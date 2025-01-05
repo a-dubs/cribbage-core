@@ -127,6 +127,8 @@ export class CribbageGame {
       throw new Error('Cannot cut deck outside of the cutting phase.');
     }
 
+    this.logState(Phase.CUTTING, ActionType.CUT, playerId, null, 0);
+
     const player = this.game.players.find(p => p.id === playerId);
     if (!player) throw new Error('Player not found.');
 
@@ -135,13 +137,21 @@ export class CribbageGame {
     if (!cutCard) throw new Error('No cards left in deck to cut.');
 
     this.game.turnCard = cutCard;
-    this.logState(
-      this.game.currentPhase,
-      ActionType.CUT,
-      playerId,
-      [cutCard],
-      0
-    );
+    this.logState(Phase.CUTTING, ActionType.TURN_CARD, playerId, [cutCard], 0);
+
+    // If cut card is a Jack, the dealer scores 2 points
+    if (cutCard.split('_')[0] === 'JACK') {
+      const dealer = this.game.players.find(p => p.isDealer);
+      if (!dealer) throw new Error('Dealer not found.');
+      dealer.score += 2;
+      this.logState(
+        Phase.CUTTING,
+        ActionType.SCORE_HEELS,
+        dealer.id,
+        [cutCard],
+        2
+      );
+    }
 
     // Advance to the pegging phase
     this.game.currentPhase = Phase.PEGGING;
@@ -167,7 +177,13 @@ export class CribbageGame {
 
     const score = scoreHand(player.hand, this.game.turnCard, false);
     player.score += score;
-    this.logState(Phase.COUNTING, ActionType.SCORE, playerId, null, score);
+    this.logState(
+      Phase.COUNTING,
+      ActionType.SCORE_HAND,
+      playerId,
+      player.hand,
+      score
+    );
     return score;
   }
 
@@ -181,7 +197,13 @@ export class CribbageGame {
 
     const score = scoreHand(this.game.crib, this.game.turnCard, true);
     player.score += score;
-    this.logState(Phase.COUNTING, ActionType.SCORE, playerId, null, score);
+    this.logState(
+      Phase.COUNTING,
+      ActionType.SCORE_CRIB,
+      playerId,
+      this.game.crib,
+      score
+    );
     return score;
   }
 

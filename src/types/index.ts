@@ -17,9 +17,11 @@ export enum ActionType {
   DEAL = 'DEAL',
   DISCARD = 'DISCARD',
   PLAY_CARD = 'PLAY_CARD',
-  SCORE = 'SCORE',
+  SCORE_HAND = 'SCORE_HAND',
+  SCORE_CRIB = 'SCORE_CRIB',
   TURN_CARD = 'TURN_CARD',
   CUT = 'CUT',
+  SCORE_HEELS = 'SCORE_HEELS', // Special case for dealer scoring 2 points for a jack as the turn card ("his heels")
 }
 
 /**
