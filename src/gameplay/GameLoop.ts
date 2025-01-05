@@ -44,30 +44,23 @@ export class GameLoop {
     // SCORING PHASE
     // Loop through each player and score their hand, starting with player after dealer and ending with dealer
     // Dealer also scores their crib after scoring their hand
-    for (
-      let i = behindDealerIndex;
-      i !== dealerIndex;
-      i = (i + 1) % this.game.getGameState().players.length
-    ) {
+    const afterDealerIndex =
+      (dealerIndex + 1) % this.game.getGameState().players.length;
+    for (let n = 0; n < this.game.getGameState().players.length; n++) {
+      const i =
+        (afterDealerIndex + n) % this.game.getGameState().players.length;
       const player = this.game.getGameState().players[i];
       const agent = this.agents[player.id];
       if (!agent) throw new Error(`No agent for player ${player.id}`);
 
-      const hand_score = this.game.scoreHand(player.id);
-      // console.log(`Player ${player.id} hand: ${player.hand.join(', ')}`);
-      // console.log(
-      //   `Player ${player.id} scored ${hand_score} points for their hand`
-      // );
+      this.game.scoreHand(player.id);
 
       if (player.score > 120) {
         return player.id;
       }
 
       if (player.isDealer) {
-        const crib_score = this.game.scoreCrib(player.id);
-        // console.log(
-        //   `Player ${player.id} scored ${crib_score} points for their crib`
-        // );
+        this.game.scoreCrib(player.id);
       }
 
       if (player.score > 120) {
