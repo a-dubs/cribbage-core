@@ -51,12 +51,12 @@ export class HumanAgent implements GameAgent {
     const player = game.players.find(p => p.id === playerId);
     if (!player) throw new Error('Player not found.');
 
-    console.log(`Your hand: ${player.hand.join(', ')}`);
+    console.log(`Your pegging hand: ${player.peggingHand.join(', ')}`);
     const input = await promptUser('Select a card to play: ');
     const selectedCard = input.trim() as Card;
 
     // Validate the selected card
-    if (!player.hand.includes(selectedCard)) {
+    if (!player.peggingHand.includes(selectedCard)) {
       console.log('Invalid card. Try again.');
       return this.makeMove(game, playerId); // Retry on invalid input
     }
