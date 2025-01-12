@@ -26,6 +26,7 @@ export class CribbageGame {
       peggingStack: [],
       peggingGoPlayers: [],
       peggingLastCardPlayer: null,
+      playedCards: [],
     };
   }
 
@@ -81,6 +82,7 @@ export class CribbageGame {
     this.game.crib = [];
     this.game.turnCard = null;
     this.game.currentPhase = Phase.DEALING;
+    this.game.playedCards = [];
   }
 
   public deal(): void {
@@ -240,6 +242,9 @@ export class CribbageGame {
 
     // add the played card to the pegging stack
     this.game.peggingStack.push(card);
+
+    // add the card to the list of played cards
+    this.game.playedCards.push(card);
 
     // score the pegging stack
     const score = scorePegging(this.game.peggingStack);

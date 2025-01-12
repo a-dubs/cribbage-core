@@ -123,6 +123,7 @@ export interface Game {
   peggingStack: Card[]; // Stack of cards played during the pegging phase
   peggingGoPlayers: string[]; // List of players who have said "Go" during this pegging stack
   peggingLastCardPlayer: string | null; // Player who played the last card during pegging
+  playedCards: string[]; // List of all cards played during the pegging phase to help with keeping track of played cards
   gameStateLog: GameState[]; // Log of all game actions
 }
 
