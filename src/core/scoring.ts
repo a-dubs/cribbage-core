@@ -296,11 +296,6 @@ const scorePeggingRun = (peggingStack: CardValue[]): number => {
 
 export const scorePegging = (peggingStack: Card[]): number => {
   const parsedStack = peggingStack.map(parseCard);
-  console.debug(
-    `Full pegging stack: ${parsedStack
-      .map(card => `${card.runValue}${suitToEmoji(card.suit)}`)
-      .join(', ')}`
-  );
   let score = 0;
   // if the sum of the stack is 15, score 2 points
   score += scorePegging15(parsedStack);

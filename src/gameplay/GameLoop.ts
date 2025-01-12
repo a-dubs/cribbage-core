@@ -1,6 +1,7 @@
 import { randomInt } from 'crypto';
 import { CribbageGame } from '../core/CribbageGame';
 import { Player, GameAgent, ActionType } from '../types';
+import { parseCard, suitToEmoji } from '../core/scoring';
 
 export class GameLoop {
   public game: CribbageGame;
@@ -31,13 +32,12 @@ export class GameLoop {
     const playersDone: string[] = []; // list of player ids who have no cards left to play
     let roundOverLastPlayer: string | null = null;
     while (playersDone.length < this.game.getGameState().players.length) {
-
       // if the current player has no cards left to play, move on to the next player
       if (playersDone.includes(currentPlayer)) {
         currentPlayer = this.game.getFollowingPlayerId(currentPlayer);
         continue;
       }
-      
+
       // if the current player has already said "Go", move on to the next player
       if (this.game.getGameState().peggingGoPlayers.includes(currentPlayer)) {
         currentPlayer = this.game.getFollowingPlayerId(currentPlayer);
@@ -53,7 +53,12 @@ export class GameLoop {
         currentPlayer
       );
       roundOverLastPlayer = this.game.playCard(currentPlayer, card);
-
+      const parsedStack = this.game.getGameState().peggingStack.map(parseCard);
+      console.log(
+        `Full pegging stack: ${parsedStack
+          .map(card => `${card.runValue}${suitToEmoji(card.suit)}`)
+          .join(', ')}`
+      );
       // if current player pegged out, return their ID as winner of game
       if (this.game.getPlayer(currentPlayer).score > 120) {
         return Promise.resolve(currentPlayer);

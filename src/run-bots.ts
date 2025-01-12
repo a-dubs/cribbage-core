@@ -6,6 +6,26 @@ import { GameStatistics } from './core/statistics';
 import { GameState } from './types';
 import { scoreHand } from './core/scoring';
 
+// keep track of how each player performs in the game
+// - points scored
+// - average hand score
+// - average crib score
+// - max hand score
+// - max crib score
+// - points from pegging
+// then print out the average, min, and max for each player per stat above
+
+interface PlayerStatistics {
+  playerId: string;
+  pointsFromPegging: number;
+  avgHandScore: number;
+  avgCribScore: number;
+  maxHandScore: number;
+  maxCribScore: number;
+}
+
+const playerStatistics: PlayerStatistics[] = [];
+
 function printStatistics(playerId: string, gameHistory: GameState[]) {
   // Calculate statistics
   const pointsFromPegging = GameStatistics.pointsFromPegging(
@@ -37,6 +57,16 @@ function printStatistics(playerId: string, gameHistory: GameState[]) {
       )}) points`
     );
   } else console.log('No best hand found');
+
+  // Store statistics
+  playerStatistics.push({
+    playerId,
+    pointsFromPegging,
+    avgHandScore,
+    avgCribScore,
+    maxHandScore,
+    maxCribScore,
+  });
 }
 
 async function main() {
@@ -74,5 +104,53 @@ async function main() {
 void (async () => {
   for (let i = 0; i < 10; i++) {
     await main();
+  }
+
+  // Print out the player statistics
+  console.log('Player statistics:');
+  // get unique player ids
+  const playerIds = [...new Set(playerStatistics.map(p => p.playerId))];
+  for (const playerId of playerIds) {
+    const stats = playerStatistics.filter(p => p.playerId === playerId);
+    if (stats.length === 0) continue;
+
+    const avg = (arr: number[]) => arr.reduce((a, b) => a + b, 0) / arr.length;
+    const min = (arr: number[]) => Math.min(...arr);
+    const max = (arr: number[]) => Math.max(...arr);
+
+    const pointsFromPegging = stats.map(s => s.pointsFromPegging);
+    const avgHandScore = stats.map(s => s.avgHandScore);
+    const avgCribScore = stats.map(s => s.avgCribScore);
+    const maxHandScore = stats.map(s => s.maxHandScore);
+    const maxCribScore = stats.map(s => s.maxCribScore);
+
+    console.log('\n------------------------------');
+    console.log(`Player ${playerId}`);
+    console.log(
+      `Points from pegging: avg: ${avg(pointsFromPegging).toFixed(
+        1
+      )}, min: ${min(pointsFromPegging)}, max: ${max(pointsFromPegging)}`
+    );
+    console.log(
+      `Average hand score: avg: ${avg(avgHandScore).toFixed(
+        1
+      )}, min: ${min(avgHandScore).toFixed(
+        1
+      )}, max: ${max(avgHandScore).toFixed(1)}`
+    );
+    console.log(
+      `Average crib score: avg: ${avg(avgCribScore).toFixed(
+        1
+      )}, min: ${min(avgCribScore).toFixed(
+        1
+      )}, max: ${max(avgCribScore).toFixed(1)}`
+    );
+    console.log(
+      `Max hand score: avg: ${avg(maxHandScore)}, min: ${min(maxHandScore)}, max: ${max(maxHandScore)}`
+    );
+    console.log(
+      `Max crib score: avg: ${avg(maxCribScore)}, min: ${min(maxCribScore)}, max: ${max(maxCribScore)}`
+    );
+    console.log('------------------------------');
   }
 })();
