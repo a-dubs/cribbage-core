@@ -78,7 +78,12 @@ export class GameStatistics {
   static bestPlayedHand(
     playerId: string,
     gameHistory: GameState[]
-  ): { hand: Card[]; turnCard: Card; score: number } | null {
+  ): {
+    hand: Card[];
+    turnCard: Card;
+    score: number;
+    gameState: GameState;
+  } | null {
     const handScores = gameHistory
       .filter(
         state =>
@@ -89,14 +94,20 @@ export class GameStatistics {
       )
       .map(state => ({
         hand: state.cards as Card[],
-        turnCard: gameHistory.find(
-          turnState =>
-            turnState.phase === Phase.CUTTING &&
-            turnState.actionType === ActionType.TURN_CARD
-        )?.cards?.[0] as Card,
+        turnCard: (() => {
+          for (let i = gameHistory.indexOf(state); i >= 0; i--) {
+            if (
+              gameHistory[i].phase === Phase.CUTTING &&
+              gameHistory[i].actionType === ActionType.TURN_CARD
+            ) {
+              return gameHistory[i].cards?.[0] as Card;
+            }
+          }
+          throw new Error('No turn card found');
+        })(),
         score: state.scoreChange,
+        gameState: state,
       }));
-
     if (handScores.length === 0) return null;
 
     return handScores.reduce((best, current) =>
@@ -120,6 +131,13 @@ export class GameStatistics {
         state.playerId === playerId &&
         state.phase === Phase.COUNTING &&
         state.actionType === ActionType.SCORE_HEELS
+    ).length;
+  }
+
+  static numberOfRounds(gameHistory: GameState[]): number {
+    return gameHistory.filter(
+      state =>
+        state.phase === Phase.CUTTING && state.actionType === ActionType.CUT
     ).length;
   }
 }
