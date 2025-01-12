@@ -45,8 +45,6 @@ export class SimpleAgent extends RandomAgent {
         }
       }
     }
-    // console.log(`Full hand: ${hand.join(', ')}`);
-    // console.log(`Best hand: ${bestHand.join(', ')}`);
     return bestHand;
   }
 

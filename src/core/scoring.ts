@@ -97,7 +97,6 @@ const getCombinations = (arr: number[], size: number): number[][] => {
   return [...withFirst, ...withoutFirst];
 };
 
-
 function longestConsecutiveRun(cardFreq: { [key: number]: number }): number[] {
   const keys = Object.keys(cardFreq)
     .map(Number) // Convert keys to numbers
@@ -140,15 +139,12 @@ export const score_runs = (cards: CardValue[]): number => {
   // using multiplication
   // iterate through the cardFreq object and calculate the run length
   const longestRun = longestConsecutiveRun(cardFreq);
-  
+
   if (longestRun.length < 3) {
     return 0;
   }
 
-  const mult = longestRun.reduce(
-    (acc, card) => acc * (cardFreq[card] || 1),
-    1
-  );
+  const mult = longestRun.reduce((acc, card) => acc * (cardFreq[card] || 1), 1);
   score += longestRun.length * mult;
 
   return score;
@@ -166,6 +162,21 @@ const pairs = (cards: CardValue[]): number => {
   return score;
 };
 
+export const suitToEmoji = (suit: string): string => {
+  switch (suit) {
+    case 'HEARTS':
+      return '♥️';
+    case 'DIAMONDS':
+      return '♦️';
+    case 'CLUBS':
+      return '♣️';
+    case 'SPADES':
+      return '♠️';
+    default:
+      return '';
+  }
+};
+
 export const scoreHand = (
   hand: Card[],
   cutCard: Card,
@@ -176,24 +187,22 @@ export const scoreHand = (
   }
 
   const sortedCards = sortCards(hand, cutCard);
-  let totalScore = 0;
 
-  totalScore += rightJack(hand, cutCard);
-  totalScore += flush(hand, cutCard, isCrib);
-  totalScore += countFifteens(sortedCards);
-  totalScore += score_runs(sortedCards);
-  totalScore += pairs(sortedCards);
+  const rightJackScore = rightJack(hand, cutCard);
+  const flushScore = flush(hand, cutCard, isCrib);
+  const fifteensScore = countFifteens(sortedCards);
+  const runsScore = score_runs(sortedCards);
+  const pairsScore = pairs(sortedCards);
+
+  const totalScore =
+    rightJackScore + flushScore + fifteensScore + runsScore + pairsScore;
 
   // let debug_str = '';
 
-  // console.debug('Cards: ', sortedCards);
-  // console.debug('Runs: ', score_runs(sortedCards));
-  // console.debug('Pairs: ', pairs(sortedCards));
   // debug_str += `Cards:\n${sortedCards
-  //   .map(card => `${card.runValue} of ${card.suit}`)
-  //   .join('\n')}\n`;
-  // debug_str += `Runs: ${score_runs(sortedCards)}\n`;
-  // debug_str += `Pairs: ${pairs(sortedCards)} \n`;
+  //   .map(card => `${card.runValue}${suitToEmoji(card.suit)}`)
+  //   .join(', ')}\n`;
+  // debug_str += `Total: ${totalScore}\n`;
 
   // console.debug(debug_str);
 

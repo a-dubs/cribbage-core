@@ -16,7 +16,7 @@
     "test:watch": "jest --watch",
     "test": "jest --coverage -- --silent=false",
     "typecheck": "tsc --noEmit",
-    "bots-test": "npm run build && node ./lib/run-bots.js"
+    "bots-test": "rm -r lib && npm run build && node ./lib/src/run-bots.js"
   },
   "repository": {
     "type": "git",

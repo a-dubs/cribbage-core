@@ -4,6 +4,7 @@ import { SimpleAgent } from './agents/SimpleAgent';
 // import { HumanAgent } from './agents/HumanAgent';
 import { GameStatistics } from './core/statistics';
 import { GameState } from './types';
+import { scoreHand } from './core/scoring';
 
 function printStatistics(playerId: string, gameHistory: GameState[]) {
   // Calculate statistics
@@ -24,7 +25,11 @@ function printStatistics(playerId: string, gameHistory: GameState[]) {
     console.log(
       `Best hand: ${bestHand.hand.join(', ')} with turn card ${
         bestHand.turnCard
-      }`
+      } for ${bestHand.score} (${scoreHand(
+        bestHand.hand,
+        bestHand.turnCard,
+        false
+      )}) points`
     );
   } else console.log('No best hand found');
 }
@@ -41,13 +46,16 @@ async function main() {
   gameLoop.addAgent('player-2', botAgent2);
 
   const result = await gameLoop.start();
-  console.log('Winner: ' + result);
+
+  const gameHistory = gameLoop.game.getGameState().gameStateLog;
+
+  const NumberOfRounds = GameStatistics.numberOfRounds(gameHistory);
+  console.log(`Winner: ${result} after ${NumberOfRounds} rounds`);
   const p1_score = gameLoop.game.getGameState().players[0].score;
   const p2_score = gameLoop.game.getGameState().players[1].score;
   console.log(`Player 1 score: ${p1_score}`);
   console.log(`Player 2 score: ${p2_score}`);
 
-  const gameHistory = gameLoop.game.getGameState().gameStateLog;
   const playerIds = gameLoop.game.getGameState().players.map(p => p.id);
   // console.log('Game history: ', gameHistory);
   for (const playerId of playerIds) {
