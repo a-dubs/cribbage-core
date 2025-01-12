@@ -1,8 +1,8 @@
 // Import necessary modules and functions
-import { scoreHand } from '../src/core/scoring';
+import { scoreHand, scorePegging } from '../src/core/scoring';
 import { Card } from '../src/types';
 
-describe('Cribbage Scoring Tests', () => {
+describe('Cribbage Hand Scoring Tests', () => {
   /**
    * Test: Basic Fifteens
    * Description: Test scoring for hands with combinations summing to 15.
@@ -18,8 +18,8 @@ describe('Cribbage Scoring Tests', () => {
         ] as Card[],
         cutCard: 'NINE_CLUBS' as Card,
         isCrib: false,
-      }, // 15-2 from 5+10
-
+        expectedScore: 2, // 15-2 from 5+10
+      },
       {
         hand: [
           'FIVE_SPADES',
@@ -29,8 +29,8 @@ describe('Cribbage Scoring Tests', () => {
         ] as Card[],
         cutCard: 'KING_SPADES' as Card,
         isCrib: false,
-      }, // 6 fifteens from 5+10s and 1 from all three 5s and then 6 points for the three 5s
-
+        expectedScore: 20, // 6 fifteens from 5+10s and 1 from all three 5s and then 6 points for the three 5s
+      },
       {
         hand: [
           'FIVE_SPADES',
@@ -40,8 +40,8 @@ describe('Cribbage Scoring Tests', () => {
         ] as Card[],
         cutCard: 'KING_CLUBS' as Card,
         isCrib: false,
-      }, // 2 fifteens from 5+10s and 2 from A+4+10s
-
+        expectedScore: 8, // 2 fifteens from 5+10s and 2 from A+4+10s
+      },
       {
         hand: [
           'TWO_CLUBS',
@@ -51,19 +51,13 @@ describe('Cribbage Scoring Tests', () => {
         ] as Card[],
         cutCard: 'TEN_HEARTS' as Card,
         isCrib: false,
-      }, // All even numbers
+        expectedScore: 0, // All even numbers
+      },
     ];
 
-    const expectedScores = [
-      2, // First hand
-      20, // Second hand
-      8, // Third hand
-      0, // Fourth hand (no fifteens)
-    ];
-
-    testCases.forEach((testCase, index) => {
+    testCases.forEach(testCase => {
       const score = scoreHand(testCase.hand, testCase.cutCard, testCase.isCrib);
-      expect(score).toEqual(expectedScores[index]);
+      expect(score).toEqual(testCase.expectedScore);
     });
   });
 
@@ -82,8 +76,8 @@ describe('Cribbage Scoring Tests', () => {
         ] as Card[],
         cutCard: 'TEN_HEARTS' as Card,
         isCrib: false,
-      }, // Pair of Fives
-
+        expectedScore: 2, // Pair of Fives
+      },
       {
         hand: [
           'TWO_HEARTS',
@@ -93,17 +87,13 @@ describe('Cribbage Scoring Tests', () => {
         ] as Card[],
         cutCard: 'TWO_DIAMONDS' as Card,
         isCrib: false,
-      }, // Four of a kind
+        expectedScore: 12, // Four of a kind
+      },
     ];
 
-    const expectedScores = [
-      2, // First hand (one pair)
-      12, // Second hand (four of a kind: 6 pairs)
-    ];
-
-    testCases.forEach((testCase, index) => {
+    testCases.forEach(testCase => {
       const score = scoreHand(testCase.hand, testCase.cutCard, testCase.isCrib);
-      expect(score).toEqual(expectedScores[index]);
+      expect(score).toEqual(testCase.expectedScore);
     });
   });
 
@@ -122,8 +112,8 @@ describe('Cribbage Scoring Tests', () => {
         ] as Card[],
         cutCard: 'SEVEN_HEARTS' as Card,
         isCrib: false,
-      }, // Run of 3, plus extra card in sequence
-
+        expectedScore: 3, // Run of 3, plus extra card in sequence
+      },
       {
         hand: [
           'TEN_CLUBS',
@@ -133,17 +123,13 @@ describe('Cribbage Scoring Tests', () => {
         ] as Card[],
         cutCard: 'NINE_HEARTS' as Card,
         isCrib: false,
-      }, // Run of 5
+        expectedScore: 5, // Run of 5
+      },
     ];
 
-    const expectedScores = [
-      3, // First hand
-      5, // Second hand
-    ];
-
-    testCases.forEach((testCase, index) => {
+    testCases.forEach(testCase => {
       const score = scoreHand(testCase.hand, testCase.cutCard, testCase.isCrib);
-      expect(score).toEqual(expectedScores[index]);
+      expect(score).toEqual(testCase.expectedScore);
     });
   });
 
@@ -162,8 +148,8 @@ describe('Cribbage Scoring Tests', () => {
         ] as Card[],
         cutCard: 'TEN_HEARTS' as Card,
         isCrib: false,
-      }, // Flush of 5 cards
-
+        expectedScore: 5, // Flush of 5 cards
+      },
       {
         hand: [
           'TWO_HEARTS',
@@ -173,8 +159,8 @@ describe('Cribbage Scoring Tests', () => {
         ] as Card[],
         cutCard: 'TEN_SPADES' as Card,
         isCrib: false,
-      }, // Flush of 4 cards, no turn card match
-
+        expectedScore: 4, // Flush of 4 cards, no turn card match
+      },
       {
         hand: [
           'TWO_HEARTS',
@@ -184,30 +170,13 @@ describe('Cribbage Scoring Tests', () => {
         ] as Card[],
         cutCard: 'TEN_SPADES' as Card,
         isCrib: true,
-      }, // Crib failed flush - turn card does not match - should score 0
-
-      {
-        hand: [
-          'TWO_HEARTS',
-          'FOUR_HEARTS',
-          'SIX_HEARTS',
-          'EIGHT_HEARTS',
-        ] as Card[],
-        cutCard: 'TEN_HEARTS' as Card,
-        isCrib: true,
-      }, // Crib flush - turn card matches - should score 5
+        expectedScore: 0, // Crib failed flush - turn card does not match - should score 0
+      },
     ];
 
-    const expectedScores = [
-      5, // Full flush
-      4, // Partial flush
-      0, // Crib flush with no match
-      5, // Crib flush with match
-    ];
-
-    testCases.forEach((testCase, index) => {
+    testCases.forEach(testCase => {
       const score = scoreHand(testCase.hand, testCase.cutCard, testCase.isCrib);
-      expect(score).toEqual(expectedScores[index]);
+      expect(score).toEqual(testCase.expectedScore);
     });
   });
 
@@ -358,6 +327,284 @@ describe('Cribbage Scoring Tests', () => {
     testCases.forEach(testCase => {
       const score = scoreHand(testCase.hand, testCase.cutCard, testCase.isCrib);
       expect(score).toEqual(testCase.expectedScore);
+    });
+  });
+});
+
+describe('Cribbage Pegging Scoring Tests', () => {
+  // test, 15s, 31s, pairs & triples & quads, and runs
+
+  // TESTING 15s
+  it('should correctly score 15s in a pegging stack', () => {
+    const testCases = [
+      // simple 15 with 5 and face card
+      {
+        // eslint-disable-next-line prettier/prettier
+        peggingStack: [
+          'FIVE_SPADES',
+          'TEN_CLUBS',
+        ] as Card[],
+        expectedScore: 2, // 15 from 5+10
+      },
+      // simple 15 with 3 different cards
+      {
+        // eslint-disable-next-line prettier/prettier
+        peggingStack: [
+          'TWO_CLUBS',
+          'TEN_SPADES',
+          'THREE_DIAMONDS',
+        ] as Card[],
+        expectedScore: 2, // 15 from 2+10+3
+      },
+      // no 15 (16)
+      {
+        // eslint-disable-next-line prettier/prettier
+        peggingStack: [
+          'TWO_CLUBS',
+          'TEN_SPADES',
+          'FOUR_DIAMONDS',
+        ] as Card[],
+        expectedScore: 0, // no 15
+      },
+    ];
+
+    testCases.forEach(testCase => {
+      const score = scorePegging(testCase.peggingStack);
+      try {
+        expect(score).toEqual(testCase.expectedScore);
+      } catch (e) {
+        throw new Error(
+          `Failed for pegging stack: ${JSON.stringify(
+            testCase.peggingStack
+          )}; Expected ${testCase.expectedScore} but got ${score}`
+        );
+      }
+    });
+  });
+
+  // TESTING 31s
+  it('should correctly score 31s in a pegging stack', () => {
+    const testCases = [
+      // simple 31
+      {
+        // eslint-disable-next-line prettier/prettier
+        peggingStack: [
+          'FIVE_SPADES',
+          'TEN_CLUBS',
+          'SIX_DIAMONDS',
+          'TEN_SPADES',
+        ] as Card[],
+        expectedScore: 2, // 31 from 5+10+6+10
+      },
+      // no 31
+      {
+        // eslint-disable-next-line prettier/prettier
+        peggingStack: [
+          'FIVE_SPADES',
+          'TEN_CLUBS',
+          'SIX_DIAMONDS',
+          'NINE_SPADES',
+        ] as Card[],
+        expectedScore: 0, // no 31
+      },
+    ];
+
+    testCases.forEach(testCase => {
+      const score = scorePegging(testCase.peggingStack);
+      try {
+        expect(score).toEqual(testCase.expectedScore);
+      } catch (e) {
+        throw new Error(
+          `Failed for pegging stack: ${JSON.stringify(
+            testCase.peggingStack
+          )}; Expected ${testCase.expectedScore} but got ${score}`
+        );
+      }
+    });
+  });
+
+  it('should correctly score pairs, triples, and quads in a pegging stack', () => {
+    // test pairs, triples, and quads
+    // for each test case, do one where it is and is not a match
+    // for a total of 6 test cases
+    const testCases = [
+      // Pair
+      {
+        // eslint-disable-next-line prettier/prettier
+        peggingStack: [
+          'TWO_HEARTS',
+          'THREE_CLUBS',
+          'TWO_CLUBS',
+          'TWO_SPADES',
+        ] as Card[],
+        expectedScore: 2, // Pair of twos
+      },
+      // Triple
+      {
+        // eslint-disable-next-line prettier/prettier
+        peggingStack: [
+          'TWO_HEARTS',
+          'THREE_CLUBS',
+          'TWO_CLUBS',
+          'TWO_SPADES',
+          'TWO_DIAMONDS',
+        ] as Card[],
+        expectedScore: 6, // Three twos
+      },
+      // Quad
+      {
+        // eslint-disable-next-line prettier/prettier
+        peggingStack: [
+          'TEN_CLUBS',
+          'TWO_CLUBS',
+          'TWO_SPADES',
+          'TWO_DIAMONDS',
+          'TWO_HEARTS',
+        ] as Card[],
+        expectedScore: 12, // Four twos
+      },
+      // No pair
+      {
+        // eslint-disable-next-line prettier/prettier
+        peggingStack: [
+          'TWO_CLUBS',
+          'TWO_DIAMONDS',
+          'THREE_SPADES',
+        ] as Card[],
+        expectedScore: 0, // pair is not at the end
+      },
+      // No triple
+      {
+        // eslint-disable-next-line prettier/prettier
+        peggingStack: [
+          'TWO_CLUBS',
+          'TWO_SPADES',
+          'TWO_DIAMONDS',
+          'THREE_DIAMONDS',
+        ] as Card[],
+        expectedScore: 0, // triple is not at the end
+      },
+      // No quad
+      {
+        // eslint-disable-next-line prettier/prettier
+        peggingStack: [
+          'TWO_CLUBS',
+          'TWO_SPADES',
+          'TWO_DIAMONDS',
+          'TWO_HEARTS',
+          'THREE_HEARTS',
+        ] as Card[],
+        expectedScore: 0, // quad is not at the end
+      },
+    ];
+
+    testCases.forEach(testCase => {
+      const score = scorePegging(testCase.peggingStack);
+      try {
+        expect(score).toEqual(testCase.expectedScore);
+      } catch (e) {
+        throw new Error(
+          `Failed for pegging stack: ${JSON.stringify(
+            testCase.peggingStack
+          )}; Expected ${testCase.expectedScore} but got ${score}`
+        );
+      }
+    });
+  });
+
+  // TESTING RUNS
+  it('should correctly score runs in a pegging stack', () => {
+    const testCases = [
+      // Run of 3
+      {
+        // eslint-disable-next-line prettier/prettier
+        peggingStack: [
+          'SIX_CLUBS',
+          'FIVE_SPADES',
+          'SEVEN_DIAMONDS',
+        ] as Card[],
+        expectedScore: 3, // Run of 3
+      },
+      // Interrupted run of 3
+      {
+        // eslint-disable-next-line prettier/prettier
+        peggingStack: [
+          'SIX_CLUBS',
+          'SEVEN_DIAMONDS',
+          'FIVE_SPADES',
+          'SEVEN_DIAMONDS',
+        ] as Card[],
+        expectedScore: 0, // no run
+      },
+      // Run of 3 buried in stack
+      {
+        // eslint-disable-next-line prettier/prettier
+        peggingStack: [
+          'SIX_CLUBS',
+          'FIVE_SPADES',
+          'SEVEN_DIAMONDS',
+          'KING_CLUBS',
+        ] as Card[],
+        expectedScore: 0, // no run
+      },
+      // Run of 4
+      {
+        // eslint-disable-next-line prettier/prettier
+        peggingStack: [
+          'FIVE_SPADES',
+          'SIX_CLUBS',
+          'SEVEN_DIAMONDS',
+          'EIGHT_HEARTS',
+        ] as Card[],
+        expectedScore: 4, // Run of 4
+      },
+      // Interrupted run of 4
+      {
+        // eslint-disable-next-line prettier/prettier
+        peggingStack: [
+          'FIVE_SPADES',
+          'SIX_CLUBS',
+          'SEVEN_DIAMONDS',
+          'SEVEN_DIAMONDS',
+          'EIGHT_HEARTS',
+        ] as Card[],
+        expectedScore: 0, // No run
+      },
+      // Run of 5
+      {
+        // eslint-disable-next-line prettier/prettier
+        peggingStack: [
+          'FIVE_SPADES',
+          'SIX_CLUBS',
+          'SEVEN_DIAMONDS',
+          'FOUR_HEARTS',
+          'EIGHT_HEARTS',
+        ] as Card[],
+        expectedScore: 5, // Run of 5
+      },
+      // No run
+      {
+        // eslint-disable-next-line prettier/prettier
+        peggingStack: [
+          'FIVE_SPADES',
+          'SIX_CLUBS',
+          'EIGHT_DIAMONDS',
+        ] as Card[],
+        expectedScore: 0, // No run
+      },
+    ];
+
+    testCases.forEach(testCase => {
+      const score = scorePegging(testCase.peggingStack);
+      try {
+        expect(score).toEqual(testCase.expectedScore);
+      } catch (e) {
+        throw new Error(
+          `Failed for pegging stack: ${JSON.stringify(
+            testCase.peggingStack
+          )}; Expected ${testCase.expectedScore} but got ${score}`
+        );
+      }
     });
   });
 });

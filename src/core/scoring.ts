@@ -208,3 +208,104 @@ export const scoreHand = (
 
   return totalScore;
 };
+
+const scorePegging15 = (peggingStack: CardValue[]): number => {
+  const sum_of_stack = peggingStack.reduce(
+    (acc, card) => acc + card.pegValue,
+    0
+  );
+  return sum_of_stack === 15 ? 2 : 0;
+};
+
+const scorePegging31 = (peggingStack: CardValue[]): number => {
+  const sum_of_stack = peggingStack.reduce(
+    (acc, card) => acc + card.pegValue,
+    0
+  );
+  return sum_of_stack === 31 ? 2 : 0;
+};
+
+const scorePeggingSameRank = (peggingStack: CardValue[]): number => {
+  // start at the most recent card played (last card in the stack) and iterate backwards
+  // count how many cards in a row have the same rank
+  // stop when a card with a different rank is found
+
+  let score = 0;
+  let i = peggingStack.length - 1;
+  while (i > 0 && peggingStack[i].runValue === peggingStack[i - 1].runValue) {
+    i--;
+  }
+
+  const run_length = peggingStack.length - i;
+  if (run_length === 2) {
+    score = 2;
+  } else if (run_length === 3) {
+    score = 6;
+  } else if (run_length === 4) {
+    score = 12;
+  }
+
+  return score;
+};
+
+const allCardsAreConsecutive = (cards: CardValue[]): boolean => {
+  for (let i = 0; i < cards.length - 1; i++) {
+    if (cards[i].runValue + 1 !== cards[i + 1].runValue) {
+      return false;
+    }
+  }
+  return true;
+};
+
+const scorePeggingRun = (peggingStack: CardValue[]): number => {
+  // the entire stack must be checked in order to be certain if there is no run
+  // the run does NOT have to be in order
+  // take slices of the stack starting at the most recent card and iterate backwards
+  // for each slice, if after sorting the slice, there are NO duplicates and the slice forms a continuous run, then save
+  // the length of this run
+  // return the length of the longest run found
+
+  let longest_run = 0;
+
+  for (let i = peggingStack.length - 1; i >= 0; i--) {
+    const slice = peggingStack.slice(i);
+    const sorted_slice = slice.sort((a, b) => a.runValue - b.runValue);
+    // if there are any duplicates, then this slice cannot be a run
+    const has_duplicates = sorted_slice.some(
+      (card, index) =>
+        sorted_slice[index + 1] &&
+        card.runValue === sorted_slice[index + 1].runValue
+    );
+    if (has_duplicates) {
+      continue;
+    }
+    if (allCardsAreConsecutive(sorted_slice)) {
+      const run_length = sorted_slice.length;
+      if (run_length > longest_run) {
+        longest_run = run_length;
+      }
+    }
+  }
+
+  return longest_run > 2 ? longest_run : 0;
+};
+
+export const scorePegging = (peggingStack: Card[]): number => {
+  const parsedStack = peggingStack.map(parseCard);
+  console.debug(
+    `Full pegging stack: ${parsedStack
+      .map(card => `${card.runValue}${suitToEmoji(card.suit)}`)
+      .join(', ')}`
+  );
+  let score = 0;
+  // if the sum of the stack is 15, score 2 points
+  score += scorePegging15(parsedStack);
+  // if the sum of the stack is 31, score 2 points
+  score += scorePegging31(parsedStack);
+  // if the last X cards are the same rank (pegValue), score either 2, 6, or 12 points
+  score += scorePeggingSameRank(parsedStack);
+  // if the last X cards form a run, score the length of the run
+  score += scorePeggingRun(parsedStack);
+
+  return score;
+};
