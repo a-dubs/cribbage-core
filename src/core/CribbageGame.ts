@@ -1,5 +1,5 @@
 import { Phase, ActionType, Card, Player, Game, GameState } from '../types';
-import { scoreHand } from './scoring';
+import { scoreHand, scorePegging, sumOfPeggingStack } from './scoring';
 
 export class CribbageGame {
   private game: Game;
@@ -10,6 +10,7 @@ export class CribbageGame {
       id: `player-${index + 1}`,
       name,
       hand: [],
+      peggingHand: [],
       score: 0,
       isDealer: index === 0,
     })) as Player[];
@@ -22,6 +23,9 @@ export class CribbageGame {
       gameStateLog: [],
       crib: [],
       turnCard: null,
+      peggingStack: [],
+      peggingGoPlayers: [],
+      peggingLastCardPlayer: null,
     };
   }
 
@@ -60,8 +64,11 @@ export class CribbageGame {
       scoreChange,
       timestamp: new Date(),
     };
+    if (phase === Phase.PEGGING) {
+      state.peggingStack = this.game.peggingStack;
+      state.peggingGoPlayers = this.game.peggingGoPlayers;
+    }
     this.game.gameStateLog.push(state);
-    // console.log(state);
   }
 
   public endRound(): void {
@@ -119,6 +126,10 @@ export class CribbageGame {
       throw new Error('Crib phase not complete. Ensure all players discarded.');
     }
 
+    // copy each players hands to their pegging hands
+    this.game.players.forEach(player => {
+      player.peggingHand = [...player.hand];
+    });
     this.game.currentPhase = Phase.CUTTING;
   }
 
@@ -154,20 +165,150 @@ export class CribbageGame {
     }
 
     // Advance to the pegging phase
+    this.resetPeggingRound();
     this.game.currentPhase = Phase.PEGGING;
   }
 
-  public playCard(playerId: string, card: Card): void {
+  public getPlayer(playerId: string): Player {
     const player = this.game.players.find(p => p.id === playerId);
-    if (!player || !player.hand.includes(card)) {
+    if (!player) throw new Error('Player not found.');
+    return player;
+  }
+
+  public getDealerId(): string {
+    const dealer = this.game.players.find(p => p.isDealer);
+    if (!dealer) throw new Error('Dealer not found.');
+    return dealer.id;
+  }
+
+  public getFollowingPlayerId(playerId: string): string {
+    const playerIndex = this.game.players.findIndex(p => p.id === playerId);
+    if (playerIndex === -1) {
+      throw new Error('Player not found.');
+    }
+    const followingPlayerIndex = (playerIndex + 1) % this.game.players.length;
+    return this.game.players[followingPlayerIndex].id;
+  }
+
+  public resetPeggingRound(): string | null {
+    this.game.peggingStack = [];
+    this.game.peggingGoPlayers = [];
+    const lastCardPlayer = this.game.peggingLastCardPlayer;
+    this.game.peggingLastCardPlayer = null;
+    console.log('PEGGING ROUND OVER; last card player:', lastCardPlayer, '\n');
+    return lastCardPlayer;
+  }
+
+  // returns true if the pegging round is over (someone got LAST_CARD or 31)
+  public playCard(playerId: string, card: Card | null): string | null {
+    if (this.game.currentPhase !== Phase.PEGGING) {
+      throw new Error('Cannot play card outside of the pegging phase.');
+    }
+
+    const player = this.game.players.find(p => p.id === playerId);
+
+    if (!player) throw new Error('Player not found.');
+
+    if (!card) {
+      // if all other players have said "Go", give the last player to play a point
+      if (
+        this.game.peggingGoPlayers.length === this.game.players.length - 1 &&
+        !this.game.peggingGoPlayers.includes(playerId) &&
+        this.game.peggingLastCardPlayer === playerId
+      ) {
+        // give the player a point for playing the last card
+        player.score += 1;
+        // log the scoring of the last card
+        this.logState(Phase.PEGGING, ActionType.LAST_CARD, playerId, null, 1);
+        // call resetPeggingRound to reset the pegging round and return the ID of last card player
+        console.log(`Player ${playerId} got the last card! and scored 1 point`);
+        return this.resetPeggingRound();
+      }
+
+      // add player to list of players who have said "Go"
+      if (!this.game.peggingGoPlayers.includes(playerId)) {
+        this.game.peggingGoPlayers.push(playerId);
+        this.logState(Phase.PEGGING, ActionType.GO, playerId, null, 0);
+      }
+      console.log(`Player ${playerId} said "Go"`);
+      return null;
+    }
+
+    if (!player.peggingHand.includes(card)) {
       throw new Error('Invalid card play.');
     }
 
-    player.hand = player.hand.filter(c => c !== card);
-    this.logState(Phase.PEGGING, ActionType.PLAY_CARD, playerId, [card], 0);
+    // add the played card to the pegging stack
+    this.game.peggingStack.push(card);
+
+    // score the pegging stack
+    const score = scorePegging(this.game.peggingStack);
+
+    // remove the played card from the player's hand
+    player.peggingHand = player.peggingHand.filter(c => c !== card);
+
+    // set this player as player who played the last card
+    this.game.peggingLastCardPlayer = playerId;
+
+    // log the play action
+    this.logState(Phase.PEGGING, ActionType.PLAY_CARD, playerId, [card], score);
+
+    // if this is the last card in the pegging round, give the player a point for last
+    const playersWithCards = this.game.players.filter(
+      player => player.peggingHand.length > 0
+    );
+    if (playersWithCards.length === 0) {
+      // give the player a point for playing the last card
+      player.score += 1;
+      // log the scoring of the last card
+      this.logState(Phase.PEGGING, ActionType.LAST_CARD, playerId, null, 1);
+      // call resetPeggingRound to reset the pegging round and return the ID of last card player
+      console.log(`Player ${playerId} played the last card and scored 1 point`);
+      return this.resetPeggingRound();
+    }
+
+    // if the sum of cards in the pegging stack is 31, end the pegging round
+    if (sumOfPeggingStack(this.game.peggingStack) === 31) {
+      // call resetPeggingRound to reset the pegging round and return the ID of last card player
+      console.log(
+        `Player ${playerId} played ${card} and got 31 for ${score} points`
+      );
+      return this.resetPeggingRound();
+    }
+    console.log(
+      `Player ${playerId} played ${card} for ${score} points - ${sumOfPeggingStack(
+        this.game.peggingStack
+      )}`
+    );
+    return null;
+  }
+
+  public endPegging(): void {
+    if (this.game.currentPhase !== Phase.PEGGING) {
+      throw new Error('Cannot end pegging outside of the pegging phase.');
+    }
+
+    // if a player still has cards in their pegging hand, raise an error
+    const playersWithCards = this.game.players.filter(
+      player => player.peggingHand.length > 0
+    );
+    if (playersWithCards.length > 0) {
+      throw new Error('Cannot end pegging with players still holding cards.');
+    }
+
+    this.game.peggingStack = [];
+    this.game.peggingGoPlayers = [];
+    this.game.peggingLastCardPlayer = null;
+
+    // Advance to the counting phase
+    this.game.currentPhase = Phase.COUNTING;
   }
 
   public scoreHand(playerId: string): number {
+    if (this.game.currentPhase !== Phase.COUNTING) {
+      throw new Error('Cannot score hand outside of the counting phase.');
+    }
+
     const player = this.game.players.find(p => p.id === playerId);
     if (!player) throw new Error('Player not found.');
 

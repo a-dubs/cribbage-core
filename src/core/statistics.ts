@@ -140,4 +140,12 @@ export class GameStatistics {
         state.phase === Phase.CUTTING && state.actionType === ActionType.CUT
     ).length;
   }
+
+  static pointsFromPegging(playerId: string, gameHistory: GameState[]): number {
+    return gameHistory
+      .filter(
+        state => state.phase === Phase.PEGGING && state.playerId === playerId
+      )
+      .reduce((sum, state) => sum + state.scoreChange, 0);
+  }
 }

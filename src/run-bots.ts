@@ -8,6 +8,10 @@ import { scoreHand } from './core/scoring';
 
 function printStatistics(playerId: string, gameHistory: GameState[]) {
   // Calculate statistics
+  const pointsFromPegging = GameStatistics.pointsFromPegging(
+    playerId,
+    gameHistory
+  );
   const avgHandScore = GameStatistics.averageHandScore(playerId, gameHistory);
   const avgCribScore = GameStatistics.averageCribScore(playerId, gameHistory);
   const maxHandScore = GameStatistics.maximumHandScore(playerId, gameHistory);
@@ -15,6 +19,7 @@ function printStatistics(playerId: string, gameHistory: GameState[]) {
   const bestHand = GameStatistics.bestPlayedHand(playerId, gameHistory);
   const hisHeelsCount = GameStatistics.scoredHisHeels(playerId, gameHistory);
 
+  console.log(`Points from pegging: ${pointsFromPegging}`);
   console.log(`Average hand score: ${avgHandScore.toFixed(1)}`);
   console.log(`Average crib score: ${avgCribScore.toFixed(1)}`);
   console.log(`Max hand score: ${maxHandScore}`);

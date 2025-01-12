@@ -1,3 +1,4 @@
+import { parseCard } from '../core/scoring';
 import { Game, GameAgent, Card } from '../types';
 
 export class RandomAgent implements GameAgent {
@@ -8,21 +9,49 @@ export class RandomAgent implements GameAgent {
     this.id = id;
   }
 
-  makeMove(game: Game, playerId: string): Promise<Card> {
+  makeMove(game: Game, playerId: string): Promise<Card | null> {
     const player = game.players.find(p => p.id === playerId);
-    if (!player || player.hand.length === 0) {
-      throw new Error('No valid cards to play.');
+    if (!player) {
+      throw new Error('Player not found.');
     }
 
-    const randomIndex = Math.floor(Math.random() * player.hand.length);
-    return Promise.resolve(player.hand[randomIndex]);
+    if (player.peggingHand.length === 0) {
+      return Promise.resolve(null);
+    }
+
+    // filter by cards that can be played (sum of stack + card <= 31) using game.peggingStack
+    const parsedHand = player.peggingHand.map(parseCard);
+    const parsedStack = game.peggingStack.map(parseCard);
+    const validCards = parsedHand.filter(card => {
+      const sum = parsedStack.reduce(
+        (acc, c) => acc + c.pegValue,
+        card.pegValue
+      );
+      return sum <= 31;
+    });
+
+    if (validCards.length === 0) {
+      return Promise.resolve(null);
+    }
+
+    const filteredHand = player.peggingHand.filter(card =>
+      validCards.some(c => c.runValue === parseCard(card).runValue)
+    );
+
+    if (filteredHand.length === 0) {
+      throw new Error('this should never happen');
+    }
+
+    const randomIndex = Math.floor(Math.random() * filteredHand.length);
+    return Promise.resolve(filteredHand[randomIndex]);
   }
 
   discard(game: Game, playerId: string): Promise<Card[]> {
     const player = game.players.find(p => p.id === playerId);
-    if (!player || player.hand.length < 2) {
-      throw new Error('Not enough cards to discard.');
-    }
+    if (!player) throw new Error('Player not found');
+
+    if (player.hand.length === 4)
+      throw new Error('Player has already discarded');
 
     const randomIndices = new Set<number>();
     while (randomIndices.size < 2) {

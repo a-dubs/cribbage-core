@@ -16,7 +16,9 @@ export enum Phase {
 export enum ActionType {
   DEAL = 'DEAL',
   DISCARD = 'DISCARD',
-  PLAY_CARD = 'PLAY_CARD',
+  PLAY_CARD = 'PLAY_CARD', // player plays a card during pegging phase
+  GO = 'GO', // Player says "Go" during pegging phase when they can't play a card
+  LAST_CARD = 'LAST_CARD', // Player receives a point for playing the last card during pegging phase (after all other players have said "Go")
   SCORE_HAND = 'SCORE_HAND',
   SCORE_CRIB = 'SCORE_CRIB',
   TURN_CARD = 'TURN_CARD',
@@ -88,6 +90,7 @@ export interface Player {
   id: string; // Unique identifier for the player
   name: string; // Display name for the player
   hand: Card[]; // Cards currently in the player's hand
+  peggingHand: Card[]; // Cards left to play during the pegging phase (starts as a copy of hand)
   score: number; // Player's score
   isDealer: boolean; // Whether the player is the dealer for the current round
 }
@@ -102,6 +105,9 @@ export interface GameState {
   cards: Card[] | null; // Card involved in the last action, if any
   scoreChange: number; // Points gained from the last action, if any
   timestamp: Date; // Time of the last action
+  peggingStack?: Card[]; // Stack of played cards during pegging (including card just played) (if phase is PEGGING)
+  peggingGoPlayers?: string[]; // List of players who have said "Go" during this pegging stack (if phase is PEGGING)
+  peggingLastCardPlayer?: string; // Player who played the last card during pegging (if phase is PEGGING)
 }
 
 /**
@@ -114,6 +120,9 @@ export interface Game {
   crib: Card[]; // Cards in the crib
   turnCard: Card | null; // The turn card revealed during the pegging phase
   currentPhase: Phase; // Current phase of the game
+  peggingStack: Card[]; // Stack of cards played during the pegging phase
+  peggingGoPlayers: string[]; // List of players who have said "Go" during this pegging stack
+  peggingLastCardPlayer: string | null; // Player who played the last card during pegging
   gameStateLog: GameState[]; // Log of all game actions
 }
 
@@ -124,8 +133,8 @@ export interface Game {
 export interface GameAgent {
   id: string; // Unique identifier for the agent
   human: boolean; // Whether the agent represents a human player
-  makeMove(game: Game, playerId: string): Promise<Card>; // Optional for AI
-  discard(game: Game, playerId: string): Promise<Card[]>; // Optional for AI
+  makeMove(game: Game, playerId: string): Promise<Card | null>;
+  discard(game: Game, playerId: string): Promise<Card[]>;
 }
 
 /**

@@ -225,6 +225,10 @@ const scorePegging31 = (peggingStack: CardValue[]): number => {
   return sum_of_stack === 31 ? 2 : 0;
 };
 
+export const sumOfPeggingStack = (peggingStack: Card[]): number => {
+  return peggingStack.reduce((acc, card) => acc + parseCard(card).pegValue, 0);
+};
+
 const scorePeggingSameRank = (peggingStack: CardValue[]): number => {
   // start at the most recent card played (last card in the stack) and iterate backwards
   // count how many cards in a row have the same rank
