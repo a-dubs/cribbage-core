@@ -60,10 +60,6 @@ export class SimpleAgent extends RandomAgent {
     const bestHand = this.getBestHand(player.hand);
     const discards = player.hand.filter(card => !bestHand.includes(card));
     return Promise.resolve(discards);
-
-    // return Promise.resolve(
-    //   Array.from(randomIndices).map(index => player.hand[index])
-    // );
   }
 
   makeMove(game: Game, playerId: string): Promise<Card | null> {
