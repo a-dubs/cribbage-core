@@ -177,6 +177,12 @@ export const suitToEmoji = (suit: string): string => {
   }
 };
 
+export const displayCard = (card: Card): string => {
+  const { runValue, suit } = parseCard(card);
+  const rank = runValue <= 10 ? runValue.toString() : card.split('_')[0][0];
+  return `${rank}${suitToEmoji(suit)}`;
+};
+
 export const scoreHand = (
   hand: Card[],
   cutCard: Card,
