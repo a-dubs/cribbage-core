@@ -1,7 +1,7 @@
 import { randomInt } from 'crypto';
 import { CribbageGame } from '../core/CribbageGame';
-import { Player, GameAgent, ActionType } from '../types';
-import { parseCard, suitToEmoji } from '../core/scoring';
+import { Player, GameAgent, ActionType, Card } from '../types';
+import { displayCard, parseCard, suitToEmoji } from '../core/scoring';
 
 export class GameLoop {
   public game: CribbageGame;
@@ -122,6 +122,12 @@ export class GameLoop {
       randomInt(0, this.game.getGameState().deck.length)
     );
 
+    const turnCard = this.game.getGameState().turnCard;
+    if (!turnCard) throw new Error('No turn card after cutting deck');
+    console.log(
+      `Player ${behindDealer.name} cut the deck: ${displayCard(turnCard)}`
+    );
+
     // Pegging phase: Agents play cards until no more cards can be played
     const peggingWinner = await this.doPegging();
     if (peggingWinner) {
@@ -141,14 +147,25 @@ export class GameLoop {
       const agent = this.agents[player.id];
       if (!agent) throw new Error(`No agent for player ${player.id}`);
 
-      this.game.scoreHand(player.id);
+      const handScore = this.game.scoreHand(player.id);
+      console.log(
+        `Player ${player.name} scored ${handScore} points hand: 
+        ${player.hand.map(card => displayCard(card)).join(', ')}`
+      );
 
       if (player.score > 120) {
         return player.id;
       }
 
       if (player.isDealer) {
-        this.game.scoreCrib(player.id);
+        const cribScore = this.game.scoreCrib(player.id);
+        console.log(
+          `Player ${player.name} scored ${cribScore} points in their crib: 
+          ${this.game
+            .getCrib()
+            .map((card: Card) => displayCard(card))
+            .join(', ')}`
+        );
       }
 
       if (player.score > 120) {
@@ -158,6 +175,11 @@ export class GameLoop {
 
     // Cleanup and Reset state and rotate dealer
     this.game.endRound();
+
+    // log the scores of each player
+    for (const player of this.game.getGameState().players) {
+      console.log(`Player ${player.name} score: ${player.score}`);
+    }
 
     return null;
   }

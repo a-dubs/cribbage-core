@@ -74,6 +74,10 @@ export class CribbageGame {
     this.game.gameStateLog.push(state);
   }
 
+  public getCrib(): Card[] {
+    return this.game.crib;
+  }
+
   public endRound(): void {
     this.game.deck = this.generateDeck();
     // Rotate dealer position
