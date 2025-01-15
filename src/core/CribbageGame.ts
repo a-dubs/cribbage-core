@@ -1,5 +1,6 @@
 import { Phase, ActionType, Card, Player, Game, GameState } from '../types';
 import { scoreHand, scorePegging, sumOfPeggingStack } from './scoring';
+import { v4 as uuidv4 } from 'uuid';
 
 export class CribbageGame {
   private game: Game;
@@ -58,6 +59,7 @@ export class CribbageGame {
     scoreChange: number
   ) {
     const state: GameState = {
+      id: uuidv4(),
       phase,
       actionType,
       playerId,

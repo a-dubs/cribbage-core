@@ -99,6 +99,7 @@ export interface Player {
  * Interface for the state of the game at any point in time
  */
 export interface GameState {
+  id: string; // Unique identifier for the game state (uuid)
   phase: Phase; // Current phase of the game
   actionType: ActionType; // Last action type taken in the game
   playerId: string | null; // ID of the player who took the last action
