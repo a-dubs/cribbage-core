@@ -1,5 +1,6 @@
 import readline from 'readline';
 import { Card, Game, GameAgent } from '../types';
+import { displayCard } from '../core/scoring';
 
 // Utility function to prompt user input
 export function promptUser(question: string): Promise<string> {
@@ -29,21 +30,28 @@ export class HumanAgent implements GameAgent {
     const player = game.players.find(p => p.id === playerId);
     if (!player) throw new Error('Player not found.');
 
-    console.log(`Your hand: ${player.hand.join(', ')}`);
-    const input = await promptUser(
-      'Select 2 cards to discard (comma-separated): '
-    );
-    const selectedCards = input.split(',').map(card => card.trim() as Card);
+    console.log('Your hand:');
+    player.hand.forEach((card, index) => {
+      console.log(`${index + 1}: ${displayCard(card)}`);
+    });
 
-    // Validate the selected cards
+    const input = await promptUser(
+      'Select 2 cards to discard (comma-separated numbers): '
+    );
+    const selectedIndices = input
+      .split(',')
+      .map(num => parseInt(num.trim()) - 1);
+
+    // Validate the selected indices
     if (
-      selectedCards.length !== 2 ||
-      !selectedCards.every(card => player.hand.includes(card))
+      selectedIndices.length !== 2 ||
+      !selectedIndices.every(index => index >= 0 && index < player.hand.length)
     ) {
       console.log('Invalid selection. Try again.');
       return this.discard(game, playerId); // Retry on invalid input
     }
 
+    const selectedCards = selectedIndices.map(index => player.hand[index]);
     return selectedCards;
   }
 
@@ -51,16 +59,20 @@ export class HumanAgent implements GameAgent {
     const player = game.players.find(p => p.id === playerId);
     if (!player) throw new Error('Player not found.');
 
-    console.log(`Your pegging hand: ${player.peggingHand.join(', ')}`);
-    const input = await promptUser('Select a card to play: ');
-    const selectedCard = input.trim() as Card;
+    console.log('Your pegging hand:');
+    player.peggingHand.forEach((card, index) => {
+      console.log(`${index + 1}: ${displayCard(card)}`);
+    });
 
-    // Validate the selected card
-    if (!player.peggingHand.includes(selectedCard)) {
+    const input = await promptUser('Select a card to play (number): ');
+    const selectedIndex = parseInt(input.trim()) - 1;
+
+    // Validate the selected index
+    if (selectedIndex < 0 || selectedIndex >= player.peggingHand.length) {
       console.log('Invalid card. Try again.');
       return this.makeMove(game, playerId); // Retry on invalid input
     }
 
-    return selectedCard;
+    return player.peggingHand[selectedIndex];
   }
 }
