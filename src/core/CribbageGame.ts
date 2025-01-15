@@ -249,6 +249,9 @@ export class CribbageGame {
     // score the pegging stack
     const score = scorePegging(this.game.peggingStack);
 
+    // add the score to the player's total
+    player.score += score;
+
     // remove the played card from the player's hand
     player.peggingHand = player.peggingHand.filter(c => c !== card);
 
