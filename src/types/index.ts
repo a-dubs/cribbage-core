@@ -165,12 +165,12 @@ export interface HandScore {
 
 ////// Types for Event Emitters //////
 
-export interface emittedData {
+export interface EmittedData {
   playerId: string;
 }
 
 // to player
-export interface emittedMakeMoveRequest extends emittedData {
+export interface EmittedMakeMoveRequest extends EmittedData {
   peggingHand: Card[];
   peggingStack: Card[];
   playedCards: PlayedCard[];
@@ -178,28 +178,32 @@ export interface emittedMakeMoveRequest extends emittedData {
 }
 
 // from player
-export interface emittedMakeMoveResponse extends emittedData {
+export interface EmittedMakeMoveResponse extends EmittedData {
   selectedCard: Card;
 }
 
 // to player
-export interface emittedMakeMoveInvalid extends emittedData {
+export interface EmittedMakeMoveInvalid extends EmittedData {
   reason: string;
-  makeMoveRequest: emittedMakeMoveRequest;
+  makeMoveRequest: EmittedMakeMoveRequest;
 }
 
 // to player
-export interface emittedDiscardRequest extends emittedData {
+export interface EmittedDiscardRequest extends EmittedData {
   hand: Card[];
 }
 
 // from player
-export interface emittedDiscardResponse extends emittedData {
+export interface EmittedDiscardResponse extends EmittedData {
   selectedCards: Card[];
 }
 
 // to player
-export interface emittedDiscardInvalid extends emittedData {
+export interface EmittedDiscardInvalid extends EmittedData {
   reason: string;
-  discardRequest: emittedDiscardRequest;
+  discardRequest: EmittedDiscardRequest;
+}
+
+export interface EmittedWaitingForPlayer extends EmittedData {
+  waitingFor: 'DISCARD' | 'PLAY_CARD';
 }

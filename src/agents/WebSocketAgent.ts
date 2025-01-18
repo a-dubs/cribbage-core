@@ -2,12 +2,12 @@ import {
   Card,
   GameState,
   GameAgent,
-  emittedMakeMoveInvalid,
-  emittedMakeMoveResponse,
-  emittedMakeMoveRequest,
-  emittedDiscardRequest,
-  emittedDiscardInvalid,
-  emittedDiscardResponse,
+  EmittedMakeMoveInvalid,
+  EmittedMakeMoveResponse,
+  EmittedMakeMoveRequest,
+  EmittedDiscardRequest,
+  EmittedDiscardInvalid,
+  EmittedDiscardResponse,
 } from '../types';
 import { parseCard } from '../core/scoring';
 import { Socket } from 'socket.io';
@@ -30,7 +30,7 @@ export class WebSocketAgent implements GameAgent {
 
     return new Promise(resolve => {
       const requestDiscard = () => {
-        const discardRequestData: emittedDiscardRequest = {
+        const discardRequestData: EmittedDiscardRequest = {
           playerId: this.playerId,
           hand: player.hand,
         };
@@ -38,7 +38,7 @@ export class WebSocketAgent implements GameAgent {
 
         this.socket.once(
           'discardResponse',
-          (response: emittedDiscardResponse) => {
+          (response: EmittedDiscardResponse) => {
             if (response.playerId !== this.playerId) {
               console.error(
                 `Received discard from wrong player: ${response.playerId}`
@@ -50,7 +50,7 @@ export class WebSocketAgent implements GameAgent {
             if (isValidDiscard(game, player, response.selectedCards)) {
               resolve(response.selectedCards);
             } else {
-              const invalidDiscardResponse: emittedDiscardInvalid = {
+              const invalidDiscardResponse: EmittedDiscardInvalid = {
                 playerId: this.playerId,
                 reason: 'Invalid discard',
                 discardRequest: discardRequestData,
@@ -73,7 +73,7 @@ export class WebSocketAgent implements GameAgent {
 
     return new Promise(resolve => {
       const requestMove = () => {
-        const requestMakeMoveData: emittedMakeMoveRequest = {
+        const requestMakeMoveData: EmittedMakeMoveRequest = {
           playerId: this.playerId,
           peggingHand: player.peggingHand,
           peggingStack: game.peggingStack,
@@ -87,7 +87,7 @@ export class WebSocketAgent implements GameAgent {
 
         this.socket.once(
           'makeMoveResponse',
-          (response: emittedMakeMoveResponse) => {
+          (response: EmittedMakeMoveResponse) => {
             if (response.playerId !== this.playerId) {
               console.error(
                 `Received move from wrong player: ${response.playerId}`
@@ -104,7 +104,7 @@ export class WebSocketAgent implements GameAgent {
             if (invalidPeggingPlayReason === null) {
               resolve(response.selectedCard);
             } else {
-              const invalidMoveResponse: emittedMakeMoveInvalid = {
+              const invalidMoveResponse: EmittedMakeMoveInvalid = {
                 playerId: this.playerId,
                 reason: invalidPeggingPlayReason,
                 makeMoveRequest: requestMakeMoveData,

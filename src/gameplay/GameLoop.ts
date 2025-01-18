@@ -6,6 +6,7 @@ import {
   PlayerIdAndName,
   GameEvent,
   GameState,
+  EmittedWaitingForPlayer,
 } from '../types';
 import { displayCard, parseCard, suitToEmoji } from '../core/scoring';
 import { EventEmitter } from 'events';
@@ -77,9 +78,11 @@ export class GameLoop extends EventEmitter {
         currentPlayerId
       );
       // emit event saying who's turn it is (who are we waiting on)
-      this.emit('waitingForPlayer', {
+      const emittedWaitingForPlayerData: EmittedWaitingForPlayer = {
         playerId: currentPlayerId,
-      });
+        waitingFor: 'PLAY_CARD',
+      };
+      this.emit('waitingForPlayer', emittedWaitingForPlayerData);
       roundOverLastPlayer = this.cribbageGame.playCard(currentPlayerId, card);
       const parsedStack = this.cribbageGame
         .getGameState()
@@ -135,9 +138,11 @@ export class GameLoop extends EventEmitter {
       const agent = this.agents[player.id];
       if (!agent) throw new Error(`No agent for player ${player.id}`);
       // emit event saying who's turn it is (who are we waiting on)
-      this.emit('waitingForPlayer', {
+      const emittedWaitingForPlayerData: EmittedWaitingForPlayer = {
         playerId: player.id,
-      });
+        waitingFor: 'DISCARD',
+      };
+      this.emit('waitingForPlayer', emittedWaitingForPlayerData);
       const discards = await agent.discard(
         this.cribbageGame.getGameState(),
         player.id
