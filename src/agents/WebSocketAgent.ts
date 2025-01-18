@@ -34,7 +34,7 @@ export class WebSocketAgent implements GameAgent {
           playerId: this.playerId,
           hand: player.hand,
         };
-        this.socket.emit('discard', discardRequestData);
+        this.socket.emit('discardRequest', discardRequestData);
 
         this.socket.once(
           'discardResponse',
