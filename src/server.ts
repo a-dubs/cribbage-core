@@ -2,7 +2,7 @@ import express from 'express';
 import http from 'http';
 import { Server, Socket } from 'socket.io';
 import { GameLoop } from './gameplay/GameLoop';
-import { GameAgent, GameEvent, GameState, PlayerIdAndName } from './types';
+import { EmittedWaitingForPlayer, GameAgent, GameEvent, GameState, PlayerIdAndName } from './types';
 import { WebSocketAgent } from './agents/WebSocketAgent';
 import { SimpleAgent } from './agents/SimpleAgent';
 
@@ -107,6 +107,9 @@ async function handleStartGame(): Promise<void> {
   });
   gameLoop.on('gameEvent', (gameEvent: GameEvent) => {
     io.emit('gameEvent', gameEvent);
+  });
+  gameLoop.on('waitingForPlayer', (waitingData: EmittedWaitingForPlayer) => {
+    io.emit('waitingForPlayer', waitingData);
   });
 
   // Start the game
