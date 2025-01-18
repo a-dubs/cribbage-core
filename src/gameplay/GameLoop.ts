@@ -1,6 +1,6 @@
 import { randomInt } from 'crypto';
 import { CribbageGame } from '../core/CribbageGame';
-import { Player, GameAgent, ActionType, Card } from '../types';
+import { GameAgent, Card } from '../types';
 import { displayCard, parseCard, suitToEmoji } from '../core/scoring';
 
 export class GameLoop {
@@ -184,22 +184,17 @@ export class GameLoop {
     return null;
   }
 
-  public async start(): Promise<string> {
-    // Pegging phase
+  /**
+   * 
+   * @returns the ID of the winning player
+   */
+  public async playGame(): Promise<string> {
     let winner: string | null = null;
 
     while (!winner) {
       winner = await this.doRound();
-      if (!winner) {
-        // console.log(
-        //   `Scores: ${this.game
-        //     .getGameState()
-        //     .players.map(p => p.score)
-        //     .join(', ')}`
-        // );
-      }
     }
 
-    return `Winner: ${winner}`;
+    return Promise.resolve(winner);
   }
 }

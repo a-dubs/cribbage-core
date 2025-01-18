@@ -80,7 +80,7 @@ async function main() {
   const botAgent2 = new SimpleAgent('bot-2');
   gameLoop.addAgent('player-2', botAgent2);
 
-  const result = await gameLoop.start();
+  const result = await gameLoop.playGame();
 
   const gameHistory = gameLoop.game.getGameState().gameStateLog;
 
