@@ -20,11 +20,11 @@ export function promptUser(question: string): Promise<string> {
 
 // Human player agent
 export class HumanAgent implements GameAgent {
-  id: string;
+  playerId: string;
   human = true;
 
   constructor(id: string) {
-    this.id = id;
+    this.playerId = id;
   }
 
   async discard(game: GameState, playerId: string): Promise<Card[]> {

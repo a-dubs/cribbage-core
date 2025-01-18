@@ -41,3 +41,29 @@ export function isValidPeggingPlay(
     currentSum + parseCard(card).pegValue <= 31
   );
 }
+
+export function getInvalidPeggingPlayReason(
+  game: GameState,
+  player: Player,
+  card: Card | null
+): string | null {
+  const currentSum = sumOfPeggingStack(game.peggingStack);
+  if (card === null) {
+    // Check if the player has any valid card to play
+    const validCards = player.peggingHand.filter(
+      c => currentSum + parseCard(c).pegValue <= 31
+    );
+    if (validCards.length !== 0) {
+      return 'You have a valid card to play and cannot say "Go"';
+    }
+    return null;
+  }
+  // Check if the card can be played without exceeding 31
+  if (!player.peggingHand.includes(card)) {
+    return 'Card not in hand';
+  }
+  if (currentSum + parseCard(card).pegValue > 31) {
+    return 'Card would exceed 31';
+  }
+  return null;
+}

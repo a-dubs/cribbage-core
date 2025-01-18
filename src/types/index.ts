@@ -144,7 +144,7 @@ export interface PlayedCard {
  * Agents can be human or AI-controlled
  */
 export interface GameAgent {
-  id: string; // Unique identifier for the agent
+  playerId: string; // Unique identifier for the agent
   human: boolean; // Whether the agent represents a human player
   makeMove(game: GameState, playerId: string): Promise<Card | null>;
   discard(game: GameState, playerId: string): Promise<Card[]>;
@@ -165,32 +165,41 @@ export interface HandScore {
 
 ////// Types for Event Emitters //////
 
-export interface emittedMakeMoveRequest {
+export interface emittedData {
   playerId: string;
+}
+
+// to player
+export interface emittedMakeMoveRequest extends emittedData {
   peggingHand: Card[];
   peggingStack: Card[];
   playedCards: PlayedCard[];
   peggingTotal: number;
 }
 
-export interface emittedMakeMoveResponse {
-  playerId: string;
+// from player
+export interface emittedMakeMoveResponse extends emittedData {
   selectedCard: Card;
 }
 
-export interface emittedMakeMoveInvalid {
+// to player
+export interface emittedMakeMoveInvalid extends emittedData {
   reason: string;
+  makeMoveRequest: emittedMakeMoveRequest;
 }
 
-export interface emittedDiscardRequest {
-  playerId: string;
+// to player
+export interface emittedDiscardRequest extends emittedData {
   hand: Card[];
 }
 
-export interface emittedDiscardResponse {
+// from player
+export interface emittedDiscardResponse extends emittedData {
   selectedCards: Card[];
 }
 
-export interface emittedDiscardInvalid {
+// to player
+export interface emittedDiscardInvalid extends emittedData {
   reason: string;
+  discardRequest: emittedDiscardRequest;
 }

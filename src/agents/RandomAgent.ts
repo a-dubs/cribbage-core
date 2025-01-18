@@ -2,11 +2,11 @@ import { parseCard } from '../core/scoring';
 import { GameState, GameAgent, Card } from '../types';
 
 export class RandomAgent implements GameAgent {
-  id: string;
+  playerId: string;
   human = false;
 
   constructor(id: string) {
-    this.id = id;
+    this.playerId = id;
   }
 
   makeMove(game: GameState, playerId: string): Promise<Card | null> {

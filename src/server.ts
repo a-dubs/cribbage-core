@@ -4,9 +4,9 @@ import { Server, Socket } from 'socket.io';
 import { GameLoop } from './gameplay/GameLoop';
 import { GameAgent, GameEvent, GameState, PlayerIdAndName } from './types';
 import { WebSocketAgent } from './agents/WebSocketAgent';
+import { SimpleAgent } from './agents/SimpleAgent';
 
 const app = express();
-// literally no matter what I do, I can't get rid of this error, so I'm just going to disable it
 // eslint-disable-next-line @typescript-eslint/no-misused-promises
 const server = http.createServer(app);
 const io = new Server(server);
@@ -29,57 +29,88 @@ app.get('/', (req, res) => {
   res.send('Socket.IO server is running!');
 });
 
-let waitingPlayer: PlayerInfo | null = null;
+const connectedPlayers: Map<string, PlayerInfo> = new Map();
 let gameLoop: GameLoop | null = null;
 
 io.on('connection', socket => {
   console.log('A user connected:', socket.id);
 
   socket.on('login', (data: LoginData) => {
-    handleLogin(socket, data).catch(error => {
-      console.error('Error handling login:', error);
+    handleLogin(socket, data);
+  });
+
+  socket.on('startGame', () => {
+    handleStartGame().catch(error => {
+      console.error('Error starting game:', error);
     });
   });
 
   socket.on('disconnect', () => {
     console.log('A user disconnected:', socket.id);
-    if (waitingPlayer && waitingPlayer.id === socket.id) {
-      waitingPlayer = null;
-    }
+    connectedPlayers.forEach((player, id) => {
+      if (player.id === socket.id) {
+        connectedPlayers.delete(id);
+      }
+    });
   });
 });
 
-async function handleLogin(socket: Socket, data: LoginData): Promise<void> {
+function handleLogin(socket: Socket, data: LoginData): void {
   const { username, name } = data;
   const agent = new WebSocketAgent(socket, username);
   const playerInfo: PlayerInfo = { id: username, name, agent };
 
-  if (!waitingPlayer) {
-    // No waiting player, set this player as the waiting player
-    waitingPlayer = playerInfo;
-    socket.emit('waiting', 'Waiting for another player to join...');
-  } else {
-    // Pair the waiting player with this player and start the game
-    const playersIdAndName: PlayerIdAndName[] = [];
-    playersIdAndName.push({ id: waitingPlayer.id, name: waitingPlayer.name });
-    playersIdAndName.push({ id: username, name });
+  // Replace old socket if player reconnects
+  connectedPlayers.set(username, playerInfo);
+  socket.emit('loggedIn', 'You are logged in!');
+}
 
-    gameLoop = new GameLoop(playersIdAndName);
-    gameLoop.addAgent(waitingPlayer.id, waitingPlayer.agent);
-    gameLoop.addAgent(username, agent);
-    waitingPlayer = null;
-
-    // Emit game state changes
-    gameLoop.on('gameStateChange', (newGameState: GameState) => {
-      io.emit('gameStateChange', newGameState);
-    });
-    gameLoop.on('gameEvent', (gameEvent: GameEvent) => {
-      io.emit('gameEvent', gameEvent);
-    });
-
-    // Start the game
-    await startGame();
+async function handleStartGame(): Promise<void> {
+  if (connectedPlayers.size < 2) {
+    console.log('Not enough players to start the game.');
+    return;
   }
+
+  const playersIdAndName: PlayerIdAndName[] = [];
+  const agents: Map<string, GameAgent> = new Map();
+
+  connectedPlayers.forEach(playerInfo => {
+    playersIdAndName.push({ id: playerInfo.id, name: playerInfo.name });
+    agents.set(playerInfo.id, playerInfo.agent);
+  });
+
+  // If only one player is connected, add a bot
+  if (playersIdAndName.length === 1) {
+    const botId = 'bot';
+    const botName = 'Bot';
+    const botAgent = new SimpleAgent(botId);
+    playersIdAndName.push({ id: botId, name: botName });
+    agents.set(botId, botAgent);
+  }
+
+  gameLoop = new GameLoop(playersIdAndName);
+
+  agents.forEach((agent, id) => {
+    if (gameLoop) {
+      gameLoop.addAgent(id, agent);
+    } else {
+      console.error(
+        'Game loop not initialized. Cannot add agent and start game.'
+      );
+      throw new Error('Game loop not initialized');
+    }
+  });
+
+  // Emit game state changes
+  gameLoop.on('gameStateChange', (newGameState: GameState) => {
+    io.emit('gameStateChange', newGameState);
+  });
+  gameLoop.on('gameEvent', (gameEvent: GameEvent) => {
+    io.emit('gameEvent', gameEvent);
+  });
+
+  // Start the game
+  await startGame();
 }
 
 async function startGame(): Promise<void> {

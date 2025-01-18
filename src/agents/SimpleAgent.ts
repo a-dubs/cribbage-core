@@ -4,13 +4,13 @@ import { GameState, Card } from '../types';
 import { RandomAgent } from './RandomAgent';
 
 export class SimpleAgent extends RandomAgent {
-  id: string;
+  playerId: string;
   human = false;
   cribbageGame: CribbageGame = new CribbageGame([]);
 
   constructor(id: string) {
     super(id);
-    this.id = id;
+    this.playerId = id;
   }
 
   private getBestHand(hand: Card[]): Card[] {
