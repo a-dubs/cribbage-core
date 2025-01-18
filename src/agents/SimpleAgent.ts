@@ -1,6 +1,6 @@
 import { CribbageGame } from '../core/CribbageGame';
 import { parseCard, scoreHand, scorePegging } from '../core/scoring';
-import { Game, Card } from '../types';
+import { GameState, Card } from '../types';
 import { RandomAgent } from './RandomAgent';
 
 export class SimpleAgent extends RandomAgent {
@@ -48,7 +48,7 @@ export class SimpleAgent extends RandomAgent {
     return bestHand;
   }
 
-  discard(game: Game, playerId: string): Promise<Card[]> {
+  discard(game: GameState, playerId: string): Promise<Card[]> {
     // score all possible hands with all possible discards with any possible remaining cut card
     // choose the discard that results in the highest score
 
@@ -62,7 +62,7 @@ export class SimpleAgent extends RandomAgent {
     return Promise.resolve(discards);
   }
 
-  makeMove(game: Game, playerId: string): Promise<Card | null> {
+  makeMove(game: GameState, playerId: string): Promise<Card | null> {
     // filter by cards that can be played (sum of stack + card <= 31) using game.peggingStack
     // then choose the card that would result in the highest potential net score (score earned - score given to opponent)
     // for score earned, calculate how many points would be earned by playing each card

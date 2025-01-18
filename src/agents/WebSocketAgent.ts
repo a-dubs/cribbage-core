@@ -1,4 +1,4 @@
-import { Card, Game, GameAgent } from '../types';
+import { Card, GameState, GameAgent } from '../types';
 import { displayCard, parseCard } from '../core/scoring';
 import { Socket } from 'socket.io';
 import { isValidDiscard, isValidPeggingPlay } from '../core/utils';
@@ -13,7 +13,7 @@ export class WebSocketAgent implements GameAgent {
     this.id = id;
   }
 
-  async discard(game: Game, playerId: string): Promise<Card[]> {
+  async discard(game: GameState, playerId: string): Promise<Card[]> {
     const player = game.players.find(p => p.id === playerId);
     if (!player) throw new Error('Player not found.');
 
@@ -37,7 +37,7 @@ export class WebSocketAgent implements GameAgent {
     });
   }
 
-  async makeMove(game: Game, playerId: string): Promise<Card> {
+  async makeMove(game: GameState, playerId: string): Promise<Card> {
     const player = game.players.find(p => p.id === playerId);
     if (!player) throw new Error('Player not found.');
 

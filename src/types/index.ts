@@ -101,7 +101,7 @@ export interface PlayerIdAndName {
 /**
  * Interface for the state of the game at any point in time
  */
-export interface GameState {
+export interface GameEvent {
   id: string; // Unique identifier for the game state (uuid)
   phase: Phase; // Current phase of the game
   actionType: ActionType; // Last action type taken in the game
@@ -118,7 +118,7 @@ export interface GameState {
 /**
  * Interface for the overall game
  */
-export interface Game {
+export interface GameState {
   id: string; // Unique identifier for the game
   players: Player[]; // List of players in the game
   deck: Card[]; // Remaining cards in the deck
@@ -129,7 +129,6 @@ export interface Game {
   peggingGoPlayers: string[]; // List of players who have said "Go" during this pegging stack
   peggingLastCardPlayer: string | null; // Player who played the last card during pegging
   playedCards: PlayedCard[]; // List of all cards played during the pegging phase to help with keeping track of played cards
-  gameStateLog: GameState[]; // Log of all game actions
 }
 
 /**
@@ -147,8 +146,8 @@ export interface PlayedCard {
 export interface GameAgent {
   id: string; // Unique identifier for the agent
   human: boolean; // Whether the agent represents a human player
-  makeMove(game: Game, playerId: string): Promise<Card | null>;
-  discard(game: Game, playerId: string): Promise<Card[]>;
+  makeMove(game: GameState, playerId: string): Promise<Card | null>;
+  discard(game: GameState, playerId: string): Promise<Card[]>;
 }
 
 /**
@@ -162,4 +161,36 @@ export interface HandScore {
   flush: number; // Points from flushes
   nobs: number; // Points from having the jack of the turn card's suit
   total: number; // Total score for the hand
+}
+
+////// Types for Event Emitters //////
+
+export interface emittedMakeMoveRequest {
+  playerId: string;
+  peggingHand: Card[];
+  peggingStack: Card[];
+  playedCards: PlayedCard[];
+  peggingTotal: number;
+}
+
+export interface emittedMakeMoveResponse {
+  playerId: string;
+  selectedCard: Card;
+}
+
+export interface emittedMakeMoveInvalid {
+  reason: string;
+}
+
+export interface emittedDiscardRequest {
+  playerId: string;
+  hand: Card[];
+}
+
+export interface emittedDiscardResponse {
+  selectedCards: Card[];
+}
+
+export interface emittedDiscardInvalid {
+  reason: string;
 }

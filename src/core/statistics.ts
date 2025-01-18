@@ -1,18 +1,10 @@
-import {
-  Game,
-  GameState,
-  HandScore,
-  Player,
-  Phase,
-  ActionType,
-  Card,
-} from '../types'; // Update the path to match your project structure
+import { GameEvent, Phase, ActionType, Card } from '../types'; // Update the path to match your project structure
 
 export class GameStatistics {
   /**
    * Calculate the average hand score for a given player.
    */
-  static averageHandScore(playerId: string, gameHistory: GameState[]): number {
+  static averageHandScore(playerId: string, gameHistory: GameEvent[]): number {
     const scores = gameHistory
       .filter(
         state =>
@@ -30,7 +22,7 @@ export class GameStatistics {
   /**
    * Calculate the average crib score for a given player.
    */
-  static averageCribScore(playerId: string, gameHistory: GameState[]): number {
+  static averageCribScore(playerId: string, gameHistory: GameEvent[]): number {
     const scores = gameHistory
       .filter(
         state =>
@@ -47,7 +39,7 @@ export class GameStatistics {
   /**
    * Calculate the maximum hand score for a given player.
    */
-  static maximumHandScore(playerId: string, gameHistory: GameState[]): number {
+  static maximumHandScore(playerId: string, gameHistory: GameEvent[]): number {
     return gameHistory
       .filter(
         state =>
@@ -61,7 +53,7 @@ export class GameStatistics {
   /**
    * Calculate the maximum crib score for a given player.
    */
-  static maximumCribScore(playerId: string, gameHistory: GameState[]): number {
+  static maximumCribScore(playerId: string, gameHistory: GameEvent[]): number {
     return gameHistory
       .filter(
         state =>
@@ -77,12 +69,12 @@ export class GameStatistics {
    */
   static bestPlayedHand(
     playerId: string,
-    gameHistory: GameState[]
+    gameHistory: GameEvent[]
   ): {
     hand: Card[];
     turnCard: Card;
     score: number;
-    gameState: GameState;
+    gameStateEvent: GameEvent;
   } | null {
     const handScores = gameHistory
       .filter(
@@ -106,7 +98,7 @@ export class GameStatistics {
           throw new Error('No turn card found');
         })(),
         score: state.scoreChange,
-        gameState: state,
+        gameStateEvent: state,
       }));
     if (handScores.length === 0) return null;
 
@@ -125,7 +117,7 @@ export class GameStatistics {
    * @returns The number of times the player scored "his heels"
    *
    */
-  static scoredHisHeels(playerId: string, gameHistory: GameState[]): number {
+  static scoredHisHeels(playerId: string, gameHistory: GameEvent[]): number {
     return gameHistory.filter(
       state =>
         state.playerId === playerId &&
@@ -134,14 +126,14 @@ export class GameStatistics {
     ).length;
   }
 
-  static numberOfRounds(gameHistory: GameState[]): number {
+  static numberOfRounds(gameHistory: GameEvent[]): number {
     return gameHistory.filter(
       state =>
         state.phase === Phase.CUTTING && state.actionType === ActionType.CUT
     ).length;
   }
 
-  static pointsFromPegging(playerId: string, gameHistory: GameState[]): number {
+  static pointsFromPegging(playerId: string, gameHistory: GameEvent[]): number {
     return gameHistory
       .filter(
         state => state.phase === Phase.PEGGING && state.playerId === playerId

@@ -1,21 +1,27 @@
 import { randomInt } from 'crypto';
 import { CribbageGame } from '../core/CribbageGame';
-import { GameAgent, Card, PlayerIdAndName } from '../types';
+import {
+  GameAgent,
+  Card,
+  PlayerIdAndName,
+  GameEvent,
+  GameState,
+} from '../types';
 import { displayCard, parseCard, suitToEmoji } from '../core/scoring';
 import { EventEmitter } from 'events';
 
 export class GameLoop extends EventEmitter {
-  public game: CribbageGame;
+  public cribbageGame: CribbageGame;
   private agents: Record<string, GameAgent> = {};
 
   constructor(playersInfo: PlayerIdAndName[]) {
     super();
-    this.game = new CribbageGame(playersInfo);
-    this.game.on('gameStateChange', newState => {
-      this.emit('gameStateChange', newState);
+    this.cribbageGame = new CribbageGame(playersInfo);
+    this.cribbageGame.on('gameStateChange', (newGameState: GameState) => {
+      this.emit('gameStateChange', newGameState);
     });
-    this.game.on('logGameStateChange', logState => {
-      this.emit('logGameStateChange', logState);
+    this.cribbageGame.on('gameEvent', (gameEvent: GameEvent) => {
+      this.emit('gameEvent', gameEvent);
     });
   }
 
@@ -36,40 +42,56 @@ export class GameLoop extends EventEmitter {
     // if a player has no cards left to play, move on to the next player
     // once all players have no cards left to play, pegging is over (call game.endPegging)
 
-    let currentPlayer = this.game.getFollowingPlayerId(this.game.getDealerId());
+    let currentPlayerId = this.cribbageGame.getFollowingPlayerId(
+      this.cribbageGame.getDealerId()
+    );
     const playersDone: string[] = []; // list of player ids who have no cards left to play
     let roundOverLastPlayer: string | null = null;
-    while (playersDone.length < this.game.getGameState().players.length) {
+    while (
+      playersDone.length < this.cribbageGame.getGameState().players.length
+    ) {
       // if the current player has no cards left to play, move on to the next player
-      if (playersDone.includes(currentPlayer)) {
-        currentPlayer = this.game.getFollowingPlayerId(currentPlayer);
+      if (playersDone.includes(currentPlayerId)) {
+        currentPlayerId =
+          this.cribbageGame.getFollowingPlayerId(currentPlayerId);
         continue;
       }
 
       // if the current player has already said "Go", move on to the next player
-      if (this.game.getGameState().peggingGoPlayers.includes(currentPlayer)) {
-        currentPlayer = this.game.getFollowingPlayerId(currentPlayer);
+      if (
+        this.cribbageGame
+          .getGameState()
+          .peggingGoPlayers.includes(currentPlayerId)
+      ) {
+        currentPlayerId =
+          this.cribbageGame.getFollowingPlayerId(currentPlayerId);
         continue;
       }
 
-      const agent = this.agents[currentPlayer];
-      if (!agent) throw new Error(`No agent for player ${currentPlayer}`);
+      const agent = this.agents[currentPlayerId];
+      if (!agent) throw new Error(`No agent for player ${currentPlayerId}`);
 
       // get the card the agent wants to play
       const card = await agent.makeMove(
-        this.game.getGameState(),
-        currentPlayer
+        this.cribbageGame.getGameState(),
+        currentPlayerId
       );
-      roundOverLastPlayer = this.game.playCard(currentPlayer, card);
-      const parsedStack = this.game.getGameState().peggingStack.map(parseCard);
+      // emit event saying who's turn it is (who are we waiting on)
+      this.emit('waitingForPlayer', {
+        playerId: currentPlayerId,
+      });
+      roundOverLastPlayer = this.cribbageGame.playCard(currentPlayerId, card);
+      const parsedStack = this.cribbageGame
+        .getGameState()
+        .peggingStack.map(parseCard);
       console.log(
         `Full pegging stack: ${parsedStack
           .map(card => `${card.runValue}${suitToEmoji(card.suit)}`)
           .join(', ')}`
       );
       // if current player pegged out, return their ID as winner of game
-      if (this.game.getPlayer(currentPlayer).score > 120) {
-        return Promise.resolve(currentPlayer);
+      if (this.cribbageGame.getPlayer(currentPlayerId).score > 120) {
+        return Promise.resolve(currentPlayerId);
       }
 
       // // if player is out of cards now, add them to the list of players done
@@ -79,9 +101,10 @@ export class GameLoop extends EventEmitter {
 
       // if the round is over, start next round with the person following the last person to play a card
       if (roundOverLastPlayer) {
-        currentPlayer = this.game.getFollowingPlayerId(roundOverLastPlayer);
+        currentPlayerId =
+          this.cribbageGame.getFollowingPlayerId(roundOverLastPlayer);
         // update the list of players done - check all players to see if they are out of cards
-        for (const player of this.game.getGameState().players) {
+        for (const player of this.cribbageGame.getGameState().players) {
           if (
             player.peggingHand.length === 0 &&
             !playersDone.includes(player.id)
@@ -92,11 +115,12 @@ export class GameLoop extends EventEmitter {
       }
       // if the round is not over, continue with the next player
       else {
-        currentPlayer = this.game.getFollowingPlayerId(currentPlayer);
+        currentPlayerId =
+          this.cribbageGame.getFollowingPlayerId(currentPlayerId);
       }
     }
     // if all players are out of cards, pegging is over
-    this.game.endPegging();
+    this.cribbageGame.endPegging();
     console.log('PEGGING OVER\n');
 
     // if no one has pegged out, return null to indicate no winner
@@ -104,33 +128,40 @@ export class GameLoop extends EventEmitter {
   }
 
   private async doRound(): Promise<string | null> {
-    this.game.deal();
+    this.cribbageGame.deal();
 
     // Crib phase: Agents discard to crib
-    for (const player of this.game.getGameState().players) {
+    for (const player of this.cribbageGame.getGameState().players) {
       const agent = this.agents[player.id];
       if (!agent) throw new Error(`No agent for player ${player.id}`);
-
-      const discards = await agent.discard(this.game.getGameState(), player.id);
-      this.game.discardToCrib(player.id, discards);
+      // emit event saying who's turn it is (who are we waiting on)
+      this.emit('waitingForPlayer', {
+        playerId: player.id,
+      });
+      const discards = await agent.discard(
+        this.cribbageGame.getGameState(),
+        player.id
+      );
+      this.cribbageGame.discardToCrib(player.id, discards);
     }
 
-    this.game.completeCribPhase();
+    this.cribbageGame.completeCribPhase();
 
     // Cutting phase: Agents cut the deck
-    const dealerIndex = this.game
+    const dealerIndex = this.cribbageGame
       .getGameState()
       .players.findIndex(player => player.isDealer);
     const behindDealerIndex =
-      (dealerIndex - 1 + this.game.getGameState().players.length) %
-      this.game.getGameState().players.length;
-    const behindDealer = this.game.getGameState().players[behindDealerIndex];
-    this.game.cutDeck(
+      (dealerIndex - 1 + this.cribbageGame.getGameState().players.length) %
+      this.cribbageGame.getGameState().players.length;
+    const behindDealer =
+      this.cribbageGame.getGameState().players[behindDealerIndex];
+    this.cribbageGame.cutDeck(
       behindDealer.id,
-      randomInt(0, this.game.getGameState().deck.length)
+      randomInt(0, this.cribbageGame.getGameState().deck.length)
     );
 
-    const turnCard = this.game.getGameState().turnCard;
+    const turnCard = this.cribbageGame.getGameState().turnCard;
     if (!turnCard) throw new Error('No turn card after cutting deck');
     console.log(
       `Player ${behindDealer.name} cut the deck: ${displayCard(turnCard)}`
@@ -147,15 +178,16 @@ export class GameLoop extends EventEmitter {
     // Loop through each player and score their hand, starting with player after dealer and ending with dealer
     // Dealer also scores their crib after scoring their hand
     const afterDealerIndex =
-      (dealerIndex + 1) % this.game.getGameState().players.length;
-    for (let n = 0; n < this.game.getGameState().players.length; n++) {
+      (dealerIndex + 1) % this.cribbageGame.getGameState().players.length;
+    for (let n = 0; n < this.cribbageGame.getGameState().players.length; n++) {
       const i =
-        (afterDealerIndex + n) % this.game.getGameState().players.length;
-      const player = this.game.getGameState().players[i];
+        (afterDealerIndex + n) %
+        this.cribbageGame.getGameState().players.length;
+      const player = this.cribbageGame.getGameState().players[i];
       const agent = this.agents[player.id];
       if (!agent) throw new Error(`No agent for player ${player.id}`);
 
-      const handScore = this.game.scoreHand(player.id);
+      const handScore = this.cribbageGame.scoreHand(player.id);
       console.log(
         `Player ${player.name} scored ${handScore} points hand: 
         ${player.hand.map(card => displayCard(card)).join(', ')}`
@@ -166,10 +198,10 @@ export class GameLoop extends EventEmitter {
       }
 
       if (player.isDealer) {
-        const cribScore = this.game.scoreCrib(player.id);
+        const cribScore = this.cribbageGame.scoreCrib(player.id);
         console.log(
           `Player ${player.name} scored ${cribScore} points in their crib: 
-          ${this.game
+          ${this.cribbageGame
             .getCrib()
             .map((card: Card) => displayCard(card))
             .join(', ')}`
@@ -182,10 +214,10 @@ export class GameLoop extends EventEmitter {
     }
 
     // Cleanup and Reset state and rotate dealer
-    this.game.endRound();
+    this.cribbageGame.endRound();
 
     // log the scores of each player
-    for (const player of this.game.getGameState().players) {
+    for (const player of this.cribbageGame.getGameState().players) {
       console.log(`Player ${player.name} score: ${player.score}`);
     }
 

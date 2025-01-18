@@ -3,7 +3,7 @@ import { RandomAgent } from './agents/RandomAgent';
 import { SimpleAgent } from './agents/SimpleAgent';
 // import { HumanAgent } from './agents/HumanAgent';
 import { GameStatistics } from './core/statistics';
-import { GameState, PlayerIdAndName } from './types';
+import { GameEvent, PlayerIdAndName } from './types';
 import { scoreHand } from './core/scoring';
 
 // keep track of how each player performs in the game
@@ -26,7 +26,7 @@ interface PlayerStatistics {
 
 const playerStatistics: PlayerStatistics[] = [];
 
-function printStatistics(playerId: string, gameHistory: GameState[]) {
+function printStatistics(playerId: string, gameHistory: GameEvent[]) {
   // Calculate statistics
   const pointsFromPegging = GameStatistics.pointsFromPegging(
     playerId,
@@ -86,16 +86,16 @@ async function main() {
 
   const result = await gameLoop.playGame();
 
-  const gameHistory = gameLoop.game.getGameState().gameStateLog;
+  const gameHistory = gameLoop.cribbageGame.getGameState().gameEventRecords;
 
   const NumberOfRounds = GameStatistics.numberOfRounds(gameHistory);
   console.log(`Winner: ${result} after ${NumberOfRounds} rounds`);
-  const p1_score = gameLoop.game.getGameState().players[0].score;
-  const p2_score = gameLoop.game.getGameState().players[1].score;
+  const p1_score = gameLoop.cribbageGame.getGameState().players[0].score;
+  const p2_score = gameLoop.cribbageGame.getGameState().players[1].score;
   console.log(`Player 1 score: ${p1_score}`);
   console.log(`Player 2 score: ${p2_score}`);
 
-  const playerIds = gameLoop.game.getGameState().players.map(p => p.id);
+  const playerIds = gameLoop.cribbageGame.getGameState().players.map(p => p.id);
   // console.log('Game history: ', gameHistory);
   for (const playerId of playerIds) {
     console.log('\n------------------------------');

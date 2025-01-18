@@ -1,8 +1,8 @@
-import { Card, Game, Player } from '../types';
+import { Card, GameState, Player } from '../types';
 import { parseCard, sumOfPeggingStack } from './scoring';
 
 export function isValidDiscard(
-  game: Game,
+  game: GameState,
   player: Player,
   cards: Card[]
 ): boolean {
@@ -10,7 +10,7 @@ export function isValidDiscard(
 }
 
 export function isValidPeggingPlay(
-  game: Game,
+  game: GameState,
   player: Player,
   card: Card | null
 ): boolean {

@@ -1,5 +1,5 @@
 import { parseCard } from '../core/scoring';
-import { Game, GameAgent, Card } from '../types';
+import { GameState, GameAgent, Card } from '../types';
 
 export class RandomAgent implements GameAgent {
   id: string;
@@ -9,7 +9,7 @@ export class RandomAgent implements GameAgent {
     this.id = id;
   }
 
-  makeMove(game: Game, playerId: string): Promise<Card | null> {
+  makeMove(game: GameState, playerId: string): Promise<Card | null> {
     const player = game.players.find(p => p.id === playerId);
     if (!player) {
       throw new Error('Player not found.');
@@ -46,7 +46,7 @@ export class RandomAgent implements GameAgent {
     return Promise.resolve(filteredHand[randomIndex]);
   }
 
-  discard(game: Game, playerId: string): Promise<Card[]> {
+  discard(game: GameState, playerId: string): Promise<Card[]> {
     const player = game.players.find(p => p.id === playerId);
     if (!player) throw new Error('Player not found');
 
