@@ -204,6 +204,17 @@ export interface EmittedDiscardInvalid extends EmittedData {
   discardRequest: EmittedDiscardRequest;
 }
 
+export enum AgentDecisionType {
+  MAKE_MOVE = 'MAKE_MOVE',
+  DISCARD = 'DISCARD',
+  // CUT = 'CUT',  // not implemented yet
+}
+
+// map AgentDecisionType to the corresponding EmittedData type
+export type EmittedDecisionRequest =
+  | EmittedMakeMoveRequest
+  | EmittedDiscardRequest;
+
 export interface EmittedWaitingForPlayer extends EmittedData {
-  waitingFor: 'DISCARD' | 'PLAY_CARD';
+  waitingFor: AgentDecisionType;
 }
