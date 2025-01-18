@@ -109,6 +109,7 @@ export interface GameState {
   peggingStack?: Card[]; // Stack of played cards during pegging (including card just played) (if phase is PEGGING)
   peggingGoPlayers?: string[]; // List of players who have said "Go" during this pegging stack (if phase is PEGGING)
   peggingLastCardPlayer?: string; // Player who played the last card during pegging (if phase is PEGGING)
+  playedCards: PlayedCard[]; // List of all cards played during the pegging phase to help with keeping track of played cards
 }
 
 /**
@@ -124,8 +125,16 @@ export interface Game {
   peggingStack: Card[]; // Stack of cards played during the pegging phase
   peggingGoPlayers: string[]; // List of players who have said "Go" during this pegging stack
   peggingLastCardPlayer: string | null; // Player who played the last card during pegging
-  playedCards: string[]; // List of all cards played during the pegging phase to help with keeping track of played cards
+  playedCards: PlayedCard[]; // List of all cards played during the pegging phase to help with keeping track of played cards
   gameStateLog: GameState[]; // Log of all game actions
+}
+
+/**
+ * Interface for a card played by a player
+ */
+export interface PlayedCard {
+  playerId: string; // ID of the player who played the card
+  card: Card; // The card that was played
 }
 
 /**

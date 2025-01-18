@@ -1,4 +1,4 @@
-import { Phase, ActionType, Card, Player, Game, GameState } from '../types';
+import { Phase, ActionType, Card, Player, Game, GameState, PlayedCard } from '../types';
 import { scoreHand, scorePegging, sumOfPeggingStack } from './scoring';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -250,7 +250,7 @@ export class CribbageGame {
     this.game.peggingStack.push(card);
 
     // add the card to the list of played cards
-    this.game.playedCards.push(card);
+    this.game.playedCards.push({ playerId, card });
 
     // score the pegging stack
     const score = scorePegging(this.game.peggingStack);

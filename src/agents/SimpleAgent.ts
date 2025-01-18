@@ -90,7 +90,7 @@ export class SimpleAgent extends RandomAgent {
       .generateDeck()
       .filter(
         card =>
-          !game.playedCards.includes(card) &&
+          !game.playedCards.some(playedCard => playedCard.card === card) &&
           !player.peggingHand.includes(card) &&
           card !== game.turnCard
       );
