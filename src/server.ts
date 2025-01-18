@@ -120,7 +120,7 @@ async function startGame(): Promise<void> {
   if (!gameLoop) return;
 
   const winner = await gameLoop.playGame();
-  io.emit('gameOver', `Player ${winner} wins!`);
+  io.emit('gameOver', winner);
 }
 
 // Start the server
