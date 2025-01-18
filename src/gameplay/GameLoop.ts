@@ -1,14 +1,22 @@
 import { randomInt } from 'crypto';
 import { CribbageGame } from '../core/CribbageGame';
-import { GameAgent, Card } from '../types';
+import { GameAgent, Card, PlayerIdAndName } from '../types';
 import { displayCard, parseCard, suitToEmoji } from '../core/scoring';
+import { EventEmitter } from 'events';
 
-export class GameLoop {
+export class GameLoop extends EventEmitter {
   public game: CribbageGame;
   private agents: Record<string, GameAgent> = {};
 
-  constructor(playerNames: string[]) {
-    this.game = new CribbageGame(playerNames);
+  constructor(playersInfo: PlayerIdAndName[]) {
+    super();
+    this.game = new CribbageGame(playersInfo);
+    this.game.on('gameStateChange', newState => {
+      this.emit('gameStateChange', newState);
+    });
+    this.game.on('logGameStateChange', logState => {
+      this.emit('logGameStateChange', logState);
+    });
   }
 
   public addAgent(playerId: string, agent: GameAgent): void {
@@ -185,7 +193,7 @@ export class GameLoop {
   }
 
   /**
-   * 
+   *
    * @returns the ID of the winning player
    */
   public async playGame(): Promise<string> {

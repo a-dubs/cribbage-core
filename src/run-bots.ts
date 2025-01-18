@@ -3,7 +3,7 @@ import { RandomAgent } from './agents/RandomAgent';
 import { SimpleAgent } from './agents/SimpleAgent';
 // import { HumanAgent } from './agents/HumanAgent';
 import { GameStatistics } from './core/statistics';
-import { GameState } from './types';
+import { GameState, PlayerIdAndName } from './types';
 import { scoreHand } from './core/scoring';
 
 // keep track of how each player performs in the game
@@ -70,15 +70,19 @@ function printStatistics(playerId: string, gameHistory: GameState[]) {
 }
 
 async function main() {
-  const gameLoop = new GameLoop(['bot-1', 'bot-2']);
+  const playersInfo: PlayerIdAndName[] = [
+    { id: 'bot-1', name: 'Random Bot' },
+    { id: 'bot-2', name: 'Simple Bot' },
+  ];
+  const gameLoop = new GameLoop(playersInfo);
 
-  // Add a human player for Alice
-  const botAgent1 = new RandomAgent('bot-1');
-  gameLoop.addAgent('player-1', botAgent1);
+  // Add a random bot agent
+  const randomBotAgent = new RandomAgent('bot-1');
+  gameLoop.addAgent('bot-1', randomBotAgent);
 
-  // Add a random agent for Bob
-  const botAgent2 = new SimpleAgent('bot-2');
-  gameLoop.addAgent('player-2', botAgent2);
+  // Add a simple bot agent
+  const simpleBotAgent = new SimpleAgent('bot-2');
+  gameLoop.addAgent('bot-2', simpleBotAgent);
 
   const result = await gameLoop.playGame();
 
@@ -132,24 +136,24 @@ void (async () => {
       )}, min: ${min(pointsFromPegging)}, max: ${max(pointsFromPegging)}`
     );
     console.log(
-      `Average hand score: avg: ${avg(avgHandScore).toFixed(
-        1
-      )}, min: ${min(avgHandScore).toFixed(
-        1
-      )}, max: ${max(avgHandScore).toFixed(1)}`
+      `Average hand score: avg: ${avg(avgHandScore).toFixed(1)}, min: ${min(
+        avgHandScore
+      ).toFixed(1)}, max: ${max(avgHandScore).toFixed(1)}`
     );
     console.log(
-      `Average crib score: avg: ${avg(avgCribScore).toFixed(
-        1
-      )}, min: ${min(avgCribScore).toFixed(
-        1
-      )}, max: ${max(avgCribScore).toFixed(1)}`
+      `Average crib score: avg: ${avg(avgCribScore).toFixed(1)}, min: ${min(
+        avgCribScore
+      ).toFixed(1)}, max: ${max(avgCribScore).toFixed(1)}`
     );
     console.log(
-      `Max hand score: avg: ${avg(maxHandScore)}, min: ${min(maxHandScore)}, max: ${max(maxHandScore)}`
+      `Max hand score: avg: ${avg(maxHandScore)}, min: ${min(
+        maxHandScore
+      )}, max: ${max(maxHandScore)}`
     );
     console.log(
-      `Max crib score: avg: ${avg(maxCribScore)}, min: ${min(maxCribScore)}, max: ${max(maxCribScore)}`
+      `Max crib score: avg: ${avg(maxCribScore)}, min: ${min(
+        maxCribScore
+      )}, max: ${max(maxCribScore)}`
     );
     console.log('------------------------------');
   }

@@ -1,6 +1,7 @@
 import readline from 'readline';
 import { Card, Game, GameAgent } from '../types';
 import { displayCard } from '../core/scoring';
+import { isValidDiscard, isValidPeggingPlay } from '../core/utils';
 
 // Utility function to prompt user input
 export function promptUser(question: string): Promise<string> {
@@ -30,49 +31,68 @@ export class HumanAgent implements GameAgent {
     const player = game.players.find(p => p.id === playerId);
     if (!player) throw new Error('Player not found.');
 
-    console.log('Your hand:');
-    player.hand.forEach((card, index) => {
-      console.log(`${index + 1}: ${displayCard(card)}`);
-    });
+    const requestDiscard = async (): Promise<Card[]> => {
+      console.log('Your hand:');
+      player.hand.forEach((card, index) => {
+        console.log(`${index + 1}: ${displayCard(card)}`);
+      });
 
-    const input = await promptUser(
-      'Select 2 cards to discard (comma-separated numbers): '
-    );
-    const selectedIndices = input
-      .split(',')
-      .map(num => parseInt(num.trim()) - 1);
+      const input = await promptUser(
+        'Select 2 cards to discard (comma-separated numbers): '
+      );
+      const selectedIndices = input
+        .split(',')
+        .map(num => parseInt(num.trim()) - 1);
 
-    // Validate the selected indices
-    if (
-      selectedIndices.length !== 2 ||
-      !selectedIndices.every(index => index >= 0 && index < player.hand.length)
-    ) {
-      console.log('Invalid selection. Try again.');
-      return this.discard(game, playerId); // Retry on invalid input
-    }
+      if (
+        selectedIndices.length !== 2 ||
+        !selectedIndices.every(
+          index => index >= 0 && index < player.hand.length
+        )
+      ) {
+        console.log('Invalid selection. Try again.');
+        return requestDiscard();
+      }
 
-    const selectedCards = selectedIndices.map(index => player.hand[index]);
-    return selectedCards;
+      const selectedCards = selectedIndices.map(index => player.hand[index]);
+      if (isValidDiscard(game, player, selectedCards)) {
+        return selectedCards;
+      } else {
+        console.log('Invalid discard. Try again.');
+        return requestDiscard();
+      }
+    };
+
+    return requestDiscard();
   }
 
   async makeMove(game: Game, playerId: string): Promise<Card> {
     const player = game.players.find(p => p.id === playerId);
     if (!player) throw new Error('Player not found.');
 
-    console.log('Your pegging hand:');
-    player.peggingHand.forEach((card, index) => {
-      console.log(`${index + 1}: ${displayCard(card)}`);
-    });
+    const requestMove = async (): Promise<Card> => {
+      console.log('Your pegging hand:');
+      player.peggingHand.forEach((card, index) => {
+        console.log(`${index + 1}: ${displayCard(card)}`);
+      });
 
-    const input = await promptUser('Select a card to play (number): ');
-    const selectedIndex = parseInt(input.trim()) - 1;
+      const input = await promptUser('Select a card to play (number): ');
+      const selectedIndex = parseInt(input.trim()) - 1;
 
-    // Validate the selected index
-    if (selectedIndex < 0 || selectedIndex >= player.peggingHand.length) {
-      console.log('Invalid card. Try again.');
-      return this.makeMove(game, playerId); // Retry on invalid input
-    }
+      if (selectedIndex < 0 || selectedIndex >= player.peggingHand.length) {
+        console.log('Invalid card. Try again.');
+        return requestMove();
+      }
 
-    return player.peggingHand[selectedIndex];
+      const selectedCard = player.peggingHand[selectedIndex];
+      if (isValidPeggingPlay(game, player, selectedCard)) {
+        return selectedCard;
+      } else {
+        console.log('[HumanAgent] Invalid move. Try again.');
+        return requestMove();
+      }
+    };
+
+    return requestMove();
   }
 }

@@ -86,13 +86,16 @@ export type Card =
 /**
  * Interface for a player in the game
  */
-export interface Player {
-  id: string; // Unique identifier for the player
-  name: string; // Display name for the player
+export interface Player extends PlayerIdAndName {
   hand: Card[]; // Cards currently in the player's hand
   peggingHand: Card[]; // Cards left to play during the pegging phase (starts as a copy of hand)
   score: number; // Player's score
   isDealer: boolean; // Whether the player is the dealer for the current round
+}
+
+export interface PlayerIdAndName {
+  id: string; // Unique identifier for the player (username for human players)
+  name: string; // Display name of the player
 }
 
 /**

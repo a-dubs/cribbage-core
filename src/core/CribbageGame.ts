@@ -1,15 +1,26 @@
-import { Phase, ActionType, Card, Player, Game, GameState, PlayedCard } from '../types';
+import {
+  Phase,
+  ActionType,
+  Card,
+  Player,
+  Game,
+  GameState,
+  PlayerIdAndName,
+} from '../types';
 import { scoreHand, scorePegging, sumOfPeggingStack } from './scoring';
 import { v4 as uuidv4 } from 'uuid';
+import { EventEmitter } from 'events';
+import { isValidDiscard, isValidPeggingPlay } from './utils';
 
-export class CribbageGame {
+export class CribbageGame extends EventEmitter {
   private game: Game;
 
-  constructor(playerNames: string[]) {
+  constructor(playersInfo: PlayerIdAndName[]) {
+    super();
     const deck = this.generateDeck();
-    const players = playerNames.map((name, index) => ({
-      id: `player-${index + 1}`,
-      name,
+    const players = playersInfo.map((info, index) => ({
+      id: info.id,
+      name: info.name,
       hand: [],
       peggingHand: [],
       score: 0,
@@ -66,12 +77,15 @@ export class CribbageGame {
       cards,
       scoreChange,
       timestamp: new Date(),
+      playedCards: this.game.playedCards,
     };
     if (phase === Phase.PEGGING) {
       state.peggingStack = this.game.peggingStack;
       state.peggingGoPlayers = this.game.peggingGoPlayers;
     }
     this.game.gameStateLog.push(state);
+    this.emit('gameStateChange', this.game);
+    this.emit('logGameStateChange', state);
   }
 
   public getCrib(): Card[] {
@@ -109,7 +123,7 @@ export class CribbageGame {
   public discardToCrib(playerId: string, cards: Card[]): void {
     const player = this.game.players.find(p => p.id === playerId);
     if (!player) throw new Error('Player not found.');
-    if (!cards.every(card => player.hand.includes(card))) {
+    if (!isValidDiscard(this.game, player, cards)) {
       throw new Error('Invalid cards to discard.');
     }
     if (playerId === this.game.players[1].id) {
@@ -214,8 +228,10 @@ export class CribbageGame {
     }
 
     const player = this.game.players.find(p => p.id === playerId);
-
     if (!player) throw new Error('Player not found.');
+    // if (!isValidPeggingPlay(this.game, player, card)) {
+    //   throw new Error('Invalid card play.');
+    // }
 
     if (!card) {
       // if all other players have said "Go", give the last player to play a point
@@ -240,10 +256,6 @@ export class CribbageGame {
       }
       console.log(`Player ${playerId} said "Go"`);
       return null;
-    }
-
-    if (!player.peggingHand.includes(card)) {
-      throw new Error('Invalid card play.');
     }
 
     // add the played card to the pegging stack

@@ -37,7 +37,7 @@ Replace `FULL_NAME`, `GITHUB_USER`, and `REPO_NAME` in the script below with you
 FULL_NAME="John Smith"
 GITHUB_USER="johnsmith"
 REPO_NAME="my-cool-package"
-sed -i.mybak "s/\([\/\"]\)(ryansonshine)/$GITHUB_USER/g; s/typescript-npm-package-template\|my-package-name/$REPO_NAME/g; s/Ryan Sonshine/$FULL_NAME/g" package.json package-lock.json README.md
+sed -i.mybak "s/\([\/\"]\)(ryansonshine)/$GITHUB_USER/g; s/typescript-npm-package-template\|cribbage-core/$REPO_NAME/g; s/Ryan Sonshine/$FULL_NAME/g" package.json package-lock.json README.md
 rm *.mybak
 ```
 
@@ -53,7 +53,7 @@ Enable the Codecov GitHub App [here](https://github.com/apps/codecov).
 
 ---
 
-# my-package-name
+# cribbage-core
 
 [![npm package][npm-img]][npm-url]
 [![Build Status][build-img]][build-url]
@@ -68,13 +68,13 @@ Enable the Codecov GitHub App [here](https://github.com/apps/codecov).
 ## Install
 
 ```bash
-npm install my-package-name
+npm install cribbage-core
 ```
 
 ## Usage
 
 ```ts
-import { myPackage } from 'my-package-name';
+import { myPackage } from 'cribbage-core';
 
 myPackage('hello');
 //=> 'hello from my package'
