@@ -2,7 +2,13 @@ import express from 'express';
 import http from 'http';
 import { Server, Socket } from 'socket.io';
 import { GameLoop } from './gameplay/GameLoop';
-import { EmittedWaitingForPlayer, GameAgent, GameEvent, GameState, PlayerIdAndName } from './types';
+import {
+  EmittedWaitingForPlayer,
+  GameAgent,
+  GameEvent,
+  GameState,
+  PlayerIdAndName,
+} from './types';
 import { WebSocketAgent } from './agents/WebSocketAgent';
 import { SimpleAgent } from './agents/SimpleAgent';
 
@@ -63,9 +69,32 @@ function handleLogin(socket: Socket, data: LoginData): void {
   // Replace old socket if player reconnects
   connectedPlayers.set(username, playerInfo);
   socket.emit('loggedIn', 'You are logged in!');
+  emitConnectedPlayers();
+}
+
+// create function that emits the current connected players to all clients
+function emitConnectedPlayers(): void {
+  const playersIdAndName: PlayerIdAndName[] = [];
+  connectedPlayers.forEach(playerInfo => {
+    playersIdAndName.push({ id: playerInfo.id, name: playerInfo.name });
+  });
+  io.emit('connectedPlayers', playersIdAndName);
 }
 
 async function handleStartGame(): Promise<void> {
+  // If only one player is connected, add a bot
+  if (connectedPlayers.keys.length === 1) {
+    const botId = 'bot';
+    const botName = 'Bot';
+    const botAgent = new SimpleAgent(botId);
+    const botPlayerInfo: PlayerInfo = {
+      id: botId,
+      name: botName,
+      agent: botAgent,
+    };
+    connectedPlayers.set(botId, botPlayerInfo);
+  }
+
   if (connectedPlayers.size < 2) {
     console.log('Not enough players to start the game.');
     return;
@@ -78,15 +107,6 @@ async function handleStartGame(): Promise<void> {
     playersIdAndName.push({ id: playerInfo.id, name: playerInfo.name });
     agents.set(playerInfo.id, playerInfo.agent);
   });
-
-  // If only one player is connected, add a bot
-  if (playersIdAndName.length === 1) {
-    const botId = 'bot';
-    const botName = 'Bot';
-    const botAgent = new SimpleAgent(botId);
-    playersIdAndName.push({ id: botId, name: botName });
-    agents.set(botId, botAgent);
-  }
 
   gameLoop = new GameLoop(playersIdAndName);
 
@@ -111,6 +131,8 @@ async function handleStartGame(): Promise<void> {
   gameLoop.on('waitingForPlayer', (waitingData: EmittedWaitingForPlayer) => {
     io.emit('waitingForPlayer', waitingData);
   });
+  // send the connected players to the clients
+  emitConnectedPlayers();
 
   // Start the game
   await startGame();
