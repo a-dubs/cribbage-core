@@ -1,5 +1,3 @@
-export const myPackage = (taco = ''): string => `${taco} from my package`;
-
 export * from './agents';
 export * from './core/CribbageGame';
 export * from './types';
