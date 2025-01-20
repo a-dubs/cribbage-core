@@ -7,6 +7,7 @@ import {
   GameEvent,
   GameState,
   EmittedWaitingForPlayer,
+  AgentDecisionType,
 } from '../types';
 import { displayCard, parseCard, suitToEmoji } from '../core/scoring';
 import { EventEmitter } from 'events';
@@ -80,7 +81,7 @@ export class GameLoop extends EventEmitter {
       // emit event saying who's turn it is (who are we waiting on)
       const emittedWaitingForPlayerData: EmittedWaitingForPlayer = {
         playerId: currentPlayerId,
-        waitingFor: 'PLAY_CARD',
+        waitingFor: AgentDecisionType.PLAY_CARD,
       };
       this.emit('waitingForPlayer', emittedWaitingForPlayerData);
       roundOverLastPlayer = this.cribbageGame.playCard(currentPlayerId, card);
@@ -140,7 +141,7 @@ export class GameLoop extends EventEmitter {
       // emit event saying who's turn it is (who are we waiting on)
       const emittedWaitingForPlayerData: EmittedWaitingForPlayer = {
         playerId: player.id,
-        waitingFor: 'DISCARD',
+        waitingFor: AgentDecisionType.DISCARD,
       };
       this.emit('waitingForPlayer', emittedWaitingForPlayerData);
       const discards = await agent.discard(

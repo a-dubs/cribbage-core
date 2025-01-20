@@ -205,7 +205,7 @@ export interface EmittedDiscardInvalid extends EmittedData {
 }
 
 export enum AgentDecisionType {
-  MAKE_MOVE = 'MAKE_MOVE',
+  PLAY_CARD = 'PLAY_CARD',
   DISCARD = 'DISCARD',
   // CUT = 'CUT',  // not implemented yet
 }
