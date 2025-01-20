@@ -416,4 +416,8 @@ export class CribbageGame extends EventEmitter {
   public getGameState(): GameState {
     return this.gameState;
   }
+
+  public getGameEventRecords(): GameEvent[] {
+    return this.gameEventRecords;
+  }
 }

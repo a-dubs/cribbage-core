@@ -76,7 +76,7 @@ async function main() {
 
   const result = await gameLoop.playGame();
 
-  const gameHistory = gameLoop.cribbageGame.getGameState().gameEventRecords;
+  const gameHistory = gameLoop.cribbageGame.getGameEventRecords();
 
   const NumberOfRounds = GameStatistics.numberOfRounds(gameHistory);
   console.log(`Winner: ${result} after ${NumberOfRounds} rounds`);
