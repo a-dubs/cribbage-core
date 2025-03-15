@@ -8,7 +8,6 @@ import {
   PlayerIdAndName,
 } from '../types';
 import { scoreHand, scorePegging, sumOfPeggingStack } from './scoring';
-import { v4 as uuidv4 } from 'uuid';
 import { EventEmitter } from 'events';
 import { isValidDiscard, isValidPeggingPlay } from './utils';
 
@@ -27,9 +26,9 @@ export class CribbageGame extends EventEmitter {
       score: 0,
       isDealer: index === 0,
     })) as Player[];
-
+    const id = `game-${Date.now()}`;
     this.gameState = {
-      id: `game-${Date.now()}`,
+      id: id,
       players,
       deck,
       currentPhase: Phase.DEALING,
@@ -72,7 +71,7 @@ export class CribbageGame extends EventEmitter {
     scoreChange: number
   ) {
     const gameEvent: GameEvent = {
-      id: uuidv4(),
+      id: this.gameState.id,
       phase,
       actionType,
       playerId,

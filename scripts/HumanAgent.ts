@@ -1,7 +1,7 @@
 import readline from 'readline';
-import { Card, GameState, GameAgent } from '../types';
-import { displayCard } from '../core/scoring';
-import { isValidDiscard, isValidPeggingPlay } from '../core/utils';
+import { Card, GameState, GameAgent } from '../src/types';
+import { displayCard } from '../src/core/scoring';
+import { isValidDiscard, isValidPeggingPlay } from '../src/core/utils';
 
 // Utility function to prompt user input
 export function promptUser(question: string): Promise<string> {

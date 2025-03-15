@@ -1,4 +1,3 @@
-import express from 'express';
 import http from 'http';
 import { Server, Socket } from 'socket.io';
 import { GameLoop } from './gameplay/GameLoop';
@@ -12,12 +11,18 @@ import {
 import { WebSocketAgent } from './agents/WebSocketAgent';
 import { SimpleAgent } from './agents/SimpleAgent';
 
-const app = express();
-// eslint-disable-next-line @typescript-eslint/no-misused-promises
-const server = http.createServer(app);
-const io = new Server(server);
+console.log('Cribbage-core server starting...');
 
-const PORT = process.env.PORT || 3000;
+const server = http.createServer();
+const io = new Server(server, {
+  cors: {
+    origin: 'http://localhost:3000',
+    methods: ['GET', 'POST'],
+    credentials: true,
+  },
+});
+
+const PORT = process.env.PORT || 3002;
 
 interface PlayerInfo {
   id: string;
@@ -30,15 +35,17 @@ interface LoginData {
   name: string;
 }
 
-// Set up a basic route to show that the server is running
-app.get('/', (req, res) => {
-  res.send('Socket.IO server is running!');
-});
-
 const connectedPlayers: Map<string, PlayerInfo> = new Map();
 let gameLoop: GameLoop | null = null;
 
 io.on('connection', socket => {
+  const token = socket.handshake.auth.token;
+  if (token !== 'dummy-auth-token') {
+    console.log('Authentication failed for socket:', socket.id);
+    socket.disconnect();
+    return;
+  }
+
   console.log('A user connected:', socket.id);
 
   socket.on('login', (data: LoginData) => {
@@ -59,6 +66,10 @@ io.on('connection', socket => {
       }
     });
   });
+
+  socket.on('heartbeat', () => {
+    console.log('Received heartbeat from client');
+  });
 });
 
 function handleLogin(socket: Socket, data: LoginData): void {
@@ -67,6 +78,11 @@ function handleLogin(socket: Socket, data: LoginData): void {
   const playerInfo: PlayerInfo = { id: username, name, agent };
 
   // Replace old socket if player reconnects
+  const oldPlayerInfo = connectedPlayers.get(username);
+
+  if (oldPlayerInfo && oldPlayerInfo.agent instanceof WebSocketAgent) {
+    oldPlayerInfo.agent.socket.disconnect(true); // Disconnect old socket if applicable
+  }
   connectedPlayers.set(username, playerInfo);
   socket.emit('loggedIn', 'You are logged in!');
   emitConnectedPlayers();
