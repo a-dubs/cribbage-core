@@ -8,6 +8,7 @@ import {
   EmittedDiscardRequest,
   EmittedDiscardInvalid,
   EmittedDiscardResponse,
+  AgentDecisionType,
 } from '../types';
 import { parseCard } from '../core/scoring';
 import { Socket } from 'socket.io';
@@ -23,7 +24,11 @@ export class WebSocketAgent implements GameAgent {
     this.playerId = playerId;
   }
 
-  async discard(game: GameState, playerId: string): Promise<Card[]> {
+  async discard(
+    game: GameState,
+    playerId: string,
+    numberOfCardsToDiscard: number
+  ): Promise<Card[]> {
     const player = game.players.find(p => p.id === playerId);
     if (!player) throw new Error('Player not found.');
     if (playerId !== this.playerId) throw new Error('Invalid playerId.');
@@ -31,8 +36,10 @@ export class WebSocketAgent implements GameAgent {
     return new Promise(resolve => {
       const requestDiscard = () => {
         const discardRequestData: EmittedDiscardRequest = {
+          requestType: AgentDecisionType.DISCARD,
           playerId: this.playerId,
           hand: player.hand,
+          numberOfCardsToDiscard,
         };
         this.socket.emit('discardRequest', discardRequestData);
 
@@ -74,6 +81,7 @@ export class WebSocketAgent implements GameAgent {
     return new Promise(resolve => {
       const requestMove = () => {
         const requestMakeMoveData: EmittedMakeMoveRequest = {
+          requestType: AgentDecisionType.PLAY_CARD,
           playerId: this.playerId,
           peggingHand: player.peggingHand,
           peggingStack: game.peggingStack,

@@ -147,7 +147,11 @@ export interface GameAgent {
   playerId: string; // Unique identifier for the agent
   human: boolean; // Whether the agent represents a human player
   makeMove(game: GameState, playerId: string): Promise<Card | null>;
-  discard(game: GameState, playerId: string): Promise<Card[]>;
+  discard(
+    game: GameState,
+    playerId: string,
+    numberOfCardsToDiscard: number
+  ): Promise<Card[]>;
 }
 
 /**
@@ -169,8 +173,12 @@ export interface EmittedData {
   playerId: string;
 }
 
+export interface EmittedRequest extends EmittedData {
+  requestType: AgentDecisionType;
+}
+
 // to player
-export interface EmittedMakeMoveRequest extends EmittedData {
+export interface EmittedMakeMoveRequest extends EmittedRequest {
   peggingHand: Card[];
   peggingStack: Card[];
   playedCards: PlayedCard[];
@@ -189,8 +197,9 @@ export interface EmittedMakeMoveInvalid extends EmittedData {
 }
 
 // to player
-export interface EmittedDiscardRequest extends EmittedData {
+export interface EmittedDiscardRequest extends EmittedRequest {
   hand: Card[];
+  numberOfCardsToDiscard: number;
 }
 
 // from player

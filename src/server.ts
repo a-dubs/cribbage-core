@@ -65,14 +65,17 @@ io.on('connection', socket => {
 
   socket.on('disconnect', () => {
     console.log('A user disconnected:', socket.id);
-    playerIdToSocketId.forEach((socketId, playerId) => {
-      if (socketId === socket.id) {
-        connectedPlayers.delete(playerId);
-        playerIdToSocketId.delete(playerId);
-      }
-    });
-    // send updated connected players to all clients
-    emitConnectedPlayers();
+    // only remove the player if the game loop is not running
+    if (!GameLoop) {
+      playerIdToSocketId.forEach((socketId, playerId) => {
+        if (socketId === socket.id) {
+          connectedPlayers.delete(playerId);
+          playerIdToSocketId.delete(playerId);
+        }
+      });
+      // send updated connected players to all clients
+      emitConnectedPlayers();
+    }
   });
 
   socket.on('heartbeat', () => {
@@ -110,9 +113,10 @@ function emitConnectedPlayers(): void {
 
 async function handleStartGame(): Promise<void> {
   // If only one player is connected, add a bot
-  if (connectedPlayers.keys.length === 1) {
-    const botId = 'bot';
-    const botName = 'Bot';
+  if (connectedPlayers.size === 1) {
+    console.log('Adding a bot to start the game.');
+    const botId = 'simple-bot-v1.0';
+    const botName = 'Simple Bot';
     const botAgent = new SimpleAgent(botId);
     const botPlayerInfo: PlayerInfo = {
       id: botId,

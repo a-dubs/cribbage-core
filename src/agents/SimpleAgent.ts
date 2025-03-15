@@ -48,12 +48,16 @@ export class SimpleAgent extends RandomAgent {
     return bestHand;
   }
 
-  discard(game: GameState, playerId: string): Promise<Card[]> {
+  discard(
+    game: GameState,
+    playerId: string,
+    numberOfCardsToDiscard: number
+  ): Promise<Card[]> {
     // score all possible hands with all possible discards with any possible remaining cut card
     // choose the discard that results in the highest score
 
     const player = game.players.find(p => p.id === playerId);
-    if (!player || player.hand.length < 2) {
+    if (!player || player.hand.length < numberOfCardsToDiscard) {
       throw new Error('Not enough cards to discard.');
     }
 

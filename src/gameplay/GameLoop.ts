@@ -146,7 +146,8 @@ export class GameLoop extends EventEmitter {
       this.emit('waitingForPlayer', emittedWaitingForPlayerData);
       const discards = await agent.discard(
         this.cribbageGame.getGameState(),
-        player.id
+        player.id,
+        this.cribbageGame.getGameState().players.length === 2 ? 2 : 1
       );
       this.cribbageGame.discardToCrib(player.id, discards);
     }

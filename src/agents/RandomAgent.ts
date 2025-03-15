@@ -46,7 +46,11 @@ export class RandomAgent implements GameAgent {
     return Promise.resolve(filteredHand[randomIndex]);
   }
 
-  discard(game: GameState, playerId: string): Promise<Card[]> {
+  discard(
+    game: GameState,
+    playerId: string,
+    numberOfCardsToDiscard: number
+  ): Promise<Card[]> {
     const player = game.players.find(p => p.id === playerId);
     if (!player) throw new Error('Player not found');
 
@@ -54,7 +58,7 @@ export class RandomAgent implements GameAgent {
       throw new Error('Player has already discarded');
 
     const randomIndices = new Set<number>();
-    while (randomIndices.size < 2) {
+    while (randomIndices.size < numberOfCardsToDiscard) {
       randomIndices.add(Math.floor(Math.random() * player.hand.length));
     }
 

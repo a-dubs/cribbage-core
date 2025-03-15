@@ -27,7 +27,11 @@ export class HumanAgent implements GameAgent {
     this.playerId = id;
   }
 
-  async discard(game: GameState, playerId: string): Promise<Card[]> {
+  async discard(
+    game: GameState,
+    playerId: string,
+    numberOfCardsToDiscard: number
+  ): Promise<Card[]> {
     const player = game.players.find(p => p.id === playerId);
     if (!player) throw new Error('Player not found.');
 
@@ -38,14 +42,14 @@ export class HumanAgent implements GameAgent {
       });
 
       const input = await promptUser(
-        'Select 2 cards to discard (comma-separated numbers): '
+        `Select ${numberOfCardsToDiscard} cards to discard (comma-separated numbers): `
       );
       const selectedIndices = input
         .split(',')
         .map(num => parseInt(num.trim()) - 1);
 
       if (
-        selectedIndices.length !== 2 ||
+        selectedIndices.length !== numberOfCardsToDiscard ||
         !selectedIndices.every(
           index => index >= 0 && index < player.hand.length
         )
