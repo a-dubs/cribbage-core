@@ -36,6 +36,7 @@ interface LoginData {
 }
 
 const connectedPlayers: Map<string, PlayerInfo> = new Map();
+const playerIdToSocketId: Map<string, string> = new Map();
 let gameLoop: GameLoop | null = null;
 
 io.on('connection', socket => {
@@ -47,6 +48,10 @@ io.on('connection', socket => {
   }
 
   console.log('A user connected:', socket.id);
+
+  // send the connected players to the clients even before login
+  // so they can see who is already connected
+  emitConnectedPlayers();
 
   socket.on('login', (data: LoginData) => {
     handleLogin(socket, data);
@@ -60,11 +65,14 @@ io.on('connection', socket => {
 
   socket.on('disconnect', () => {
     console.log('A user disconnected:', socket.id);
-    connectedPlayers.forEach((player, id) => {
-      if (player.id === socket.id) {
-        connectedPlayers.delete(id);
+    playerIdToSocketId.forEach((socketId, playerId) => {
+      if (socketId === socket.id) {
+        connectedPlayers.delete(playerId);
+        playerIdToSocketId.delete(playerId);
       }
     });
+    // send updated connected players to all clients
+    emitConnectedPlayers();
   });
 
   socket.on('heartbeat', () => {
@@ -83,6 +91,9 @@ function handleLogin(socket: Socket, data: LoginData): void {
   if (oldPlayerInfo && oldPlayerInfo.agent instanceof WebSocketAgent) {
     oldPlayerInfo.agent.socket.disconnect(true); // Disconnect old socket if applicable
   }
+
+  playerIdToSocketId.set(username, socket.id);
+
   connectedPlayers.set(username, playerInfo);
   socket.emit('loggedIn', 'You are logged in!');
   emitConnectedPlayers();
