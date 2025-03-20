@@ -187,7 +187,7 @@ export interface EmittedMakeMoveRequest extends EmittedRequest {
 
 // from player
 export interface EmittedMakeMoveResponse extends EmittedData {
-  selectedCard: Card;
+  selectedCard: Card | null;
 }
 
 // to player

@@ -38,6 +38,9 @@ interface LoginData {
 const connectedPlayers: Map<string, PlayerInfo> = new Map();
 const playerIdToSocketId: Map<string, string> = new Map();
 let gameLoop: GameLoop | null = null;
+let mostRecentGameState: GameState | null = null;
+let mostRecentGameEvent: GameEvent | null = null;
+let mostRecentWaitingForPlayer: EmittedWaitingForPlayer | null = null;
 
 io.on('connection', socket => {
   const token = socket.handshake.auth.token;
@@ -75,6 +78,8 @@ io.on('connection', socket => {
       });
       // send updated connected players to all clients
       emitConnectedPlayers();
+    } else {
+      console.log('Game loop is already running. Not removing player.');
     }
   });
 
@@ -85,15 +90,26 @@ io.on('connection', socket => {
 
 function handleLogin(socket: Socket, data: LoginData): void {
   const { username, name } = data;
-  const agent = new WebSocketAgent(socket, username);
-  const playerInfo: PlayerInfo = { id: username, name, agent };
+  let agent: WebSocketAgent;
 
   // Replace old socket if player reconnects
   const oldPlayerInfo = connectedPlayers.get(username);
 
   if (oldPlayerInfo && oldPlayerInfo.agent instanceof WebSocketAgent) {
+    console.log(
+      `Player ${username} reconnected. Updating socket for their WebSocketAgent.`
+    );
     oldPlayerInfo.agent.socket.disconnect(true); // Disconnect old socket if applicable
+    agent = oldPlayerInfo.agent;
+    agent.updateSocket(socket);
+    // if the game loop is running, send the most recent game data to the client
+    if (gameLoop) {
+      sendMostRecentGameData(socket);
+    }
+  } else {
+    agent = new WebSocketAgent(socket, username);
   }
+  const playerInfo: PlayerInfo = { id: username, name, agent };
 
   playerIdToSocketId.set(username, socket.id);
 
@@ -155,18 +171,33 @@ async function handleStartGame(): Promise<void> {
   // Emit game state changes
   gameLoop.on('gameStateChange', (newGameState: GameState) => {
     io.emit('gameStateChange', newGameState);
+    mostRecentGameState = newGameState;
   });
   gameLoop.on('gameEvent', (gameEvent: GameEvent) => {
     io.emit('gameEvent', gameEvent);
+    mostRecentGameEvent = gameEvent;
   });
   gameLoop.on('waitingForPlayer', (waitingData: EmittedWaitingForPlayer) => {
     io.emit('waitingForPlayer', waitingData);
+    mostRecentWaitingForPlayer = waitingData;
   });
   // send the connected players to the clients
   emitConnectedPlayers();
 
   // Start the game
   await startGame();
+}
+
+function sendMostRecentGameData(socket: Socket): void {
+  if (mostRecentGameState) {
+    socket.emit('gameStateChange', mostRecentGameState);
+  }
+  if (mostRecentGameEvent) {
+    socket.emit('gameEvent', mostRecentGameEvent);
+  }
+  if (mostRecentWaitingForPlayer) {
+    socket.emit('waitingForPlayer', mostRecentWaitingForPlayer);
+  }
 }
 
 async function startGame(): Promise<void> {

@@ -231,6 +231,10 @@ export class CribbageGame extends EventEmitter {
     return this.gameState.players[followingPlayerIndex].id;
   }
 
+  /**
+   * Reset the pegging round by clearing the pegging stack and go players
+   * @returns the ID of the player who played the last card
+   */
   public resetPeggingRound(): string | null {
     this.gameState.peggingStack = [];
     this.gameState.peggingGoPlayers = [];
@@ -260,6 +264,9 @@ export class CribbageGame extends EventEmitter {
         !this.gameState.peggingGoPlayers.includes(playerId) &&
         this.gameState.peggingLastCardPlayer === playerId
       ) {
+        // call resetPeggingRound to reset the pegging round and return the ID of last card player
+        console.log(`Player ${playerId} got the last card! and scored 1 point`);
+        const lastPlayer = this.resetPeggingRound();
         // give the player a point for playing the last card
         player.score += 1;
         // log the scoring of the last card
@@ -270,9 +277,7 @@ export class CribbageGame extends EventEmitter {
           null,
           1
         );
-        // call resetPeggingRound to reset the pegging round and return the ID of last card player
-        console.log(`Player ${playerId} got the last card! and scored 1 point`);
-        return this.resetPeggingRound();
+        return lastPlayer;
       }
 
       // add player to list of players who have said "Go"
