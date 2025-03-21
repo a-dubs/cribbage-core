@@ -54,12 +54,13 @@ export class GameLoop extends EventEmitter {
     ) {
       // if the current player has no cards left to play, move on to the next player
       if (playersDone.includes(currentPlayerId)) {
-        console.log(`Player ${currentPlayerId} has no cards left to play. Moving on to the next player.`);
+        console.log(
+          `Player ${currentPlayerId} has no cards left to play. Moving on to the next player.`
+        );
         currentPlayerId =
           this.cribbageGame.getFollowingPlayerId(currentPlayerId);
         continue;
-      }
-      else {
+      } else {
         console.log(`Player ${currentPlayerId}'s turn to play a card.`);
       }
 
@@ -169,6 +170,22 @@ export class GameLoop extends EventEmitter {
       this.cribbageGame.getGameState().players.length;
     const behindDealer =
       this.cribbageGame.getGameState().players[behindDealerIndex];
+    const behindDealerAgent = this.agents[behindDealer.id];
+    if (!behindDealerAgent) {
+      throw new Error(`No agent for player ${behindDealer.id}`);
+    }
+    if (behindDealerAgent.waitForContinue) {
+      const continueData: EmittedWaitingForPlayer = {
+        playerId: behindDealer.id,
+        waitingFor: AgentDecisionType.CONTINUE,
+      };
+      this.emit('waitingForPlayer', continueData);
+      await behindDealerAgent.waitForContinue(
+        this.cribbageGame.getGameState(),
+        behindDealer.id,
+        'Cut the deck'
+      );
+    }
     this.cribbageGame.cutDeck(
       behindDealer.id,
       randomInt(0, this.cribbageGame.getGameState().deck.length)

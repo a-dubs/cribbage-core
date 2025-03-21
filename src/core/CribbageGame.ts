@@ -203,7 +203,7 @@ export class CribbageGame extends EventEmitter {
     }
 
     // Advance to the pegging phase
-    this.resetPeggingRound();
+    this.startNewPeggingRound();
     this.gameState.currentPhase = Phase.PEGGING;
   }
 
@@ -235,12 +235,19 @@ export class CribbageGame extends EventEmitter {
    * Reset the pegging round by clearing the pegging stack and go players
    * @returns the ID of the player who played the last card
    */
-  public resetPeggingRound(): string | null {
+  public startNewPeggingRound(): string | null {
     this.gameState.peggingStack = [];
     this.gameState.peggingGoPlayers = [];
     const lastCardPlayer = this.gameState.peggingLastCardPlayer;
     this.gameState.peggingLastCardPlayer = null;
     console.log('PEGGING ROUND OVER; last card player:', lastCardPlayer, '\n');
+    this.recordGameEvent(
+      Phase.PEGGING,
+      ActionType.START_PEGGING_ROUND,
+      null,
+      null,
+      0
+    );
     return lastCardPlayer;
   }
 
@@ -266,7 +273,7 @@ export class CribbageGame extends EventEmitter {
       ) {
         // call resetPeggingRound to reset the pegging round and return the ID of last card player
         console.log(`Player ${playerId} got the last card! and scored 1 point`);
-        const lastPlayer = this.resetPeggingRound();
+        const lastPlayer = this.startNewPeggingRound();
         // give the player a point for playing the last card
         player.score += 1;
         // log the scoring of the last card
@@ -333,7 +340,7 @@ export class CribbageGame extends EventEmitter {
       );
       // call resetPeggingRound to reset the pegging round and return the ID of last card player
       console.log(`Player ${playerId} played the last card and scored 1 point`);
-      return this.resetPeggingRound();
+      return this.startNewPeggingRound();
     }
 
     // if the sum of cards in the pegging stack is 31, end the pegging round
@@ -342,7 +349,7 @@ export class CribbageGame extends EventEmitter {
       console.log(
         `Player ${playerId} played ${card} and got 31 for ${score} points`
       );
-      return this.resetPeggingRound();
+      return this.startNewPeggingRound();
     }
     console.log(
       `Player ${playerId} played ${card} for ${score} points - ${sumOfPeggingStack(

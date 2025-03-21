@@ -24,6 +24,7 @@ export enum ActionType {
   TURN_CARD = 'TURN_CARD',
   CUT = 'CUT',
   SCORE_HEELS = 'SCORE_HEELS', // Special case for dealer scoring 2 points for a jack as the turn card ("his heels")
+  START_PEGGING_ROUND = 'START_PEGGING_ROUND', // Start a new round of pegging
 }
 
 /**
@@ -152,6 +153,11 @@ export interface GameAgent {
     playerId: string,
     numberOfCardsToDiscard: number
   ): Promise<Card[]>;
+  waitForContinue?(
+    game: GameState,
+    playerId: string,
+    continueDescription: string
+  ): Promise<void>;
 }
 
 /**
@@ -213,10 +219,18 @@ export interface EmittedDiscardInvalid extends EmittedData {
   discardRequest: EmittedDiscardRequest;
 }
 
+export interface EmittedContinueRequest extends EmittedRequest {
+  description: string;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-empty-interface
+export interface EmittedContinueResponse extends EmittedData {}
+
 export enum AgentDecisionType {
   PLAY_CARD = 'PLAY_CARD',
   DISCARD = 'DISCARD',
   // CUT = 'CUT',  // not implemented yet
+  CONTINUE = 'CONTINUE',
 }
 
 // map AgentDecisionType to the corresponding EmittedData type
