@@ -11,10 +11,10 @@ import {
   AgentDecisionType,
   EmittedContinueResponse,
   EmittedContinueRequest,
-} from '../types';
-import { parseCard } from '../core/scoring';
+} from '../types/index.js';
+import { parseCard } from '../core/scoring.js';
 import { Socket } from 'socket.io';
-import { getInvalidPeggingPlayReason, isValidDiscard } from '../core/utils';
+import { getInvalidPeggingPlayReason, isValidDiscard } from '../core/utils.js';
 
 export class WebSocketAgent implements GameAgent {
   playerId: string;

@@ -1,6 +1,6 @@
 import http from 'http';
 import { Server, Socket } from 'socket.io';
-import { GameLoop } from './gameplay/GameLoop';
+import { GameLoop } from './gameplay/GameLoop.js';
 import {
   ActionType,
   EmittedWaitingForPlayer,
@@ -8,9 +8,9 @@ import {
   GameEvent,
   GameState,
   PlayerIdAndName,
-} from './types';
-import { WebSocketAgent } from './agents/WebSocketAgent';
-import { SimpleAgent } from './agents/SimpleAgent';
+} from './types/index.js';
+import { WebSocketAgent } from './agents/WebSocketAgent.js';
+import { SimpleAgent } from './agents/SimpleAgent.js';
 
 console.log('Cribbage-core server starting...');
 

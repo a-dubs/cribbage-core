@@ -1,5 +1,5 @@
 import { randomInt } from 'crypto';
-import { CribbageGame } from '../core/CribbageGame';
+import { CribbageGame } from '../core/CribbageGame.js';
 import {
   GameAgent,
   Card,
@@ -8,8 +8,8 @@ import {
   GameState,
   EmittedWaitingForPlayer,
   AgentDecisionType,
-} from '../types';
-import { displayCard, parseCard, suitToEmoji } from '../core/scoring';
+} from '../types/index.js';
+import { displayCard, parseCard, suitToEmoji } from '../core/scoring.js';
 import { EventEmitter } from 'events';
 
 export class GameLoop extends EventEmitter {

@@ -1,7 +1,7 @@
-import { CribbageGame } from '../core/CribbageGame';
-import { parseCard, scoreHand, scorePegging } from '../core/scoring';
-import { GameState, Card } from '../types';
-import { RandomAgent } from './RandomAgent';
+import { CribbageGame } from '../core/CribbageGame.js';
+import { parseCard, scoreHand, scorePegging } from '../core/scoring.js';
+import { GameState, Card } from '../types/index.js';
+import { RandomAgent } from './RandomAgent.js';
 
 export class SimpleAgent extends RandomAgent {
   playerId: string;

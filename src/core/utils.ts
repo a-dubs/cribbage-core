@@ -1,5 +1,5 @@
-import { ActionType, Card, GameEvent, GameState, Player } from '../types';
-import { parseCard, sumOfPeggingStack } from './scoring';
+import { ActionType, Card, GameEvent, GameState, Player } from '../types/index.js';
+import { parseCard, sumOfPeggingStack } from './scoring.js';
 
 export function isValidDiscard(
   game: GameState,

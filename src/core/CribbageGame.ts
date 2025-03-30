@@ -6,10 +6,10 @@ import {
   GameState,
   GameEvent,
   PlayerIdAndName,
-} from '../types';
-import { scoreHand, scorePegging, sumOfPeggingStack } from './scoring';
+} from '../types/index.js';
+import { scoreHand, scorePegging, sumOfPeggingStack } from './scoring.js';
 import { EventEmitter } from 'events';
-import { isValidDiscard, isValidPeggingPlay } from './utils';
+import { isValidDiscard, isValidPeggingPlay } from './utils.js';
 
 export class CribbageGame extends EventEmitter {
   private gameState: GameState;

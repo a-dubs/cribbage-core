@@ -1,5 +1,5 @@
-import { parseCard } from '../core/scoring';
-import { GameState, GameAgent, Card } from '../types';
+import { parseCard } from '../core/scoring.js';
+import { GameState, GameAgent, Card } from '../types/index.js';
 
 export class RandomAgent implements GameAgent {
   playerId: string;
