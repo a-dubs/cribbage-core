@@ -144,6 +144,7 @@ function emitConnectedPlayers(): void {
 }
 
 async function handleStartGame(): Promise<void> {
+  console.log('Starting game...');
   // If only one player is connected, add a bot
   if (connectedPlayers.size === 1) {
     console.log('Adding a bot to start the game.');
@@ -178,7 +179,7 @@ async function handleStartGame(): Promise<void> {
       gameLoop.addAgent(id, agent);
     } else {
       console.error(
-        'Game loop not initialized. Cannot add agent and start game.'
+        '[handleStartGame()] Game loop not initialized. Cannot add agent and start game.'
       );
       throw new Error('Game loop not initialized');
     }
@@ -224,7 +225,12 @@ function sendMostRecentGameData(socket: Socket): void {
 }
 
 async function startGame(): Promise<void> {
-  if (!gameLoop) return;
+  if (!gameLoop) {
+    console.error(
+      '[startGame()] Game loop not initialized. Cannot start game.'
+    );
+    return;
+  }
 
   const winner = await gameLoop.playGame();
   io.emit('gameOver', winner);

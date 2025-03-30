@@ -31,19 +31,26 @@ export class GameLoop extends EventEmitter {
     this.agents[playerId] = agent;
   }
 
-  private async sendContinue(playerID: string, continueDescription: string) {
+  private async sendContinue(
+    playerID: string,
+    continueDescription: string,
+    sendWaitingForPlayer = true
+  ): Promise<void> {
     const agent = this.agents[playerID];
     if (agent.waitForContinue) {
-      const continueData: EmittedWaitingForPlayer = {
-        playerId: playerID,
-        waitingFor: AgentDecisionType.CONTINUE,
-      };
-      this.emit('waitingForPlayer', continueData);
+      if (sendWaitingForPlayer) {
+        const continueData: EmittedWaitingForPlayer = {
+          playerId: playerID,
+          waitingFor: AgentDecisionType.CONTINUE,
+        };
+        this.emit('waitingForPlayer', continueData);
+      }
       await agent.waitForContinue(
         this.cribbageGame.getGameState(),
         playerID,
         continueDescription
       );
+      console.log(`Player ${playerID} is ready to continue`);
     }
   }
 
@@ -261,7 +268,7 @@ export class GameLoop extends EventEmitter {
     // Send wait request to all players in parallel and once all are done, continue
     const continuePromises = this.cribbageGame
       .getGameState()
-      .players.map(player => this.sendContinue(player.id, 'End round'));
+      .players.map(player => this.sendContinue(player.id, 'End round', false));
     await Promise.all(continuePromises);
 
     console.log('All players ready for next round');
