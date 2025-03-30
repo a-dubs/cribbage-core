@@ -11,6 +11,13 @@ import {
 } from '../types';
 import { displayCard, parseCard, suitToEmoji } from '../core/scoring';
 import { EventEmitter } from 'events';
+import dotenv from 'dotenv';
+
+// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
+dotenv.config();
+const startingScore = process.env.OVERRIDE_START_SCORE
+  ? parseInt(process.env.OVERRIDE_START_SCORE)
+  : 0;
 
 export class GameLoop extends EventEmitter {
   public cribbageGame: CribbageGame;
@@ -18,7 +25,7 @@ export class GameLoop extends EventEmitter {
 
   constructor(playersInfo: PlayerIdAndName[]) {
     super();
-    this.cribbageGame = new CribbageGame(playersInfo);
+    this.cribbageGame = new CribbageGame(playersInfo, startingScore);
     this.cribbageGame.on('gameStateChange', (newGameState: GameState) => {
       this.emit('gameStateChange', newGameState);
     });
