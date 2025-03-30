@@ -11,19 +11,33 @@ import {
 } from './types';
 import { WebSocketAgent } from './agents/WebSocketAgent';
 import { SimpleAgent } from './agents/SimpleAgent';
+import dotenv from 'dotenv';
+
+// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
+dotenv.config();
+
+const PORT = process.env.PORT || 3002;
+const WEB_APP_ORIGIN = process.env.WEB_APP_ORIGIN || 'http://localhost:3000';
+const WEBSOCKET_AUTH_TOKEN = process.env.WEBSOCKET_AUTH_TOKEN;
+
+if (!WEBSOCKET_AUTH_TOKEN) {
+  console.error('WEBSOCKET_AUTH_TOKEN is not set');
+  throw new Error('WEBSOCKET_AUTH_TOKEN is not set');
+}
+
+console.log('PORT:', PORT);
+console.log('WEB_APP_ORIGIN:', WEB_APP_ORIGIN);
 
 console.log('Cribbage-core server starting...');
 
 const server = http.createServer();
 const io = new Server(server, {
   cors: {
-    origin: 'http://localhost:3000',
+    origin: WEB_APP_ORIGIN,
     methods: ['GET', 'POST'],
     credentials: true,
   },
 });
-
-const PORT = process.env.PORT || 3002;
 
 interface PlayerInfo {
   id: string;
