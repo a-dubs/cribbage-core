@@ -93,20 +93,29 @@ export class CribbageGame extends EventEmitter {
     return this.gameState.crib;
   }
 
-  public endRound(): void {
-    this.gameState.deck = this.generateDeck();
-    // Rotate dealer position
-    const dealerIndex = this.gameState.players.findIndex(
-      player => player.isDealer
-    );
-    this.gameState.players[dealerIndex].isDealer = false;
-    this.gameState.players[
-      (dealerIndex + 1) % this.gameState.players.length
-    ].isDealer = true;
+  public startRound(): void {
+    // dont rotate dealer if this is the first round
+    if (this.gameEventRecords.length > 0) {
+      this.gameState.deck = this.generateDeck();
+      // Rotate dealer position
+      const dealerIndex = this.gameState.players.findIndex(
+        player => player.isDealer
+      );
+      this.gameState.players[dealerIndex].isDealer = false;
+      this.gameState.players[
+        (dealerIndex + 1) % this.gameState.players.length
+      ].isDealer = true;
+    }
     this.gameState.crib = [];
     this.gameState.turnCard = null;
     this.gameState.currentPhase = Phase.DEALING;
     this.gameState.playedCards = [];
+    // reset all players' hands
+    this.gameState.players.forEach(player => {
+      player.hand = [];
+      player.peggingHand = [];
+    });
+    this.recordGameEvent(Phase.DEALING, ActionType.START_ROUND, null, null, 0);
   }
 
   public deal(): void {
@@ -127,7 +136,14 @@ export class CribbageGame extends EventEmitter {
       );
     });
 
-    this.gameState.currentPhase = Phase.CRIB;
+    this.gameState.currentPhase = Phase.DISCARDING;
+    this.recordGameEvent(
+      Phase.DISCARDING,
+      ActionType.BEGIN_PHASE,
+      null,
+      null,
+      0
+    );
   }
 
   public discardToCrib(playerId: string, cards: Card[]): void {
@@ -203,8 +219,8 @@ export class CribbageGame extends EventEmitter {
     }
 
     // Advance to the pegging phase
-    this.startNewPeggingRound();
     this.gameState.currentPhase = Phase.PEGGING;
+    this.startNewPeggingRound();
   }
 
   public getPlayer(playerId: string): Player {
@@ -263,6 +279,7 @@ export class CribbageGame extends EventEmitter {
     //   throw new Error('Invalid card play.');
     // }
 
+    // No card played = player says "Go"
     if (!card) {
       // if all other players have said "Go", give the last player to play a point
       if (

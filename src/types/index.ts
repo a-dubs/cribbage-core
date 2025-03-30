@@ -3,7 +3,7 @@
  */
 export enum Phase {
   DEALING = 'DEALING',
-  CRIB = 'CRIB',
+  DISCARDING = 'DISCARDING',
   CUTTING = 'CUTTING',
   PEGGING = 'PEGGING',
   COUNTING = 'COUNTING',
@@ -14,6 +14,7 @@ export enum Phase {
  * Enum for the types of actions in the game
  */
 export enum ActionType {
+  BEGIN_PHASE = 'BEGIN_PHASE',
   DEAL = 'DEAL',
   DISCARD = 'DISCARD',
   PLAY_CARD = 'PLAY_CARD', // player plays a card during pegging phase
@@ -25,6 +26,7 @@ export enum ActionType {
   CUT = 'CUT',
   SCORE_HEELS = 'SCORE_HEELS', // Special case for dealer scoring 2 points for a jack as the turn card ("his heels")
   START_PEGGING_ROUND = 'START_PEGGING_ROUND', // Start a new round of pegging
+  START_ROUND = 'START_ROUND', // Start a new round of the game
 }
 
 /**
@@ -229,8 +231,8 @@ export interface EmittedContinueResponse extends EmittedData {}
 export enum AgentDecisionType {
   PLAY_CARD = 'PLAY_CARD',
   DISCARD = 'DISCARD',
-  // CUT = 'CUT',  // not implemented yet
   CONTINUE = 'CONTINUE',
+  DEAL = 'DEAL',
 }
 
 // map AgentDecisionType to the corresponding EmittedData type

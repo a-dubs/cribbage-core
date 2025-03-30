@@ -2,6 +2,7 @@ import http from 'http';
 import { Server, Socket } from 'socket.io';
 import { GameLoop } from './gameplay/GameLoop';
 import {
+  ActionType,
   EmittedWaitingForPlayer,
   GameAgent,
   GameEvent,
@@ -41,6 +42,7 @@ let gameLoop: GameLoop | null = null;
 let mostRecentGameState: GameState | null = null;
 let mostRecentGameEvent: GameEvent | null = null;
 let mostRecentWaitingForPlayer: EmittedWaitingForPlayer | null = null;
+let currentRoundGameEvents: GameEvent[] = [];
 
 io.on('connection', socket => {
   const token = socket.handshake.auth.token;
@@ -176,6 +178,11 @@ async function handleStartGame(): Promise<void> {
   gameLoop.on('gameEvent', (gameEvent: GameEvent) => {
     io.emit('gameEvent', gameEvent);
     mostRecentGameEvent = gameEvent;
+    if (gameEvent.actionType === ActionType.START_ROUND) {
+      currentRoundGameEvents = [];
+    }
+    currentRoundGameEvents.push(gameEvent);
+    io.emit('currentRoundGameEvents', currentRoundGameEvents);
   });
   gameLoop.on('waitingForPlayer', (waitingData: EmittedWaitingForPlayer) => {
     io.emit('waitingForPlayer', waitingData);
@@ -189,6 +196,7 @@ async function handleStartGame(): Promise<void> {
 }
 
 function sendMostRecentGameData(socket: Socket): void {
+  console.log('Sending most recent game data to client');
   if (mostRecentGameState) {
     socket.emit('gameStateChange', mostRecentGameState);
   }
@@ -198,6 +206,7 @@ function sendMostRecentGameData(socket: Socket): void {
   if (mostRecentWaitingForPlayer) {
     socket.emit('waitingForPlayer', mostRecentWaitingForPlayer);
   }
+  socket.emit('currentRoundGameEvents', currentRoundGameEvents);
 }
 
 async function startGame(): Promise<void> {

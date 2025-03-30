@@ -31,6 +31,22 @@ export class GameLoop extends EventEmitter {
     this.agents[playerId] = agent;
   }
 
+  private async sendContinue(playerID: string, continueDescription: string) {
+    const agent = this.agents[playerID];
+    if (agent.waitForContinue) {
+      const continueData: EmittedWaitingForPlayer = {
+        playerId: playerID,
+        waitingFor: AgentDecisionType.CONTINUE,
+      };
+      this.emit('waitingForPlayer', continueData);
+      await agent.waitForContinue(
+        this.cribbageGame.getGameState(),
+        playerID,
+        continueDescription
+      );
+    }
+  }
+
   private async doPegging(): Promise<string | null> {
     // start with person after dealer for the initial card
     // each person chooses a card to play
@@ -139,6 +155,18 @@ export class GameLoop extends EventEmitter {
   }
 
   private async doRound(): Promise<string | null> {
+    // start the round (cleanup and reset state and rotate dealer)
+    this.cribbageGame.startRound();
+
+    // Prompt the dealer to deal
+    const dealer = this.cribbageGame.getPlayer(this.cribbageGame.getDealerId());
+    // send waiting for player event to all players
+    const waitingForPlayerData: EmittedWaitingForPlayer = {
+      playerId: dealer.id,
+      waitingFor: AgentDecisionType.DEAL,
+    };
+    this.emit('waitingForPlayer', waitingForPlayerData);
+    await this.sendContinue(dealer.id, 'Deal the cards');
     this.cribbageGame.deal();
 
     // Crib phase: Agents discard to crib
@@ -170,22 +198,8 @@ export class GameLoop extends EventEmitter {
       this.cribbageGame.getGameState().players.length;
     const behindDealer =
       this.cribbageGame.getGameState().players[behindDealerIndex];
-    const behindDealerAgent = this.agents[behindDealer.id];
-    if (!behindDealerAgent) {
-      throw new Error(`No agent for player ${behindDealer.id}`);
-    }
-    if (behindDealerAgent.waitForContinue) {
-      const continueData: EmittedWaitingForPlayer = {
-        playerId: behindDealer.id,
-        waitingFor: AgentDecisionType.CONTINUE,
-      };
-      this.emit('waitingForPlayer', continueData);
-      await behindDealerAgent.waitForContinue(
-        this.cribbageGame.getGameState(),
-        behindDealer.id,
-        'Cut the deck'
-      );
-    }
+    // prompt user to continue to initiate cutting the deck
+    await this.sendContinue(behindDealer.id, 'Cut the deck');
     this.cribbageGame.cutDeck(
       behindDealer.id,
       randomInt(0, this.cribbageGame.getGameState().deck.length)
@@ -216,7 +230,7 @@ export class GameLoop extends EventEmitter {
       const player = this.cribbageGame.getGameState().players[i];
       const agent = this.agents[player.id];
       if (!agent) throw new Error(`No agent for player ${player.id}`);
-
+      // await this.sendContinue(player.id, 'Score hand');
       const handScore = this.cribbageGame.scoreHand(player.id);
       console.log(
         `Player ${player.name} scored ${handScore} points hand: 
@@ -228,6 +242,7 @@ export class GameLoop extends EventEmitter {
       }
 
       if (player.isDealer) {
+        // await this.sendContinue(player.id, 'Score crib');
         const cribScore = this.cribbageGame.scoreCrib(player.id);
         console.log(
           `Player ${player.name} scored ${cribScore} points in their crib: 
@@ -243,8 +258,13 @@ export class GameLoop extends EventEmitter {
       }
     }
 
-    // Cleanup and Reset state and rotate dealer
-    this.cribbageGame.endRound();
+    // Send wait request to all players in parallel and once all are done, continue
+    const continuePromises = this.cribbageGame
+      .getGameState()
+      .players.map(player => this.sendContinue(player.id, 'End round'));
+    await Promise.all(continuePromises);
+
+    console.log('All players ready for next round');
 
     // log the scores of each player
     for (const player of this.cribbageGame.getGameState().players) {

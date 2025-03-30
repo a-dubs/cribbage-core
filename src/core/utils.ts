@@ -1,4 +1,4 @@
-import { Card, GameState, Player } from '../types';
+import { ActionType, Card, GameEvent, GameState, Player } from '../types';
 import { parseCard, sumOfPeggingStack } from './scoring';
 
 export function isValidDiscard(
@@ -64,6 +64,61 @@ export function getInvalidPeggingPlayReason(
   }
   if (currentSum + parseCard(card).pegValue > 31) {
     return 'Card would exceed 31';
+  }
+  return null;
+}
+
+export function getMostRecentGameEventForPlayer(
+  gameEventHistory: GameEvent[],
+  playerId: string
+): GameEvent | null {
+  for (let i = gameEventHistory.length - 1; i >= 0; i--) {
+    if (gameEventHistory[i].playerId === playerId) {
+      return gameEventHistory[i];
+    }
+  }
+  return null;
+}
+
+export function isScoreableEvent(event: GameEvent): boolean {
+  // it doesn't matter if score occurred or not
+  // we care about if this type of event can be scored
+  return (
+    event.actionType === ActionType.SCORE_HEELS ||
+    event.actionType === ActionType.LAST_CARD ||
+    event.actionType === ActionType.SCORE_HAND ||
+    event.actionType === ActionType.SCORE_CRIB ||
+    event.actionType === ActionType.PLAY_CARD
+  );
+}
+
+export function getMostRecentScoreableEventForPlayer(
+  gameEventHistory: GameEvent[],
+  playerId: string
+): GameEvent | null {
+  for (let i = gameEventHistory.length - 1; i >= 0; i--) {
+    if (
+      gameEventHistory[i].playerId === playerId &&
+      isScoreableEvent(gameEventHistory[i])
+    ) {
+      return gameEventHistory[i];
+    }
+  }
+  return null;
+}
+
+export function getMostRecentEventForPlayerByActionType(
+  gameEventHistory: GameEvent[],
+  playerId: string,
+  actionType: ActionType
+): GameEvent | null {
+  for (let i = gameEventHistory.length - 1; i >= 0; i--) {
+    if (
+      gameEventHistory[i].playerId === playerId &&
+      gameEventHistory[i].actionType === actionType
+    ) {
+      return gameEventHistory[i];
+    }
   }
   return null;
 }
