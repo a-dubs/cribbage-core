@@ -115,6 +115,7 @@ export class CribbageGame extends EventEmitter {
     this.gameState.players.forEach(player => {
       player.hand = [];
       player.peggingHand = [];
+      player.playedCards = [];
     });
     this.recordGameEvent(Phase.DEALING, ActionType.START_ROUND, null, null, 0);
   }
