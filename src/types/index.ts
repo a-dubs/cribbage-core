@@ -33,6 +33,7 @@ export enum ActionType {
  * Type for representing a playing card
  */
 export type Card =
+  | 'UNKNOWN' // For opponents' cards that should not be revealed
   | 'ACE_SPADES'
   | 'TWO_SPADES'
   | 'THREE_SPADES'
