@@ -11,6 +11,13 @@ import {
 } from '../types';
 import { displayCard, parseCard, suitToEmoji } from '../core/scoring';
 import { EventEmitter } from 'events';
+import dotenv from 'dotenv';
+
+// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
+dotenv.config();
+const startingScore = process.env.OVERRIDE_START_SCORE
+  ? parseInt(process.env.OVERRIDE_START_SCORE)
+  : 0;
 
 export class GameLoop extends EventEmitter {
   public cribbageGame: CribbageGame;
@@ -18,7 +25,7 @@ export class GameLoop extends EventEmitter {
 
   constructor(playersInfo: PlayerIdAndName[]) {
     super();
-    this.cribbageGame = new CribbageGame(playersInfo);
+    this.cribbageGame = new CribbageGame(playersInfo, startingScore);
     this.cribbageGame.on('gameStateChange', (newGameState: GameState) => {
       this.emit('gameStateChange', newGameState);
     });
@@ -31,19 +38,26 @@ export class GameLoop extends EventEmitter {
     this.agents[playerId] = agent;
   }
 
-  private async sendContinue(playerID: string, continueDescription: string) {
+  private async sendContinue(
+    playerID: string,
+    continueDescription: string,
+    sendWaitingForPlayer = true
+  ): Promise<void> {
     const agent = this.agents[playerID];
     if (agent.waitForContinue) {
-      const continueData: EmittedWaitingForPlayer = {
-        playerId: playerID,
-        waitingFor: AgentDecisionType.CONTINUE,
-      };
-      this.emit('waitingForPlayer', continueData);
+      if (sendWaitingForPlayer) {
+        const continueData: EmittedWaitingForPlayer = {
+          playerId: playerID,
+          waitingFor: AgentDecisionType.CONTINUE,
+        };
+        this.emit('waitingForPlayer', continueData);
+      }
       await agent.waitForContinue(
         this.cribbageGame.getGameState(),
         playerID,
         continueDescription
       );
+      console.log(`Player ${playerID} is ready to continue`);
     }
   }
 
@@ -261,7 +275,7 @@ export class GameLoop extends EventEmitter {
     // Send wait request to all players in parallel and once all are done, continue
     const continuePromises = this.cribbageGame
       .getGameState()
-      .players.map(player => this.sendContinue(player.id, 'End round'));
+      .players.map(player => this.sendContinue(player.id, 'End round', false));
     await Promise.all(continuePromises);
 
     console.log('All players ready for next round');

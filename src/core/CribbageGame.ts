@@ -15,7 +15,7 @@ export class CribbageGame extends EventEmitter {
   private gameState: GameState;
   private gameEventRecords: GameEvent[]; // Log of all game actions
 
-  constructor(playersInfo: PlayerIdAndName[]) {
+  constructor(playersInfo: PlayerIdAndName[], startingScore = 0) {
     super();
     const deck = this.generateDeck();
     const players = playersInfo.map((info, index) => ({
@@ -23,7 +23,7 @@ export class CribbageGame extends EventEmitter {
       name: info.name,
       hand: [],
       peggingHand: [],
-      score: 0,
+      score: startingScore,
       isDealer: index === 0,
     })) as Player[];
     const id = `game-${Date.now()}`;

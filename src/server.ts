@@ -11,19 +11,33 @@ import {
 } from './types';
 import { WebSocketAgent } from './agents/WebSocketAgent';
 import { SimpleAgent } from './agents/SimpleAgent';
+import dotenv from 'dotenv';
+
+// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
+dotenv.config();
+
+const PORT = process.env.PORT || 3002;
+const WEB_APP_ORIGIN = process.env.WEB_APP_ORIGIN || 'http://localhost:3000';
+const WEBSOCKET_AUTH_TOKEN = process.env.WEBSOCKET_AUTH_TOKEN;
+
+if (!WEBSOCKET_AUTH_TOKEN) {
+  console.error('WEBSOCKET_AUTH_TOKEN is not set');
+  throw new Error('WEBSOCKET_AUTH_TOKEN is not set');
+}
+
+console.log('PORT:', PORT);
+console.log('WEB_APP_ORIGIN:', WEB_APP_ORIGIN);
 
 console.log('Cribbage-core server starting...');
 
 const server = http.createServer();
 const io = new Server(server, {
   cors: {
-    origin: 'http://localhost:3000',
+    origin: WEB_APP_ORIGIN,
     methods: ['GET', 'POST'],
     credentials: true,
   },
 });
-
-const PORT = process.env.PORT || 3002;
 
 interface PlayerInfo {
   id: string;
@@ -130,6 +144,7 @@ function emitConnectedPlayers(): void {
 }
 
 async function handleStartGame(): Promise<void> {
+  console.log('Starting game...');
   // If only one player is connected, add a bot
   if (connectedPlayers.size === 1) {
     console.log('Adding a bot to start the game.');
@@ -164,7 +179,7 @@ async function handleStartGame(): Promise<void> {
       gameLoop.addAgent(id, agent);
     } else {
       console.error(
-        'Game loop not initialized. Cannot add agent and start game.'
+        '[handleStartGame()] Game loop not initialized. Cannot add agent and start game.'
       );
       throw new Error('Game loop not initialized');
     }
@@ -210,7 +225,12 @@ function sendMostRecentGameData(socket: Socket): void {
 }
 
 async function startGame(): Promise<void> {
-  if (!gameLoop) return;
+  if (!gameLoop) {
+    console.error(
+      '[startGame()] Game loop not initialized. Cannot start game.'
+    );
+    return;
+  }
 
   const winner = await gameLoop.playGame();
   io.emit('gameOver', winner);
