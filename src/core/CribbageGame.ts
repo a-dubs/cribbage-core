@@ -23,6 +23,7 @@ export class CribbageGame extends EventEmitter {
       name: info.name,
       hand: [],
       peggingHand: [],
+      playedCards: [],
       score: startingScore,
       isDealer: index === 0,
     })) as Player[];
@@ -279,8 +280,11 @@ export class CribbageGame extends EventEmitter {
     //   throw new Error('Invalid card play.');
     // }
 
+    if (card) {
+      player.playedCards.push(card);
+    }
     // No card played = player says "Go"
-    if (!card) {
+    else {
       // if all other players have said "Go", give the last player to play a point
       if (
         this.gameState.peggingGoPlayers.length ===

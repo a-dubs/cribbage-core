@@ -93,6 +93,7 @@ export type Card =
 export interface Player extends PlayerIdAndName {
   hand: Card[]; // Cards currently in the player's hand
   peggingHand: Card[]; // Cards left to play during the pegging phase (starts as a copy of hand)
+  playedCards: Card[]; // Cards played by the player during the pegging phase
   score: number; // Player's score
   isDealer: boolean; // Whether the player is the dealer for the current round
 }
