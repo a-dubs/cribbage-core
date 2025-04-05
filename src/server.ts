@@ -226,9 +226,9 @@ async function handleStartGame(): Promise<void> {
   // If only one player is connected, add a bot
   if (connectedPlayers.size === 1) {
     console.log('Adding a bot to start the game.');
-    const botId = 'simple-bot-v1.0';
-    const botName = 'Simple Bot';
-    const botAgent = new SimpleAgent(botId);
+    const botName = 'Simple Optimal Bot';
+    const botAgent = new SimpleAgent();
+    const botId = botAgent.playerId;
     const botPlayerInfo: PlayerInfo = {
       id: botId,
       name: botName,
