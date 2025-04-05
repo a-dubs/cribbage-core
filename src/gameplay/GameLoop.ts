@@ -283,7 +283,9 @@ export class GameLoop extends EventEmitter {
     // Send wait request to all players in parallel and once all are done, continue
     const continueToNextRoundPromises = this.cribbageGame
       .getGameState()
-      .players.map(player => this.sendContinue(player.id, 'End round', false));
+      .players.map(player =>
+        this.sendContinue(player.id, 'Ready for next round', false)
+      );
     await Promise.all(continueToNextRoundPromises);
 
     console.log('All players ready for next round');
