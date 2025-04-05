@@ -27,7 +27,7 @@ export class CribbageGame extends EventEmitter {
       score: startingScore,
       isDealer: index === 0,
     })) as Player[];
-    const id = `game-${Date.now()}-${playersInfo.map(p => p.name).join('-')}`;
+    const id = `game-${Date.now()}-${playersInfo.map(p => p.id).join('-')}`;
     this.gameState = {
       id: id,
       players,
