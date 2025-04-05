@@ -82,29 +82,41 @@ const startGameInDB = (
   players: PlayerIdAndName[],
   lobbyId: string
 ): void => {
-  const gameInfo: GameInfo = {
-    id: gameId,
-    players: players,
-    startTime: new Date(),
-    endTime: null,
-    lobbyId,
-  };
-  // if the file does not exist, create it
-  if (!fs.existsSync(GAME_INFO_FILE)) {
-    fs.writeFileSync(GAME_INFO_FILE, JSON.stringify([], null, 2));
-  }
-  // if gameInfo with matching id already exists, throw error
-  const existingGameInfo: GameInfo[] = JSON.parse(
-    fs.readFileSync(GAME_INFO_FILE, 'utf-8')
-  );
-  const gameInfoExists = existingGameInfo.some(game => game.id === gameId);
-  if (gameInfoExists) {
-    console.error('Game info with this ID already exists:', gameId);
-    // throw new Error('Game info with this ID already exists');
-  }
   try {
-    fs.writeFileSync(GAME_INFO_FILE, JSON.stringify(gameInfo, null, 2));
-    console.log('Game info saved to DB:', gameInfo);
+    // if the file does not exist, create it
+    if (!fs.existsSync(GAME_INFO_FILE)) {
+      fs.writeFileSync(GAME_INFO_FILE, JSON.stringify([], null, 2));
+    }
+    // if gameInfo with matching id already exists, throw error
+    const existingGamesInfo: GameInfo[] = JSON.parse(
+      fs.readFileSync(GAME_INFO_FILE, 'utf-8')
+    ) as GameInfo[];
+    // make sure the existingGamesInfo is an array and not null
+    if (!Array.isArray(existingGamesInfo)) {
+      console.error('Existing game info is not an array:', existingGamesInfo);
+      throw new Error('Existing game info is not an array');
+    }
+    const gameInfoExists = existingGamesInfo.some(game => game.id === gameId);
+    if (gameInfoExists) {
+      console.error('Game info with this ID already exists:', gameId);
+      throw new Error('Game info with this ID already exists');
+    }
+    // fs.writeFileSync(GAME_INFO_FILE, JSON.stringify(gameInfo, null, 2));
+    existingGamesInfo.push({
+      id: gameId,
+      players: players,
+      startTime: new Date(),
+      endTime: null,
+      lobbyId,
+    });
+    fs.writeFileSync(
+      GAME_INFO_FILE,
+      JSON.stringify(existingGamesInfo, null, 2)
+    );
+    console.log(
+      'Game info saved to DB:',
+      existingGamesInfo[existingGamesInfo.length - 1]
+    );
   } catch (error) {
     console.error('Error writing game info to DB:', error);
   }
@@ -130,6 +142,7 @@ const endGameInDB = (gameId: string): void => {
 
 const connectedPlayers: Map<string, PlayerInfo> = new Map();
 const playerIdToSocketId: Map<string, string> = new Map();
+const playAgainVotes: Set<string> = new Set();
 let gameLoop: GameLoop | null = null;
 let mostRecentGameState: GameState | null = null;
 let mostRecentGameEvent: GameEvent | null = null;
@@ -158,6 +171,28 @@ io.on('connection', socket => {
     handleStartGame().catch(error => {
       console.error('Error starting game:', error);
     });
+  });
+
+  socket.on('playAgain', () => {
+    const playerId = [...playerIdToSocketId.entries()].find(
+      ([, id]) => id === socket.id
+    )?.[0];
+    if (!playerId) {
+      console.error('Player ID not found for socket:', socket.id);
+      return;
+    }
+    console.log(`Player ${playerId} voted to play again.`);
+    playAgainVotes.add(playerId);
+
+    if (playAgainVotes.size === connectedPlayers.size) {
+      console.log('All players voted to play again. Starting a new game.');
+      playAgainVotes.clear();
+      handleStartGame().catch(error => {
+        console.error('Error starting new game:', error);
+      });
+    } else {
+      io.emit('playAgainVotes', Array.from(playAgainVotes));
+    }
   });
 
   socket.on('disconnect', () => {
@@ -290,6 +325,12 @@ async function handleStartGame(): Promise<void> {
   const lobbyId = 'lobbyId'; // TODO: replace with actual lobby ID once lobbies are implemented
   startGameInDB(gameId, playersIdAndName, lobbyId);
 
+  // send gameStart event to all clients
+  io.emit('gameStart', {
+    gameId,
+    players: playersIdAndName,
+  });
+
   // Start the game
   await startGame();
 }
@@ -306,6 +347,7 @@ function sendMostRecentGameData(socket: Socket): void {
     socket.emit('waitingForPlayer', mostRecentWaitingForPlayer);
   }
   socket.emit('currentRoundGameEvents', currentRoundGameEvents);
+  socket.emit('playAgainVotes', Array.from(playAgainVotes));
 }
 
 async function startGame(): Promise<void> {
@@ -318,6 +360,22 @@ async function startGame(): Promise<void> {
 
   const winner = await gameLoop.playGame();
   endGameInDB(gameLoop.cribbageGame.getGameState().id);
+
+  // Reset play again votes and automatically add bots
+  playAgainVotes.clear();
+
+  // Add all bot players to play again votes automatically
+  connectedPlayers.forEach(playerInfo => {
+    if (playerInfo.agent instanceof SimpleAgent) {
+      playAgainVotes.add(playerInfo.id);
+      console.log(
+        `Bot player ${playerInfo.id} automatically voted to play again.`
+      );
+    }
+  });
+
+  // Emit updated play again votes to all clients
+  io.emit('playAgainVotes', Array.from(playAgainVotes));
   io.emit('gameOver', winner);
 }
 

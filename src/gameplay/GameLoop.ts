@@ -132,6 +132,11 @@ export class GameLoop extends EventEmitter {
       );
       // if current player pegged out, return their ID as winner of game
       if (this.cribbageGame.getPlayer(currentPlayerId).score > 120) {
+        console.log(
+          `Player ${currentPlayerId} pegged out with score ${
+            this.cribbageGame.getPlayer(currentPlayerId).score
+          }`
+        );
         return Promise.resolve(currentPlayerId);
       }
 
@@ -259,9 +264,8 @@ export class GameLoop extends EventEmitter {
         ${player.hand.map(card => displayCard(card)).join(', ')}`
       );
 
-      if (player.score > 120) {
-        return player.id;
-      }
+      // if player wins by scoring their hand
+      if (player.score > 120) return player.id;
 
       if (player.isDealer) {
         // await this.sendContinue(player.id, 'Score crib');
@@ -275,9 +279,8 @@ export class GameLoop extends EventEmitter {
         );
       }
 
-      if (player.score > 120) {
-        return player.id;
-      }
+      // if player wins by scoring their crib
+      if (player.score > 120) return player.id;
     }
 
     // Send wait request to all players in parallel and once all are done, continue
@@ -299,7 +302,7 @@ export class GameLoop extends EventEmitter {
   }
 
   /**
-   *
+   * Runs the entire game loop until a player wins
    * @returns the ID of the winning player
    */
   public async playGame(): Promise<string> {
@@ -308,6 +311,10 @@ export class GameLoop extends EventEmitter {
     while (!winner) {
       winner = await this.doRound();
     }
+
+    // pause for a beat to let the players see the winner
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    this.cribbageGame.endGame(winner);
 
     return Promise.resolve(winner);
   }

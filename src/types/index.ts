@@ -14,7 +14,7 @@ export enum Phase {
  * Enum for the types of actions in the game
  */
 export enum ActionType {
-  BEGIN_PHASE = 'BEGIN_PHASE',
+  BEGIN_PHASE = 'BEGIN_PHASE', // Used to indicate phase has changed w/o a specific action being taken by a player
   DEAL = 'DEAL',
   DISCARD = 'DISCARD',
   PLAY_CARD = 'PLAY_CARD', // player plays a card during pegging phase
@@ -27,6 +27,7 @@ export enum ActionType {
   SCORE_HEELS = 'SCORE_HEELS', // Special case for dealer scoring 2 points for a jack as the turn card ("his heels")
   START_PEGGING_ROUND = 'START_PEGGING_ROUND', // Start a new round of pegging
   START_ROUND = 'START_ROUND', // Start a new round of the game
+  WIN = 'WIN', // Player wins the game
 }
 
 /**
