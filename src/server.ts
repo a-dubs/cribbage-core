@@ -104,10 +104,11 @@ const startGameInDB = (
     // fs.writeFileSync(GAME_INFO_FILE, JSON.stringify(gameInfo, null, 2));
     existingGamesInfo.push({
       id: gameId,
-      players: players,
+      playerIds: players.map(player => player.id),
       startTime: new Date(),
       endTime: null,
       lobbyId,
+      gameWinner: null,
     });
     fs.writeFileSync(
       GAME_INFO_FILE,
@@ -122,7 +123,7 @@ const startGameInDB = (
   }
 };
 
-const endGameInDB = (gameId: string): void => {
+const endGameInDB = (gameId: string, winnerId: string): void => {
   try {
     const gameInfo: GameInfo[] = JSON.parse(
       fs.readFileSync(GAME_INFO_FILE, 'utf-8')
@@ -133,6 +134,7 @@ const endGameInDB = (gameId: string): void => {
       throw new Error('Game info with this ID does not exist');
     }
     gameInfo[gameInfoIndex].endTime = new Date();
+    gameInfo[gameInfoIndex].gameWinner = winnerId;
     fs.writeFileSync(GAME_INFO_FILE, JSON.stringify(gameInfo, null, 2));
     console.log('Game info updated in DB:', gameInfo[gameInfoIndex]);
   } catch (error) {
@@ -359,7 +361,7 @@ async function startGame(): Promise<void> {
   }
 
   const winner = await gameLoop.playGame();
-  endGameInDB(gameLoop.cribbageGame.getGameState().id);
+  endGameInDB(gameLoop.cribbageGame.getGameState().id, winner);
 
   // Reset play again votes and automatically add bots
   playAgainVotes.clear();

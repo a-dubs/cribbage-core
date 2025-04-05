@@ -257,8 +257,9 @@ export interface EmittedWaitingForPlayer extends EmittedData {
 // create type for declaring a specific game that is played
 export interface GameInfo {
   id: string; // Unique identifier for the game
-  players: PlayerIdAndName[]; // List of players in the game
+  playerIds: string[]; // List of player IDs in the game
   lobbyId: string; // Unique identifier for the lobby
   startTime: Date; // Time when the game started
   endTime: Date | null; // Time when the game ended (null if not ended)
+  gameWinner: string | null; // ID of the player who won the game (null if not ended)
 }
