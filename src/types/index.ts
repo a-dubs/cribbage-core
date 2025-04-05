@@ -163,18 +163,25 @@ export interface GameAgent {
   ): Promise<void>;
 }
 
-/**
- * Interface for a Cribbage hand score
- * This can represent a single player's hand or the crib
- */
-export interface HandScore {
-  fifteens: number; // Points from combinations summing to 15
-  pairs: number; // Points from pairs
-  runs: number; // Points from runs
-  flush: number; // Points from flushes
-  nobs: number; // Points from having the jack of the turn card's suit
-  total: number; // Total score for the hand
-}
+export type ScoreType =
+  | 'FIFTEEN'
+  | 'PAIR'
+  | 'TRIPS'
+  | 'FOUR_OF_A_KIND'
+  | 'RUN_OF_3'
+  | 'RUN_OF_4'
+  | 'RUN_OF_5'
+  | 'RUN_OF_6'
+  | 'RUN_OF_7'
+  | 'RUN_OF_8'
+  | 'RUN_OF_9'
+  | 'RUN_OF_10'
+  | 'NOBS'
+  | 'FLUSH'
+  | 'DOUBLE_RUN_OF_3'
+  | 'DOUBLE_RUN_OF_4'
+  | 'TRIPLE_RUN_OF_3'
+  | 'QUADRUBLE_RUN_OF_3';
 
 ////// Types for Event Emitters //////
 
