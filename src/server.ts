@@ -184,11 +184,7 @@ io.on('connection', socket => {
     console.log(`Player ${playerId} voted to play again.`);
     playAgainVotes.add(playerId);
 
-    const allPlayers = [...connectedPlayers.keys()].filter(
-      playerId =>
-        !(connectedPlayers.get(playerId)?.agent instanceof SimpleAgent)
-    );
-    if (playAgainVotes.size === allPlayers.length) {
+    if (playAgainVotes.size === connectedPlayers.size) {
       console.log('All players voted to play again. Starting a new game.');
       playAgainVotes.clear();
       handleStartGame().catch(error => {
@@ -351,6 +347,7 @@ function sendMostRecentGameData(socket: Socket): void {
     socket.emit('waitingForPlayer', mostRecentWaitingForPlayer);
   }
   socket.emit('currentRoundGameEvents', currentRoundGameEvents);
+  socket.emit('playAgainVotes', Array.from(playAgainVotes));
 }
 
 async function startGame(): Promise<void> {
@@ -363,6 +360,22 @@ async function startGame(): Promise<void> {
 
   const winner = await gameLoop.playGame();
   endGameInDB(gameLoop.cribbageGame.getGameState().id);
+
+  // Reset play again votes and automatically add bots
+  playAgainVotes.clear();
+
+  // Add all bot players to play again votes automatically
+  connectedPlayers.forEach(playerInfo => {
+    if (playerInfo.agent instanceof SimpleAgent) {
+      playAgainVotes.add(playerInfo.id);
+      console.log(
+        `Bot player ${playerInfo.id} automatically voted to play again.`
+      );
+    }
+  });
+
+  // Emit updated play again votes to all clients
+  io.emit('playAgainVotes', Array.from(playAgainVotes));
   io.emit('gameOver', winner);
 }
 
