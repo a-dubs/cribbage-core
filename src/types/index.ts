@@ -252,3 +252,12 @@ export type EmittedDecisionRequest =
 export interface EmittedWaitingForPlayer extends EmittedData {
   waitingFor: AgentDecisionType;
 }
+
+// create type for declaring a specific game that is played
+export interface GameInfo {
+  id: string; // Unique identifier for the game
+  players: PlayerIdAndName[]; // List of players in the game
+  lobbyId: string; // Unique identifier for the lobby
+  startTime: Date; // Time when the game started
+  endTime: Date | null; // Time when the game ended (null if not ended)
+}

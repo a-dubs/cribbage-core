@@ -3,14 +3,15 @@ import { parseCard, scoreHand, scorePegging } from '../core/scoring';
 import { GameState, Card } from '../types';
 import { RandomAgent } from './RandomAgent';
 
+const AGENT_ID = 'simple-bot-v1.0';
+
 export class SimpleAgent extends RandomAgent {
-  playerId: string;
+  playerId: string = AGENT_ID;
   human = false;
   cribbageGame: CribbageGame = new CribbageGame([]);
 
-  constructor(id: string) {
-    super(id);
-    this.playerId = id;
+  constructor() {
+    super();
   }
 
   private getBestHand(hand: Card[]): Card[] {

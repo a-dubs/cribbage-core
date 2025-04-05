@@ -8,10 +8,13 @@ import {
   GameEvent,
   GameState,
   PlayerIdAndName,
+  GameInfo,
 } from './types';
 import { WebSocketAgent } from './agents/WebSocketAgent';
 import { SimpleAgent } from './agents/SimpleAgent';
 import dotenv from 'dotenv';
+import fs from 'fs';
+import path from 'path';
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
 dotenv.config();
@@ -19,6 +22,12 @@ dotenv.config();
 const PORT = process.env.PORT || 3002;
 const WEB_APP_ORIGIN = process.env.WEB_APP_ORIGIN || 'http://localhost:3000';
 const WEBSOCKET_AUTH_TOKEN = process.env.WEBSOCKET_AUTH_TOKEN;
+const JSON_DB_DIR = process.env.JSON_DB_DIR || path.join(__dirname, 'json_db');
+console.log('JSON_DB_DIR:', JSON_DB_DIR);
+// create the directory if it does not exist
+if (!fs.existsSync(JSON_DB_DIR)) {
+  fs.mkdirSync(JSON_DB_DIR);
+}
 
 if (!WEBSOCKET_AUTH_TOKEN) {
   console.error('WEBSOCKET_AUTH_TOKEN is not set');
@@ -49,6 +58,75 @@ interface LoginData {
   username: string;
   name: string;
 }
+
+const GAME_EVENTS_FILE = path.join(JSON_DB_DIR, 'gameEvents.json');
+const GAME_INFO_FILE = path.join(JSON_DB_DIR, 'gameInfo.json');
+
+// just write to json file for now (append to list of game events)
+const sendGameEventToDB = (gameEvent: GameEvent): void => {
+  try {
+    const gameEvents: GameEvent[] = fs.existsSync(GAME_EVENTS_FILE)
+      ? (JSON.parse(fs.readFileSync(GAME_EVENTS_FILE, 'utf-8')) as GameEvent[])
+      : [];
+    gameEvents.push(gameEvent);
+    fs.writeFileSync(GAME_EVENTS_FILE, JSON.stringify(gameEvents, null, 2));
+    console.log('Game event saved to DB:', gameEvent);
+  } catch (error) {
+    console.error('Error writing game event to DB:', error);
+  }
+};
+
+// function that writes GameInfo to a json file
+const startGameInDB = (
+  gameId: string,
+  players: PlayerIdAndName[],
+  lobbyId: string
+): void => {
+  const gameInfo: GameInfo = {
+    id: gameId,
+    players: players,
+    startTime: new Date(),
+    endTime: null,
+    lobbyId,
+  };
+  // if the file does not exist, create it
+  if (!fs.existsSync(GAME_INFO_FILE)) {
+    fs.writeFileSync(GAME_INFO_FILE, JSON.stringify([], null, 2));
+  }
+  // if gameInfo with matching id already exists, throw error
+  const existingGameInfo: GameInfo[] = JSON.parse(
+    fs.readFileSync(GAME_INFO_FILE, 'utf-8')
+  );
+  const gameInfoExists = existingGameInfo.some(game => game.id === gameId);
+  if (gameInfoExists) {
+    console.error('Game info with this ID already exists:', gameId);
+    // throw new Error('Game info with this ID already exists');
+  }
+  try {
+    fs.writeFileSync(GAME_INFO_FILE, JSON.stringify(gameInfo, null, 2));
+    console.log('Game info saved to DB:', gameInfo);
+  } catch (error) {
+    console.error('Error writing game info to DB:', error);
+  }
+};
+
+const endGameInDB = (gameId: string): void => {
+  try {
+    const gameInfo: GameInfo[] = JSON.parse(
+      fs.readFileSync(GAME_INFO_FILE, 'utf-8')
+    );
+    const gameInfoIndex = gameInfo.findIndex(game => game.id === gameId);
+    if (gameInfoIndex === -1) {
+      console.error('Game info with this ID does not exist:', gameId);
+      throw new Error('Game info with this ID does not exist');
+    }
+    gameInfo[gameInfoIndex].endTime = new Date();
+    fs.writeFileSync(GAME_INFO_FILE, JSON.stringify(gameInfo, null, 2));
+    console.log('Game info updated in DB:', gameInfo[gameInfoIndex]);
+  } catch (error) {
+    console.error('Error updating game info in DB:', error);
+  }
+};
 
 const connectedPlayers: Map<string, PlayerInfo> = new Map();
 const playerIdToSocketId: Map<string, string> = new Map();
@@ -148,9 +226,9 @@ async function handleStartGame(): Promise<void> {
   // If only one player is connected, add a bot
   if (connectedPlayers.size === 1) {
     console.log('Adding a bot to start the game.');
-    const botId = 'simple-bot-v1.0';
-    const botName = 'Simple Bot';
-    const botAgent = new SimpleAgent(botId);
+    const botName = 'Simple Optimal Bot';
+    const botAgent = new SimpleAgent();
+    const botId = botAgent.playerId;
     const botPlayerInfo: PlayerInfo = {
       id: botId,
       name: botName,
@@ -197,6 +275,7 @@ async function handleStartGame(): Promise<void> {
       currentRoundGameEvents = [];
     }
     currentRoundGameEvents.push(gameEvent);
+    sendGameEventToDB(gameEvent);
     io.emit('currentRoundGameEvents', currentRoundGameEvents);
   });
   gameLoop.on('waitingForPlayer', (waitingData: EmittedWaitingForPlayer) => {
@@ -205,6 +284,11 @@ async function handleStartGame(): Promise<void> {
   });
   // send the connected players to the clients
   emitConnectedPlayers();
+
+  // Start the game in the database
+  const gameId = gameLoop.cribbageGame.getGameState().id;
+  const lobbyId = 'lobbyId'; // TODO: replace with actual lobby ID once lobbies are implemented
+  startGameInDB(gameId, playersIdAndName, lobbyId);
 
   // Start the game
   await startGame();
@@ -233,6 +317,7 @@ async function startGame(): Promise<void> {
   }
 
   const winner = await gameLoop.playGame();
+  endGameInDB(gameLoop.cribbageGame.getGameState().id);
   io.emit('gameOver', winner);
 }
 
