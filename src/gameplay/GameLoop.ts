@@ -232,6 +232,14 @@ export class GameLoop extends EventEmitter {
       return peggingWinner;
     }
 
+    // send continue to all players before continuing to counting phase
+    const continueToScoringPromises = this.cribbageGame
+      .getGameState()
+      .players.map(player =>
+        this.sendContinue(player.id, 'Ready for counting', false)
+      );
+    await Promise.all(continueToScoringPromises);
+
     // SCORING PHASE
     // Loop through each player and score their hand, starting with player after dealer and ending with dealer
     // Dealer also scores their crib after scoring their hand
@@ -273,10 +281,10 @@ export class GameLoop extends EventEmitter {
     }
 
     // Send wait request to all players in parallel and once all are done, continue
-    const continuePromises = this.cribbageGame
+    const continueToNextRoundPromises = this.cribbageGame
       .getGameState()
       .players.map(player => this.sendContinue(player.id, 'End round', false));
-    await Promise.all(continuePromises);
+    await Promise.all(continueToNextRoundPromises);
 
     console.log('All players ready for next round');
 
