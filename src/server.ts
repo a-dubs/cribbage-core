@@ -82,29 +82,41 @@ const startGameInDB = (
   players: PlayerIdAndName[],
   lobbyId: string
 ): void => {
-  const gameInfo: GameInfo = {
-    id: gameId,
-    players: players,
-    startTime: new Date(),
-    endTime: null,
-    lobbyId,
-  };
-  // if the file does not exist, create it
-  if (!fs.existsSync(GAME_INFO_FILE)) {
-    fs.writeFileSync(GAME_INFO_FILE, JSON.stringify([], null, 2));
-  }
-  // if gameInfo with matching id already exists, throw error
-  const existingGameInfo: GameInfo[] = JSON.parse(
-    fs.readFileSync(GAME_INFO_FILE, 'utf-8')
-  );
-  const gameInfoExists = existingGameInfo.some(game => game.id === gameId);
-  if (gameInfoExists) {
-    console.error('Game info with this ID already exists:', gameId);
-    // throw new Error('Game info with this ID already exists');
-  }
   try {
-    fs.writeFileSync(GAME_INFO_FILE, JSON.stringify(gameInfo, null, 2));
-    console.log('Game info saved to DB:', gameInfo);
+    // if the file does not exist, create it
+    if (!fs.existsSync(GAME_INFO_FILE)) {
+      fs.writeFileSync(GAME_INFO_FILE, JSON.stringify([], null, 2));
+    }
+    // if gameInfo with matching id already exists, throw error
+    const existingGamesInfo: GameInfo[] = JSON.parse(
+      fs.readFileSync(GAME_INFO_FILE, 'utf-8')
+    ) as GameInfo[];
+    // make sure the existingGamesInfo is an array and not null
+    if (!Array.isArray(existingGamesInfo)) {
+      console.error('Existing game info is not an array:', existingGamesInfo);
+      throw new Error('Existing game info is not an array');
+    }
+    const gameInfoExists = existingGamesInfo.some(game => game.id === gameId);
+    if (gameInfoExists) {
+      console.error('Game info with this ID already exists:', gameId);
+      throw new Error('Game info with this ID already exists');
+    }
+    // fs.writeFileSync(GAME_INFO_FILE, JSON.stringify(gameInfo, null, 2));
+    existingGamesInfo.push({
+      id: gameId,
+      players: players,
+      startTime: new Date(),
+      endTime: null,
+      lobbyId,
+    });
+    fs.writeFileSync(
+      GAME_INFO_FILE,
+      JSON.stringify(existingGamesInfo, null, 2)
+    );
+    console.log(
+      'Game info saved to DB:',
+      existingGamesInfo[existingGamesInfo.length - 1]
+    );
   } catch (error) {
     console.error('Error writing game info to DB:', error);
   }
