@@ -142,6 +142,7 @@ const endGameInDB = (gameId: string): void => {
 
 const connectedPlayers: Map<string, PlayerInfo> = new Map();
 const playerIdToSocketId: Map<string, string> = new Map();
+const playAgainVotes: Set<string> = new Set();
 let gameLoop: GameLoop | null = null;
 let mostRecentGameState: GameState | null = null;
 let mostRecentGameEvent: GameEvent | null = null;
@@ -170,6 +171,32 @@ io.on('connection', socket => {
     handleStartGame().catch(error => {
       console.error('Error starting game:', error);
     });
+  });
+
+  socket.on('playAgain', () => {
+    const playerId = [...playerIdToSocketId.entries()].find(
+      ([, id]) => id === socket.id
+    )?.[0];
+    if (!playerId) {
+      console.error('Player ID not found for socket:', socket.id);
+      return;
+    }
+    console.log(`Player ${playerId} voted to play again.`);
+    playAgainVotes.add(playerId);
+
+    const allPlayers = [...connectedPlayers.keys()].filter(
+      playerId =>
+        !(connectedPlayers.get(playerId)?.agent instanceof SimpleAgent)
+    );
+    if (playAgainVotes.size === allPlayers.length) {
+      console.log('All players voted to play again. Starting a new game.');
+      playAgainVotes.clear();
+      handleStartGame().catch(error => {
+        console.error('Error starting new game:', error);
+      });
+    } else {
+      io.emit('playAgainVotes', Array.from(playAgainVotes));
+    }
   });
 
   socket.on('disconnect', () => {
@@ -301,6 +328,12 @@ async function handleStartGame(): Promise<void> {
   const gameId = gameLoop.cribbageGame.getGameState().id;
   const lobbyId = 'lobbyId'; // TODO: replace with actual lobby ID once lobbies are implemented
   startGameInDB(gameId, playersIdAndName, lobbyId);
+
+  // send gameStart event to all clients
+  io.emit('gameStart', {
+    gameId,
+    players: playersIdAndName,
+  });
 
   // Start the game
   await startGame();

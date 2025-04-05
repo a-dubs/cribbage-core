@@ -120,6 +120,18 @@ export class CribbageGame extends EventEmitter {
     this.recordGameEvent(Phase.DEALING, ActionType.START_ROUND, null, null, 0);
   }
 
+  public endGame(winnerId: string): void {
+    const winner = this.gameState.players.find(p => p.id === winnerId);
+    if (!winner) throw new Error(`Winner not found: ${winnerId}`);
+    this.recordGameEvent(
+      this.gameState.currentPhase,
+      ActionType.WIN,
+      winnerId,
+      null,
+      0
+    );
+  }
+
   public deal(): void {
     if (this.gameState.currentPhase !== Phase.DEALING) {
       throw new Error('Cannot deal cards outside of the dealing phase.');
