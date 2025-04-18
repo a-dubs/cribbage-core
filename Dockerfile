@@ -1,5 +1,5 @@
 # backend/Dockerfile
-FROM node:18
+FROM node:22-slim
 
 # Set timezone
 ENV TZ=America/New_York

@@ -10,7 +10,7 @@ import {
   AgentDecisionType,
 } from '../types';
 import { displayCard, parseCard, suitToEmoji } from '../core/scoring';
-import { EventEmitter } from 'events';
+import EventEmitter from 'eventemitter3';
 import dotenv from 'dotenv';
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call

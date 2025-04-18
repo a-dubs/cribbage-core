@@ -39,7 +39,26 @@ console.log('WEB_APP_ORIGIN:', WEB_APP_ORIGIN);
 
 console.log('Cribbage-core server starting...');
 
-const server = http.createServer();
+const server = http.createServer((req, res) => {
+  if (req.method === 'GET' && req.url === '/ping') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('pong');
+    return;
+  }
+  if (req.method === 'GET' && req.url === '/connected-players') {
+    const playersIdAndName: PlayerIdAndName[] = [];
+    connectedPlayers.forEach(playerInfo => {
+      playersIdAndName.push({ id: playerInfo.id, name: playerInfo.name });
+    });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(playersIdAndName));
+    return;
+  }
+  // fallback for other routes
+  res.writeHead(404, { 'Content-Type': 'text/plain' });
+  res.end('Not found');
+});
+
 const io = new Server(server, {
   cors: {
     origin: WEB_APP_ORIGIN,
@@ -153,13 +172,13 @@ let currentRoundGameEvents: GameEvent[] = [];
 
 io.on('connection', socket => {
   const token = socket.handshake.auth.token;
-  if (token !== 'dummy-auth-token') {
-    console.log('Authentication failed for socket:', socket.id);
+  if (token !== WEBSOCKET_AUTH_TOKEN) {
+    console.log('Incorrect socket token for socket:', socket.id);
     socket.disconnect();
     return;
   }
 
-  console.log('A user connected:', socket.id);
+  console.log('New socket connection:', socket.id);
 
   // send the connected players to the clients even before login
   // so they can see who is already connected
@@ -222,6 +241,7 @@ io.on('connection', socket => {
 function handleLogin(socket: Socket, data: LoginData): void {
   const { username, name } = data;
   let agent: WebSocketAgent;
+  console.log('Handling login for user:', username);
 
   // Replace old socket if player reconnects
   const oldPlayerInfo = connectedPlayers.get(username);
@@ -255,6 +275,7 @@ function emitConnectedPlayers(): void {
   connectedPlayers.forEach(playerInfo => {
     playersIdAndName.push({ id: playerInfo.id, name: playerInfo.name });
   });
+  console.log('Emitting connected players to all clients:', playersIdAndName);
   io.emit('connectedPlayers', playersIdAndName);
 }
 

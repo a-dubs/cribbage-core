@@ -8,7 +8,7 @@ import {
   PlayerIdAndName,
 } from '../types';
 import { scoreHand, scorePegging, sumOfPeggingStack } from './scoring';
-import { EventEmitter } from 'events';
+import EventEmitter from 'eventemitter3';
 import { isValidDiscard, isValidPeggingPlay } from './utils';
 
 export class CribbageGame extends EventEmitter {

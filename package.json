@@ -128,9 +128,11 @@
     ]
   },
   "dependencies": {
+    "@babel/runtime": "^7.27.0",
     "@types/socket.io": "^3.0.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
+    "eventemitter3": "^5.0.1",
     "express": "^4.21.2",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
