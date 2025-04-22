@@ -7,7 +7,7 @@ import {
   GameEvent,
   PlayerIdAndName,
 } from '../types';
-import { scoreHand, scorePegging, sumOfPeggingStack } from './scoring';
+import { parseCard, scoreHand, scorePegging, sumOfPeggingStack } from './scoring';
 import EventEmitter from 'eventemitter3';
 import { isValidDiscard, isValidPeggingPlay } from './utils';
 
@@ -39,6 +39,7 @@ export class CribbageGame extends EventEmitter {
       peggingGoPlayers: [],
       peggingLastCardPlayer: null,
       playedCards: [],
+      peggingTotal: 0,
     };
 
     this.gameEventRecords = [];
@@ -80,6 +81,7 @@ export class CribbageGame extends EventEmitter {
       scoreChange,
       timestamp: new Date(),
       playedCards: this.gameState.playedCards,
+      peggingTotal: this.gameState.peggingTotal,
     };
     if (phase === Phase.PEGGING) {
       gameEvent.peggingStack = this.gameState.peggingStack;
@@ -111,6 +113,10 @@ export class CribbageGame extends EventEmitter {
     this.gameState.turnCard = null;
     this.gameState.currentPhase = Phase.DEALING;
     this.gameState.playedCards = [];
+    this.gameState.peggingStack = [];
+    this.gameState.peggingGoPlayers = [];
+    this.gameState.peggingLastCardPlayer = null;
+    this.gameState.peggingTotal = 0;
     // reset all players' hands
     this.gameState.players.forEach(player => {
       player.hand = [];
@@ -295,6 +301,7 @@ export class CribbageGame extends EventEmitter {
 
     if (card) {
       player.playedCards.push(card);
+      this.gameState.peggingTotal += parseCard(card).runValue;
     }
     // No card played = player says "Go"
     else {
@@ -409,6 +416,7 @@ export class CribbageGame extends EventEmitter {
     this.gameState.peggingStack = [];
     this.gameState.peggingGoPlayers = [];
     this.gameState.peggingLastCardPlayer = null;
+    this.gameState.peggingTotal = 0;
 
     // Advance to the counting phase
     this.gameState.currentPhase = Phase.COUNTING;
