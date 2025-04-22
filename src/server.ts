@@ -177,7 +177,6 @@ io.on('connection', socket => {
     socket.disconnect();
     return;
   }
-
   console.log('New socket connection:', socket.id);
 
   // send the connected players to the clients even before login
@@ -219,7 +218,7 @@ io.on('connection', socket => {
   socket.on('disconnect', () => {
     console.log('A user disconnected:', socket.id);
     // only remove the player if the game loop is not running
-    if (!GameLoop) {
+    if (!gameLoop) {
       playerIdToSocketId.forEach((socketId, playerId) => {
         if (socketId === socket.id) {
           connectedPlayers.delete(playerId);
@@ -280,6 +279,10 @@ function emitConnectedPlayers(): void {
 }
 
 async function handleStartGame(): Promise<void> {
+  if (gameLoop) {
+    console.error('Game loop already running. Cannot start a new game.');
+    throw new Error('Game loop already running. Cannot start a new game.');
+  }
   console.log('Starting game...');
   // If only one player is connected, add a bot
   if (connectedPlayers.size === 1) {
