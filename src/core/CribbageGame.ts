@@ -301,7 +301,7 @@ export class CribbageGame extends EventEmitter {
 
     if (card) {
       player.playedCards.push(card);
-      this.gameState.peggingTotal += parseCard(card).runValue;
+      this.gameState.peggingTotal += parseCard(card).pegValue;
     }
     // No card played = player says "Go"
     else {
