@@ -184,10 +184,12 @@ io.on('connection', socket => {
   emitConnectedPlayers();
 
   socket.on('login', (data: LoginData) => {
+    console.log('Received login event from socket:', socket.id);
     handleLogin(socket, data);
   });
 
   socket.on('startGame', () => {
+    console.log('Received startGame event from socket:', socket.id);
     handleStartGame().catch(error => {
       console.error('Error starting game:', error);
     });
@@ -216,7 +218,7 @@ io.on('connection', socket => {
   });
 
   socket.on('disconnect', () => {
-    console.log('A user disconnected:', socket.id);
+    console.log('A socket disconnected:', socket.id);
     // only remove the player if the game loop is not running
     if (!gameLoop) {
       playerIdToSocketId.forEach((socketId, playerId) => {
@@ -249,14 +251,22 @@ function handleLogin(socket: Socket, data: LoginData): void {
     console.log(
       `Player ${username} reconnected. Updating socket for their WebSocketAgent.`
     );
-    oldPlayerInfo.agent.socket.disconnect(true); // Disconnect old socket if applicable
     agent = oldPlayerInfo.agent;
-    agent.updateSocket(socket);
-    // if the game loop is running, send the most recent game data to the client
-    if (gameLoop) {
-      sendMostRecentGameData(socket);
+    console.log(
+      `Old socket ID: ${oldPlayerInfo.agent.socket.id}, New socket ID: ${socket.id}`
+    );
+    // compare the socket ids and if they are different, replace the socket
+    if (oldPlayerInfo.agent.socket.id !== socket.id) {
+      console.log(
+        `Replacing old socket ${oldPlayerInfo.agent.socket.id} with new socket ${socket.id}`
+      );
+      oldPlayerInfo.agent.socket.disconnect(true); // Disconnect old socket if applicable
+      agent.updateSocket(socket);
     }
   } else {
+    console.log(
+      `Player ${username} logged in for the first time. Creating new WebSocketAgent.`
+    );
     agent = new WebSocketAgent(socket, username);
   }
   const playerInfo: PlayerInfo = { id: username, name, agent };
@@ -264,8 +274,17 @@ function handleLogin(socket: Socket, data: LoginData): void {
   playerIdToSocketId.set(username, socket.id);
 
   connectedPlayers.set(username, playerInfo);
-  socket.emit('loggedIn', 'You are logged in!');
+  console.log('emitting loggedIn event to client:', username);
+  const loggedInData: PlayerIdAndName = {
+    id: username,
+    name,
+  };
+  socket.emit('loggedIn', loggedInData);
   emitConnectedPlayers();
+  // if the game loop is running, send the most recent game data to the client
+  if (gameLoop) {
+    sendMostRecentGameData(socket);
+  }
 }
 
 // create function that emits the current connected players to all clients
@@ -276,6 +295,13 @@ function emitConnectedPlayers(): void {
   });
   console.log('Emitting connected players to all clients:', playersIdAndName);
   io.emit('connectedPlayers', playersIdAndName);
+  // for (const [_, playerInfo] of connectedPlayers) {
+  //   if (playerInfo.agent instanceof WebSocketAgent) {
+  //     // Emit to the specific player
+  //     playerInfo.agent.socket.emit('connectedPlayers', playersIdAndName);
+  //   }
+
+  // }
 }
 
 async function handleStartGame(): Promise<void> {
@@ -365,9 +391,16 @@ function sendMostRecentGameData(socket: Socket): void {
   console.log('Sending most recent game data to client');
   if (mostRecentGameState) {
     socket.emit('gameStateChange', mostRecentGameState);
+  } else {
+    socket.emit('gameStateChange', gameLoop?.cribbageGame.getGameState());
   }
   if (mostRecentGameEvent) {
     socket.emit('gameEvent', mostRecentGameEvent);
+  } else {
+    const allGameEvents = gameLoop?.cribbageGame.getGameEventRecords();
+    if (allGameEvents) {
+      socket.emit('gameEvent', allGameEvents[allGameEvents.length - 1]);
+    }
   }
   if (mostRecentWaitingForPlayer) {
     socket.emit('waitingForPlayer', mostRecentWaitingForPlayer);
@@ -383,7 +416,7 @@ async function startGame(): Promise<void> {
     );
     return;
   }
-
+  console.log('Starting game loop...');
   const winner = await gameLoop.playGame();
   endGameInDB(gameLoop.cribbageGame.getGameState().id, winner);
 
