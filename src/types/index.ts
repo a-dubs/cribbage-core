@@ -250,7 +250,8 @@ export enum AgentDecisionType {
 // map AgentDecisionType to the corresponding EmittedData type
 export type EmittedDecisionRequest =
   | EmittedMakeMoveRequest
-  | EmittedDiscardRequest;
+  | EmittedDiscardRequest
+  | EmittedContinueRequest;
 
 export interface EmittedWaitingForPlayer extends EmittedData {
   waitingFor: AgentDecisionType;
