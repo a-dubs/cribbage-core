@@ -17,10 +17,6 @@ export function isValidPeggingPlay(
   const currentSum = sumOfPeggingStack(game.peggingStack);
   if (card === null) {
     console.log('Trying to say "Go"');
-    // Check if the player has any valid card to play
-    // return !player.peggingHand.some(
-    //   c => currentSum + parseCard(c).pegValue <= 31
-    // );
     const validCards = [];
     for (const c of player.peggingHand) {
       if (currentSum + parseCard(c).pegValue <= 31) {
@@ -66,6 +62,18 @@ export function getInvalidPeggingPlayReason(
     return 'Card would exceed 31';
   }
   return null;
+}
+
+export function handHasValidPlay(game: GameState, hand: Card[]): boolean {
+  const currentSum = sumOfPeggingStack(game.peggingStack);
+  return (
+    hand.length > 0 &&
+    hand.some(card => currentSum + parseCard(card).pegValue <= 31)
+  );
+}
+
+export function playerHasValidPlay(game: GameState, player: Player): boolean {
+  return handHasValidPlay(game, player.peggingHand);
 }
 
 export function getMostRecentGameEventForPlayer(
