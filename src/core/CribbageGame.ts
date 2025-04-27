@@ -274,6 +274,7 @@ export class CribbageGame extends EventEmitter {
   public startNewPeggingRound(): string | null {
     this.gameState.peggingStack = [];
     this.gameState.peggingGoPlayers = [];
+    this.gameState.peggingTotal = 0;
     const lastCardPlayer = this.gameState.peggingLastCardPlayer;
     this.gameState.peggingLastCardPlayer = null;
     console.log('PEGGING ROUND OVER; last card player:', lastCardPlayer, '\n');

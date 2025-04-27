@@ -119,7 +119,7 @@ export interface GameEvent {
   peggingGoPlayers?: string[]; // List of players who have said "Go" during this pegging stack (if phase is PEGGING)
   peggingLastCardPlayer?: string; // Player who played the last card during pegging (if phase is PEGGING)
   playedCards: PlayedCard[]; // List of all cards played during the pegging phase to help with keeping track of played cards
-  peggingTotal: number; // Total value of the cards played in the current pegging stack
+  peggingTotal?: number; // Total value of the cards played in the current pegging stack
 }
 
 /**
