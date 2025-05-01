@@ -6,6 +6,7 @@ import {
   GameState,
   GameEvent,
   PlayerIdAndName,
+  GameStateAndEvent,
 } from '../types';
 import { parseCard, scoreHand, scorePegging, sumOfPeggingStack } from './scoring';
 import EventEmitter from 'eventemitter3';
@@ -90,6 +91,10 @@ export class CribbageGame extends EventEmitter {
     this.gameEventRecords.push(gameEvent);
     this.emit('gameStateChange', this.gameState);
     this.emit('gameEvent', gameEvent);
+    this.emit('gameStateAndEvent', {
+      gameState: this.gameState,
+      gameEvent,
+    } as GameStateAndEvent);
   }
 
   public getCrib(): Card[] {

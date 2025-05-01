@@ -8,6 +8,7 @@ import {
   GameState,
   EmittedWaitingForPlayer,
   AgentDecisionType,
+  GameStateAndEvent,
 } from '../types';
 import { displayCard, parseCard, suitToEmoji } from '../core/scoring';
 import EventEmitter from 'eventemitter3';
@@ -32,10 +33,15 @@ export class GameLoop extends EventEmitter {
     this.cribbageGame.on('gameEvent', (gameEvent: GameEvent) => {
       this.emit('gameEvent', gameEvent);
     });
+    this.cribbageGame.on(
+      'gameStateAndEvent',
+      (newGameStateAndEvent: GameStateAndEvent) => {
+        this.emit('gameStateAndEvent', newGameStateAndEvent);
+      }
+    );
   }
 
-  public addAgent(playerId: string, agent: GameAgent): void {
-    this.agents[playerId] = agent;
+  public addAgent(playerId: string, agent: GameAgent): void { this.agents[playerId] = agent;
   }
 
   private async sendContinue(

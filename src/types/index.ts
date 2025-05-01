@@ -139,6 +139,11 @@ export interface GameState {
   peggingTotal: number; // Total value of the cards played in the current pegging stack
 }
 
+export interface GameStateAndEvent {
+  gameState: GameState; // Current state of the game
+  gameEvent: GameEvent; // Last event that occurred in the game
+}
+
 /**
  * Interface for a card played by a player
  */

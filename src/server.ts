@@ -9,6 +9,7 @@ import {
   GameState,
   PlayerIdAndName,
   GameInfo,
+  GameStateAndEvent,
 } from './types';
 import { WebSocketAgent } from './agents/WebSocketAgent';
 import { SimpleAgent } from './agents/SimpleAgent';
@@ -167,6 +168,7 @@ const playAgainVotes: Set<string> = new Set();
 let gameLoop: GameLoop | null = null;
 let mostRecentGameState: GameState | null = null;
 let mostRecentGameEvent: GameEvent | null = null;
+let mostRecentGameStateAndEvent: GameStateAndEvent | null = null;
 let mostRecentWaitingForPlayer: EmittedWaitingForPlayer | null = null;
 let currentRoundGameEvents: GameEvent[] = [];
 
@@ -355,6 +357,13 @@ async function handleStartGame(): Promise<void> {
     io.emit('gameStateChange', newGameState);
     mostRecentGameState = newGameState;
   });
+  gameLoop.on(
+    'gameStateAndEvent',
+    (newGameStateAndEvent: GameStateAndEvent) => {
+      io.emit('gameStateAndEvent', newGameStateAndEvent);
+      mostRecentGameStateAndEvent = newGameStateAndEvent;
+    }
+  );
   gameLoop.on('gameEvent', (gameEvent: GameEvent) => {
     io.emit('gameEvent', gameEvent);
     mostRecentGameEvent = gameEvent;
@@ -404,6 +413,9 @@ function sendMostRecentGameData(socket: Socket): void {
   }
   if (mostRecentWaitingForPlayer) {
     socket.emit('waitingForPlayer', mostRecentWaitingForPlayer);
+  }
+  if (mostRecentGameStateAndEvent) {
+    socket.emit('gameStateAndEvent', mostRecentGameStateAndEvent);
   }
   socket.emit('currentRoundGameEvents', currentRoundGameEvents);
   socket.emit('playAgainVotes', Array.from(playAgainVotes));
