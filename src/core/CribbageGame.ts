@@ -8,7 +8,12 @@ import {
   PlayerIdAndName,
   GameStateAndEvent,
 } from '../types';
-import { parseCard, scoreHand, scorePegging, sumOfPeggingStack } from './scoring';
+import {
+  parseCard,
+  scoreHand,
+  scorePegging,
+  sumOfPeggingStack,
+} from './scoring';
 import EventEmitter from 'eventemitter3';
 import { isValidDiscard, isValidPeggingPlay } from './utils';
 
@@ -129,6 +134,15 @@ export class CribbageGame extends EventEmitter {
       player.playedCards = [];
     });
     this.recordGameEvent(Phase.DEALING, ActionType.START_ROUND, null, null, 0);
+  }
+
+  public endScoring(): void {
+    if (this.gameState.currentPhase !== Phase.COUNTING) {
+      throw new Error('Cannot end scoring outside of the counting phase.');
+    }
+
+    this.gameState.currentPhase = Phase.DEALING;
+    this.recordGameEvent(Phase.COUNTING, ActionType.END_PHASE, null, null, 0);
   }
 
   public endGame(winnerId: string): void {

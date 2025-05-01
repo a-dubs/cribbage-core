@@ -15,6 +15,7 @@ export enum Phase {
  */
 export enum ActionType {
   BEGIN_PHASE = 'BEGIN_PHASE', // Used to indicate phase has changed w/o a specific action being taken by a player
+  END_PHASE = 'END_PHASE', // Used to indicate phase has ended w/o a specific action being taken by a player
   DEAL = 'DEAL',
   DISCARD = 'DISCARD',
   PLAY_CARD = 'PLAY_CARD', // player plays a card during pegging phase

@@ -41,7 +41,8 @@ export class GameLoop extends EventEmitter {
     );
   }
 
-  public addAgent(playerId: string, agent: GameAgent): void { this.agents[playerId] = agent;
+  public addAgent(playerId: string, agent: GameAgent): void {
+    this.agents[playerId] = agent;
   }
 
   private async sendContinue(
@@ -288,6 +289,9 @@ export class GameLoop extends EventEmitter {
       // if player wins by scoring their crib
       if (player.score > 120) return player.id;
     }
+
+    // record end_phase event for the scoring phase
+    this.cribbageGame.endScoring();
 
     // Send wait request to all players in parallel and once all are done, continue
     const continueToNextRoundPromises = this.cribbageGame
