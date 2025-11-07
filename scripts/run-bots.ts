@@ -1,6 +1,7 @@
 import { GameLoop } from '../src/gameplay/GameLoop';
 import { RandomAgent } from '../src/agents/RandomAgent';
 import { SimpleAgent } from '../src/agents/SimpleAgent';
+import { HeuristicSimpleAgent } from '../src/agents/HeuristicSimpleAgent';
 import {
   RandomDelaySimpleAgent,
   Fixed500msSimpleAgent,
@@ -15,8 +16,9 @@ import * as path from 'path';
 
 // Parse command line arguments
 // Usage: node run-bots.js [number-of-games] [agent-type-1] [agent-type-2]
-// Agent types: 'random', 'simple', 'random-delay', 'fixed-500ms', 'fixed-200ms'
+// Agent types: 'random', 'simple', 'heuristic-simple', 'random-delay', 'fixed-500ms', 'fixed-200ms'
 // Default: 10 games, 'random' vs 'simple'
+// Note: 'simple' = exhaustive simulation (slow but optimal), 'heuristic-simple' = fast heuristic-based
 const numGames = parseInt(process.argv[2] || '10', 10);
 const agentType1 = process.argv[3] || 'random';
 const agentType2 = process.argv[4] || 'simple';
@@ -24,8 +26,11 @@ const agentType2 = process.argv[4] || 'simple';
 if (isNaN(numGames) || numGames < 1) {
   console.error('Usage: node run-bots.js [number-of-games] [agent-type-1] [agent-type-2]');
   console.error('Example: node run-bots.js 2 random simple');
+  console.error('Example: node run-bots.js 2 simple heuristic-simple');
   console.error('Example: node run-bots.js 2 fixed-500ms random-delay');
-  console.error('Agent types: random, simple, random-delay, fixed-500ms, fixed-200ms');
+  console.error('Agent types: random, simple, heuristic-simple, random-delay, fixed-500ms, fixed-200ms');
+  console.error('  - simple: Exhaustive simulation (slow but optimal)');
+  console.error('  - heuristic-simple: Fast heuristic-based (fast but approximate)');
   process.exit(1);
 }
 
@@ -244,7 +249,11 @@ async function main(gameNumber: number, totalGames: number): Promise<GameResult>
         break;
       case 'simple':
         agent = new SimpleAgent();
-        name = 'Simple Bot';
+        name = 'Simple Bot (Exhaustive)';
+        break;
+      case 'heuristic-simple':
+        agent = new HeuristicSimpleAgent();
+        name = 'Heuristic Simple Bot';
         break;
       case 'random-delay':
         agent = new RandomDelaySimpleAgent();
@@ -270,13 +279,15 @@ async function main(gameNumber: number, totalGames: number): Promise<GameResult>
   const agent2 = createAgent(agentType2, 'bot-2');
   
   const agent1Name = agentType1 === 'random' ? 'Random Bot' :
-                     agentType1 === 'simple' ? 'Simple Bot' :
+                     agentType1 === 'simple' ? 'Simple Bot (Exhaustive)' :
+                     agentType1 === 'heuristic-simple' ? 'Heuristic Simple Bot' :
                      agentType1 === 'random-delay' ? 'Random Delay Bot (250-1000ms)' :
                      agentType1 === 'fixed-500ms' ? 'Fixed 500ms Bot' :
                      'Fixed 200ms Bot';
   
   const agent2Name = agentType2 === 'random' ? 'Random Bot' :
-                     agentType2 === 'simple' ? 'Simple Bot' :
+                     agentType2 === 'simple' ? 'Simple Bot (Exhaustive)' :
+                     agentType2 === 'heuristic-simple' ? 'Heuristic Simple Bot' :
                      agentType2 === 'random-delay' ? 'Random Delay Bot (250-1000ms)' :
                      agentType2 === 'fixed-500ms' ? 'Fixed 500ms Bot' :
                      'Fixed 200ms Bot';

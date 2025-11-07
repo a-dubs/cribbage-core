@@ -1,11 +1,13 @@
 import { GameState, Card } from '../types';
-import { SimpleAgent } from './SimpleAgent';
+import { HeuristicSimpleAgent } from './HeuristicSimpleAgent';
 
 /**
- * Base class for SimpleAgent with configurable delays to simulate human response times.
+ * Base class for HeuristicSimpleAgent with configurable delays to simulate human response times.
  * All decision methods are wrapped with a delay before returning.
+ * 
+ * Uses HeuristicSimpleAgent as base (fast) rather than SimpleAgent (slow exhaustive simulation).
  */
-export abstract class DelayedSimpleAgent extends SimpleAgent {
+export abstract class DelayedSimpleAgent extends HeuristicSimpleAgent {
   /**
    * Get the delay in milliseconds for this decision.
    * Subclasses should override this to provide their delay strategy.
