@@ -1,15 +1,15 @@
-# Agent Comparison: SimpleAgent vs HeuristicSimpleAgent
+# Agent Comparison: ExhaustiveSimpleAgent vs HeuristicSimpleAgent
 
 ## Two Distinct Agents
 
 We now have two separate agents with different algorithms:
 
-1. **SimpleAgent**: Exhaustive simulation (slow but optimal)
+1. **ExhaustiveSimpleAgent**: Exhaustive simulation (slow but optimal)
 2. **HeuristicSimpleAgent**: Fast heuristic-based (fast but approximate)
 
-## SimpleAgent: O(n³) Complexity
+## ExhaustiveSimpleAgent: O(n³) Complexity
 
-The **SimpleAgent algorithm** uses exhaustive simulation with nested loops:
+The **ExhaustiveSimpleAgent algorithm** uses exhaustive simulation with nested loops:
 
 ```typescript
 // OLD ALGORITHM (lines 118-142 in original)
@@ -63,7 +63,7 @@ for (const card of validPlayedCards) {                    // O(n) - typically 2-
 
 **Complexity**: O(n) where n = number of valid cards to play (typically 2-6)
 
-**Worst case**: 6 iterations - **900x faster** than SimpleAgent!
+**Worst case**: 6 iterations - **900x faster** than ExhaustiveSimpleAgent!
 
 **Performance**: 
 - All scenarios: 5-50ms per move
@@ -89,7 +89,7 @@ Instead of simulating opponent responses, calculate threat based on:
 
 ## Performance Comparison
 
-### SimpleAgent (Exhaustive)
+### ExhaustiveSimpleAgent (Exhaustive)
 - **Early game** (30+ remaining cards): 2-5 seconds per move
 - **Mid game** (15-20 remaining cards): 500ms-2s per move
 - **Late game** (few remaining cards): 50-200ms per move
@@ -105,7 +105,7 @@ Instead of simulating opponent responses, calculate threat based on:
 
 ## When to Use Which Agent
 
-### Use SimpleAgent When:
+### Use ExhaustiveSimpleAgent When:
 - ✅ You need optimal decisions (analysis, research)
 - ✅ Performance is not critical
 - ✅ You can wait 2-5 seconds per move
@@ -119,7 +119,7 @@ Instead of simulating opponent responses, calculate threat based on:
 
 ## Trade-offs
 
-### SimpleAgent (Exhaustive)
+### ExhaustiveSimpleAgent (Exhaustive)
 - ✅ **Perfect opponent modeling**: Simulates all possible opponent responses
 - ✅ **Theoretical optimality**: Chooses mathematically best move
 - ❌ **Slow**: 2-5 seconds in early game

@@ -3,10 +3,10 @@ import { parseCard, scoreHand, scorePegging } from '../core/scoring';
 import { GameState, Card } from '../types';
 import { RandomAgent } from './RandomAgent';
 
-const AGENT_ID = 'simple-bot-v1.0';
+const AGENT_ID = 'exhaustive-simple-bot-v1.0';
 const DEBUG_TIMING = process.env.DEBUG_SIMPLE_AGENT_TIMING === 'true';
 
-export class SimpleAgent extends RandomAgent {
+export class ExhaustiveSimpleAgent extends RandomAgent {
   playerId: string = AGENT_ID;
   human = false;
   cribbageGame: CribbageGame = new CribbageGame([]);
@@ -50,7 +50,7 @@ export class SimpleAgent extends RandomAgent {
     }
     if (DEBUG_TIMING) {
       const duration = Date.now() - startTime;
-      console.log(`[SimpleAgent.getBestHand] ${duration}ms for hand of ${hand.length} cards`);
+      console.log(`[ExhaustiveSimpleAgent.getBestHand] ${duration}ms for hand of ${hand.length} cards`);
     }
     return bestHand;
   }
@@ -74,7 +74,7 @@ export class SimpleAgent extends RandomAgent {
     
     if (DEBUG_TIMING) {
       const duration = Date.now() - startTime;
-      console.log(`[SimpleAgent.discard] ${duration}ms for player ${playerId}`);
+      console.log(`[ExhaustiveSimpleAgent.discard] ${duration}ms for player ${playerId}`);
     }
     
     return Promise.resolve(discards);
@@ -170,7 +170,7 @@ export class SimpleAgent extends RandomAgent {
     
     if (DEBUG_TIMING) {
       const totalDuration = Date.now() - startTime;
-      console.log(`[SimpleAgent.makeMove] ${totalDuration}ms total (parse: ${parseDuration}ms, filter: ${filterDuration}ms, scoring: ${scoringDuration}ms, select: ${selectDuration}ms)`);
+      console.log(`[ExhaustiveSimpleAgent.makeMove] ${totalDuration}ms total (parse: ${parseDuration}ms, filter: ${filterDuration}ms, scoring: ${scoringDuration}ms, select: ${selectDuration}ms)`);
       console.log(`  - Valid cards: ${validPlayedCards.length}, Possible remaining: ${possibleRemainingCards.length}`);
     }
     

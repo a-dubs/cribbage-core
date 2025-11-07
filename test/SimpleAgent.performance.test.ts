@@ -8,7 +8,7 @@ describe('SimpleAgent Performance Tests', () => {
   let gameState: GameState;
 
   beforeEach(() => {
-    agent = new SimpleAgent();
+    agent = new ExhaustiveSimpleAgent();
     agent.playerId = 'test-player';
     
     game = new CribbageGame([

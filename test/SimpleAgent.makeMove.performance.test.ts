@@ -1,17 +1,17 @@
-import { SimpleAgent } from '../src/agents/SimpleAgent';
+import { ExhaustiveSimpleAgent } from '../src/agents/ExhaustiveSimpleAgent';
 import { HeuristicSimpleAgent } from '../src/agents/HeuristicSimpleAgent';
 import { CribbageGame } from '../src/core/CribbageGame';
 import { GameState, Card } from '../src/types';
 
 describe('Agent.makeMove Performance Tests', () => {
-  let simpleAgent: SimpleAgent;
+  let exhaustiveAgent: ExhaustiveSimpleAgent;
   let heuristicAgent: HeuristicSimpleAgent;
   let game: CribbageGame;
   let gameState: GameState;
 
   beforeEach(() => {
-    simpleAgent = new SimpleAgent();
-    simpleAgent.playerId = 'test-player';
+    exhaustiveAgent = new ExhaustiveSimpleAgent();
+    exhaustiveAgent.playerId = 'test-player';
     
     heuristicAgent = new HeuristicSimpleAgent();
     heuristicAgent.playerId = 'test-player';
@@ -38,7 +38,7 @@ describe('Agent.makeMove Performance Tests', () => {
     gameState = game.getGameState();
   });
 
-  describe('SimpleAgent (exhaustive) baseline performance', () => {
+  describe('ExhaustiveSimpleAgent (exhaustive) baseline performance', () => {
     it('should complete makeMove in reasonable time (< 5000ms)', async () => {
       const player = gameState.players.find(p => p.id === 'test-player')!;
       if (player.peggingHand.length === 0) {
@@ -46,13 +46,13 @@ describe('Agent.makeMove Performance Tests', () => {
       }
 
       const startTime = Date.now();
-      const result = await simpleAgent.makeMove(gameState, 'test-player');
+      const result = await exhaustiveAgent.makeMove(gameState, 'test-player');
       const duration = Date.now() - startTime;
 
       expect(result).toBeDefined();
       expect(duration).toBeLessThan(5000); // Exhaustive can be slow
       
-      console.log(`SimpleAgent.makeMove took ${duration}ms`);
+      console.log(`ExhaustiveSimpleAgent.makeMove took ${duration}ms`);
     });
 
     it('should handle multiple makeMove calls efficiently', async () => {
@@ -66,7 +66,7 @@ describe('Agent.makeMove Performance Tests', () => {
 
       for (let i = 0; i < iterations; i++) {
         const startTime = Date.now();
-        await simpleAgent.makeMove(gameState, 'test-player');
+        await exhaustiveAgent.makeMove(gameState, 'test-player');
         times.push(Date.now() - startTime);
       }
 
@@ -74,7 +74,7 @@ describe('Agent.makeMove Performance Tests', () => {
       const minTime = Math.min(...times);
       const maxTime = Math.max(...times);
 
-      console.log(`SimpleAgent.makeMove (${iterations} iterations):`);
+      console.log(`ExhaustiveSimpleAgent.makeMove (${iterations} iterations):`);
       console.log(`  Average: ${avgTime.toFixed(0)}ms`);
       console.log(`  Min: ${minTime}ms`);
       console.log(`  Max: ${maxTime}ms`);
@@ -86,21 +86,21 @@ describe('Agent.makeMove Performance Tests', () => {
   });
 
   describe('makeMove performance comparison', () => {
-    it('should compare SimpleAgent vs HeuristicSimpleAgent performance', async () => {
+    it('should compare ExhaustiveSimpleAgent vs HeuristicSimpleAgent performance', async () => {
       const player = gameState.players.find(p => p.id === 'test-player')!;
       if (player.peggingHand.length === 0) {
         return;
       }
 
-      // Test SimpleAgent (exhaustive)
-      const simpleTimes: number[] = [];
-      const simpleIterations = 3;
-      for (let i = 0; i < simpleIterations; i++) {
+      // Test ExhaustiveSimpleAgent (exhaustive)
+      const exhaustiveTimes: number[] = [];
+      const exhaustiveIterations = 3;
+      for (let i = 0; i < exhaustiveIterations; i++) {
         const startTime = Date.now();
-        await simpleAgent.makeMove(gameState, 'test-player');
-        simpleTimes.push(Date.now() - startTime);
+        await exhaustiveAgent.makeMove(gameState, 'test-player');
+        exhaustiveTimes.push(Date.now() - startTime);
       }
-      const simpleAvg = simpleTimes.reduce((a, b) => a + b, 0) / simpleTimes.length;
+      const exhaustiveAvg = exhaustiveTimes.reduce((a, b) => a + b, 0) / exhaustiveTimes.length;
 
       // Test HeuristicSimpleAgent (fast)
       const heuristicTimes: number[] = [];
@@ -113,11 +113,11 @@ describe('Agent.makeMove Performance Tests', () => {
       const heuristicAvg = heuristicTimes.reduce((a, b) => a + b, 0) / heuristicTimes.length;
 
       console.log(`\nPerformance Comparison:`);
-      console.log(`  SimpleAgent (exhaustive): avg ${simpleAvg.toFixed(0)}ms`);
+      console.log(`  ExhaustiveSimpleAgent (exhaustive): avg ${exhaustiveAvg.toFixed(0)}ms`);
       console.log(`  HeuristicSimpleAgent (fast): avg ${heuristicAvg.toFixed(0)}ms`);
-      console.log(`  Speedup: ${(simpleAvg / heuristicAvg).toFixed(1)}x faster`);
+      console.log(`  Speedup: ${(exhaustiveAvg / heuristicAvg).toFixed(1)}x faster`);
 
-      expect(heuristicAvg).toBeLessThan(simpleAvg); // Heuristic should be faster
+      expect(heuristicAvg).toBeLessThan(exhaustiveAvg); // Heuristic should be faster
     });
   });
 
@@ -278,8 +278,8 @@ describe('Agent.makeMove Performance Tests', () => {
       expect(maxTime).toBeLessThan(500);
     });
 
-    it('should compare SimpleAgent vs HeuristicSimpleAgent with many remaining cards', async () => {
-      // Simulate early game: few cards played (worst case for SimpleAgent)
+    it('should compare ExhaustiveSimpleAgent vs HeuristicSimpleAgent with many remaining cards', async () => {
+      // Simulate early game: few cards played (worst case for ExhaustiveSimpleAgent)
       const player = gameState.players.find(p => p.id === 'test-player')!;
       if (player.peggingHand.length === 0) {
         return;
@@ -290,10 +290,10 @@ describe('Agent.makeMove Performance Tests', () => {
         playedCards: [], // No cards played yet
       };
 
-      // Test SimpleAgent (exhaustive - slow with many cards)
-      const simpleStartTime = Date.now();
-      await simpleAgent.makeMove(earlyGameState, 'test-player');
-      const simpleTime = Date.now() - simpleStartTime;
+      // Test ExhaustiveSimpleAgent (exhaustive - slow with many cards)
+      const exhaustiveStartTime = Date.now();
+      await exhaustiveAgent.makeMove(earlyGameState, 'test-player');
+      const exhaustiveTime = Date.now() - exhaustiveStartTime;
 
       // Test HeuristicSimpleAgent (fast regardless)
       const heuristicStartTime = Date.now();
@@ -301,11 +301,11 @@ describe('Agent.makeMove Performance Tests', () => {
       const heuristicTime = Date.now() - heuristicStartTime;
 
       console.log(`\nPerformance with many remaining cards:`);
-      console.log(`  SimpleAgent (exhaustive): ${simpleTime}ms`);
+      console.log(`  ExhaustiveSimpleAgent (exhaustive): ${exhaustiveTime}ms`);
       console.log(`  HeuristicSimpleAgent (fast): ${heuristicTime}ms`);
-      console.log(`  Speedup: ${(simpleTime / heuristicTime).toFixed(1)}x faster`);
+      console.log(`  Speedup: ${(exhaustiveTime / heuristicTime).toFixed(1)}x faster`);
 
-      expect(heuristicTime).toBeLessThan(simpleTime); // Heuristic should be faster
+      expect(heuristicTime).toBeLessThan(exhaustiveTime); // Heuristic should be faster
       expect(heuristicTime).toBeLessThan(500); // Heuristic should be consistently fast
     });
   });

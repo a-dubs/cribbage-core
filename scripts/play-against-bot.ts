@@ -1,5 +1,5 @@
 import { GameLoop } from '../src/gameplay/GameLoop';
-import { SimpleAgent } from '../src/agents/SimpleAgent';
+import { ExhaustiveSimpleAgent } from '../src/agents/ExhaustiveSimpleAgent';
 import { HumanAgent } from './HumanAgent';
 import { GameStatistics } from '../src/core/statistics';
 import { GameEvent, PlayerIdAndName } from '../src/types';
@@ -71,7 +71,7 @@ async function main() {
   gameLoop.addAgent(playersInfo[0].id, humanAgent);
 
   // Add a simple bot agent
-  const simpleBotAgent = new SimpleAgent();
+  const simpleBotAgent = new ExhaustiveSimpleAgent();
   simpleBotAgent.playerId = playersInfo[1].id;
   gameLoop.addAgent(playersInfo[1].id, simpleBotAgent);
 

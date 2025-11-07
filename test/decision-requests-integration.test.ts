@@ -1,7 +1,7 @@
 import { CribbageGame } from '../src/core/CribbageGame';
 import { GameLoop } from '../src/gameplay/GameLoop';
 import { RandomAgent } from '../src/agents/RandomAgent';
-import { SimpleAgent } from '../src/agents/SimpleAgent';
+import { ExhaustiveSimpleAgent } from '../src/agents/ExhaustiveSimpleAgent';
 import {
   ActionType,
   AgentDecisionType,
@@ -137,7 +137,7 @@ describe('Decision Requests Integration', () => {
 
       const agent1 = new RandomAgent();
       agent1.playerId = 'bot-1';
-      const agent2 = new SimpleAgent();
+      const agent2 = new ExhaustiveSimpleAgent();
       agent2.playerId = 'bot-2';
 
       gameLoop.addAgent('bot-1', agent1);

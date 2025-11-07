@@ -1,23 +1,23 @@
 import { CribbageGame } from '../core/CribbageGame';
 import { parseCard, scoreHand, scorePegging } from '../core/scoring';
 import { GameState, Card } from '../types';
-import { SimpleAgent } from './SimpleAgent';
+import { ExhaustiveSimpleAgent } from './ExhaustiveSimpleAgent';
 
 const AGENT_ID = 'heuristic-simple-bot-v1.0';
 const DEBUG_TIMING = process.env.DEBUG_SIMPLE_AGENT_TIMING === 'true';
 
 /**
- * HeuristicSimpleAgent extends SimpleAgent but uses a fast heuristic-based algorithm
+ * HeuristicSimpleAgent extends ExhaustiveSimpleAgent but uses a fast heuristic-based algorithm
  * for makeMove instead of exhaustive opponent simulation.
  * 
- * Performance: O(n) complexity vs O(n³) for SimpleAgent
- * - SimpleAgent: Simulates all possible opponent responses (slow but optimal)
+ * Performance: O(n) complexity vs O(n³) for ExhaustiveSimpleAgent
+ * - ExhaustiveSimpleAgent: Simulates all possible opponent responses (slow but optimal)
  * - HeuristicSimpleAgent: Uses threat-based heuristics (fast but approximate)
  * 
  * Use HeuristicSimpleAgent when you need fast decisions (e.g., real-time games).
- * Use SimpleAgent when you need optimal decisions and can wait (e.g., analysis).
+ * Use ExhaustiveSimpleAgent when you need optimal decisions and can wait (e.g., analysis).
  */
-export class HeuristicSimpleAgent extends SimpleAgent {
+export class HeuristicSimpleAgent extends ExhaustiveSimpleAgent {
   playerId: string = AGENT_ID;
 
   makeMove(game: GameState, playerId: string): Promise<Card | null> {

@@ -10,7 +10,7 @@ import {
   GameSnapshot,
 } from './types';
 import { WebSocketAgent } from './agents/WebSocketAgent';
-import { SimpleAgent } from './agents/SimpleAgent';
+import { ExhaustiveSimpleAgent } from './agents/ExhaustiveSimpleAgent';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
@@ -312,7 +312,7 @@ async function handleStartGame(): Promise<void> {
   if (connectedPlayers.size === 1) {
     console.log('Adding a bot to start the game.');
     const botName = 'Simple Optimal Bot';
-    const botAgent = new SimpleAgent();
+    const botAgent = new ExhaustiveSimpleAgent();
     const botId = botAgent.playerId;
     const botPlayerInfo: PlayerInfo = {
       id: botId,
@@ -407,7 +407,7 @@ async function startGame(): Promise<void> {
 
   // Add all bot players to play again votes automatically
   connectedPlayers.forEach(playerInfo => {
-    if (playerInfo.agent instanceof SimpleAgent) {
+    if (playerInfo.agent instanceof ExhaustiveSimpleAgent) {
       playAgainVotes.add(playerInfo.id);
       console.log(
         `Bot player ${playerInfo.id} automatically voted to play again.`
