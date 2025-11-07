@@ -111,7 +111,7 @@ export interface PlayerIdAndName {
  */
 export interface GameEvent {
   gameId: string; // Unique identifier for the game (uuid)
-  gameStateSnapshotId: number; // Ties this game event to a unique snapshot/version of the game state
+  snapshotId: number; // Ties this game event to a unique snapshot/version of the game state
   phase: Phase; // Current phase of the game
   actionType: ActionType; // Last action type taken in the game
   playerId: string | null; // ID of the player who took the last action
@@ -144,7 +144,7 @@ export interface GameState {
   roundNumber: number;
 }
 
-export interface GameStateAndEvent {
+export interface GameSnapshot {
   gameState: GameState; // Current state of the game
   gameEvent: GameEvent; // Last event that occurred in the game
 }

@@ -6,7 +6,7 @@ import {
   GameState,
   GameEvent,
   PlayerIdAndName,
-  GameStateAndEvent,
+  GameSnapshot,
 } from '../types';
 import {
   parseCard,
@@ -20,7 +20,7 @@ import { isValidDiscard } from './utils';
 export class CribbageGame extends EventEmitter {
   private gameState: GameState;
   // private gameEventRecords: GameEvent[]; // Log of all game actions
-  private gameStateAndEventHistory: GameStateAndEvent[]; // Log of all game state and events
+  private gameSnapshotHistory: GameSnapshot[]; // Log of all game state and events
 
   constructor(playersInfo: PlayerIdAndName[], startingScore = 0) {
     super();
@@ -52,7 +52,7 @@ export class CribbageGame extends EventEmitter {
     };
 
     // this.gameEventRecords = [];
-    this.gameStateAndEventHistory = [];
+    this.gameSnapshotHistory = [];
   }
 
   public generateDeck(): Card[] {
@@ -90,14 +90,14 @@ export class CribbageGame extends EventEmitter {
       cards,
       scoreChange,
       timestamp: new Date(),
-      gameStateSnapshotId: this.gameState.snapshotId,
+      snapshotId: this.gameState.snapshotId,
     };
-    const newGameStateAndEvent = {
+    const newGameSnapshot = {
       gameEvent,
       gameState: this.gameState,
-    } as GameStateAndEvent;
-    this.gameStateAndEventHistory.push(newGameStateAndEvent);
-    this.emit('gameStateAndEvent', newGameStateAndEvent);
+    } as GameSnapshot;
+    this.gameSnapshotHistory.push(newGameSnapshot);
+    this.emit('gameSnapshot', newGameSnapshot);
   }
 
   public getCrib(): Card[] {
@@ -106,7 +106,7 @@ export class CribbageGame extends EventEmitter {
 
   public startRound(): void {
     // dont rotate dealer if this is the first round
-    if (this.gameStateAndEventHistory.length > 0) {
+    if (this.gameSnapshotHistory.length > 0) {
       this.gameState.deck = this.generateDeck();
       // Rotate dealer position
       const dealerIndex = this.gameState.players.findIndex(
@@ -158,7 +158,7 @@ export class CribbageGame extends EventEmitter {
     this.gameState.deck = this.gameState.deck.sort(() => Math.random() - 0.5);
   }
 
-  public beginDiscardingPhase(): void {
+  private beginDiscardingPhase(): void {
     this.gameState.currentPhase = Phase.DISCARDING;
     this.recordGameEvent(ActionType.BEGIN_PHASE, null, null, 0);
   }
@@ -174,6 +174,9 @@ export class CribbageGame extends EventEmitter {
       player.hand = this.gameState.deck.splice(0, 6);
       this.recordGameEvent(ActionType.DEAL, player.id, player.hand, 0);
     });
+
+    // Advance to the discarding phase
+    this.beginDiscardingPhase();
   }
 
   public discardToCrib(playerId: string, cards: Card[]): void {
@@ -439,7 +442,7 @@ export class CribbageGame extends EventEmitter {
   //   return this.gameEventRecords;
   // }
 
-  public getGameStateAndEventHistory(): GameStateAndEvent[] {
-    return this.gameStateAndEventHistory;
+  public getGameSnapshotHistory(): GameSnapshot[] {
+    return this.gameSnapshotHistory;
   }
 }

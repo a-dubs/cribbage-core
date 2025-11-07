@@ -8,7 +8,7 @@ import {
   GameEvent,
   PlayerIdAndName,
   GameInfo,
-  GameStateAndEvent,
+  GameSnapshot,
 } from './types';
 import { WebSocketAgent } from './agents/WebSocketAgent';
 import { SimpleAgent } from './agents/SimpleAgent';
@@ -166,7 +166,7 @@ const connectedPlayers: Map<string, PlayerInfo> = new Map();
 const playerIdToSocketId: Map<string, string> = new Map();
 const playAgainVotes: Set<string> = new Set();
 let gameLoop: GameLoop | null = null;
-let mostRecentGameStateAndEvent: GameStateAndEvent | null = null;
+let mostRecentGameSnapshot: GameSnapshot | null = null;
 let mostRecentWaitingForPlayer: EmittedWaitingForPlayer | null = null;
 let currentRoundGameEvents: GameEvent[] = [];
 
@@ -351,12 +351,12 @@ async function handleStartGame(): Promise<void> {
   });
 
   // Emit game state changes
-  gameLoop.on('gameStateAndEvent', (newGSE: GameStateAndEvent) => {
-    io.emit('gameStateAndEvent', newGSE);
-    mostRecentGameStateAndEvent = newGSE;
-    sendGameEventToDB(newGSE.gameEvent);
-    currentRoundGameEvents.push(newGSE.gameEvent);
-    if (newGSE.gameEvent.actionType === ActionType.START_ROUND) {
+  gameLoop.on('gameSnapshot', (newSnapshot: GameSnapshot) => {
+    io.emit('gameSnapshot', newSnapshot);
+    mostRecentGameSnapshot = newSnapshot;
+    sendGameEventToDB(newSnapshot.gameEvent);
+    currentRoundGameEvents.push(newSnapshot.gameEvent);
+    if (newSnapshot.gameEvent.actionType === ActionType.START_ROUND) {
       currentRoundGameEvents = [];
     }
     io.emit('currentRoundGameEvents', currentRoundGameEvents);
@@ -388,10 +388,10 @@ function sendMostRecentGameData(socket: Socket): void {
   if (mostRecentWaitingForPlayer) {
     socket.emit('waitingForPlayer', mostRecentWaitingForPlayer);
   }
-  if (mostRecentGameStateAndEvent) {
-    socket.emit('gameStateAndEvent', mostRecentGameStateAndEvent);
+  if (mostRecentGameSnapshot) {
+    socket.emit('gameSnapshot', mostRecentGameSnapshot);
   } else {
-    console.log('no mostRecentGameStateAndEvent to send...');
+    console.log('no mostRecentGameSnapshot to send...');
   }
   socket.emit('currentRoundGameEvents', currentRoundGameEvents);
   socket.emit('playAgainVotes', Array.from(playAgainVotes));
