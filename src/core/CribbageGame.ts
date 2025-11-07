@@ -171,6 +171,12 @@ export class CribbageGame extends EventEmitter {
       throw new Error('Cannot deal cards outside of the dealing phase.');
     }
 
+    // Clear waiting state before action
+    const dealer = this.gameState.players.find(p => p.isDealer);
+    if (dealer) {
+      this.removeWaitingForPlayer(dealer.id);
+    }
+
     this.shuffleDeck();
 
     this.gameState.players.forEach((player: Player) => {
@@ -192,6 +198,8 @@ export class CribbageGame extends EventEmitter {
       // console.log(`Player ${playerId} hand: ${player.hand.join(', ')}`);
       // console.log(`Player ${playerId} discards: ${cards.join(', ')}`);
     }
+    // Clear waiting state before action
+    this.removeWaitingForPlayer(playerId);
     // Remove cards from player's hand and add to the crib
     player.hand = player.hand.filter((card: Card) => !cards.includes(card));
     this.gameState.crib.push(...cards);
@@ -215,6 +223,9 @@ export class CribbageGame extends EventEmitter {
     if (this.gameState.currentPhase !== Phase.CUTTING) {
       throw new Error('Cannot cut deck outside of the cutting phase.');
     }
+
+    // Clear waiting state before action
+    this.removeWaitingForPlayer(playerId);
 
     this.recordGameEvent(ActionType.CUT, playerId, null, 0);
 
@@ -291,6 +302,9 @@ export class CribbageGame extends EventEmitter {
     // if (!isValidPeggingPlay(this.game, player, card)) {
     //   throw new Error('Invalid card play.');
     // }
+
+    // Clear waiting state before action
+    this.removeWaitingForPlayer(playerId);
 
     if (card) {
       player.playedCards.push(card);
@@ -494,6 +508,25 @@ export class CribbageGame extends EventEmitter {
         requestTimestamp: new Date(),
       });
     }
+  }
+
+  /**
+   * Record a waiting event in game history
+   * This method adds the player to waiting list and records the event
+   * @param actionType - The WAITING_FOR_* action type
+   * @param playerId - ID of the player we're waiting on
+   * @param decisionType - Type of decision being requested
+   */
+  public recordWaitingEvent(
+    actionType: ActionType,
+    playerId: string,
+    decisionType: AgentDecisionType
+  ): void {
+    // Add to waiting list
+    this.addWaitingForPlayer(playerId, decisionType);
+
+    // Record the event
+    this.recordGameEvent(actionType, playerId, null, 0);
   }
 
   /**

@@ -66,7 +66,7 @@ export class GameLoop extends EventEmitter {
   /**
    * Request a decision from a player and record it in GameState/GameEvent
    * This helper method integrates decision requests into the canonical game state
-   * Currently sets waiting state in GameState. Event recording will be added in Phase 2.
+   * Sets waiting state in GameState and records WAITING_FOR_* event in game history
    * @param playerId - ID of the player we're waiting on
    * @param decisionType - Type of decision being requested
    */
@@ -74,12 +74,8 @@ export class GameLoop extends EventEmitter {
     playerId: string,
     decisionType: AgentDecisionType
   ): void {
-    // Add player to waiting list in GameState
-    this.cribbageGame.addWaitingForPlayer(playerId, decisionType);
-
-    // TODO: In Phase 2, add event recording here:
-    // const waitingActionType = this.getWaitingActionType(decisionType);
-    // this.cribbageGame.recordWaitingEvent(waitingActionType, playerId);
+    const waitingActionType = this.getWaitingActionType(decisionType);
+    this.cribbageGame.recordWaitingEvent(waitingActionType, playerId, decisionType);
   }
 
   private async sendContinue(
@@ -90,6 +86,9 @@ export class GameLoop extends EventEmitter {
     const agent = this.agents[playerID];
     if (agent.waitForContinue) {
       if (sendWaitingForPlayer) {
+        // Request decision and record in GameState/GameEvent
+        this.requestDecision(playerID, AgentDecisionType.CONTINUE);
+        // Keep emit for backward compatibility during transition
         const continueData: EmittedWaitingForPlayer = {
           playerId: playerID,
           waitingFor: AgentDecisionType.CONTINUE,
@@ -152,7 +151,9 @@ export class GameLoop extends EventEmitter {
       const agent = this.agents[currentPlayerId];
       if (!agent) throw new Error(`No agent for player ${currentPlayerId}`);
 
-      // emit event saying who's turn it is (who are we waiting on)
+      // Request decision and record in GameState/GameEvent
+      this.requestDecision(currentPlayerId, AgentDecisionType.PLAY_CARD);
+      // Keep emit for backward compatibility during transition
       const emittedWaitingForPlayerData: EmittedWaitingForPlayer = {
         playerId: currentPlayerId,
         waitingFor: AgentDecisionType.PLAY_CARD,
@@ -223,7 +224,9 @@ export class GameLoop extends EventEmitter {
 
     // Prompt the dealer to deal
     const dealer = this.cribbageGame.getPlayer(this.cribbageGame.getDealerId());
-    // send waiting for player event to all players
+    // Request decision and record in GameState/GameEvent
+    this.requestDecision(dealer.id, AgentDecisionType.DEAL);
+    // Keep emit for backward compatibility during transition
     const waitingForPlayerData: EmittedWaitingForPlayer = {
       playerId: dealer.id,
       waitingFor: AgentDecisionType.DEAL,
@@ -237,7 +240,9 @@ export class GameLoop extends EventEmitter {
     for (const player of this.cribbageGame.getGameState().players) {
       const agent = this.agents[player.id];
       if (!agent) throw new Error(`No agent for player ${player.id}`);
-      // emit event saying who's turn it is (who are we waiting on)
+      // Request decision and record in GameState/GameEvent
+      this.requestDecision(player.id, AgentDecisionType.DISCARD);
+      // Keep emit for backward compatibility during transition
       const emittedWaitingForPlayerData: EmittedWaitingForPlayer = {
         playerId: player.id,
         waitingFor: AgentDecisionType.DISCARD,
