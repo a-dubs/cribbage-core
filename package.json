@@ -18,7 +18,7 @@
     "test:watch": "jest --watch",
     "test": "jest --coverage -- --silent=false",
     "typecheck": "tsc --noEmit",
-    "bots-test": "npm run clean && npm run build-scripts && node ./dist-scripts/scripts/run-bots.js",
+    "bots-test": "pnpm run clean && pnpm run build-scripts && node ./dist-scripts/scripts/run-bots.js",
     "play-against-bot": "npm run clean && npm run build-scripts && node ./dist-scripts/scripts/play-against-bot.js",
     "start-server": "DEBUG=socket.io:* node ./lib/server.js"
   },
