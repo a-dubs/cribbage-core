@@ -127,3 +127,6 @@ test/*.test.d.ts
 test/*.test.d.ts.map
 
 .DS_Store
+
+# ignore anything ending in .ignore
+*.ignore
