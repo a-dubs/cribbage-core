@@ -320,8 +320,6 @@ export class GameLoop extends EventEmitter {
       winner = await this.doRound();
     }
 
-    // pause for a beat to let the players see the winner
-    await new Promise(resolve => setTimeout(resolve, 3000));
     this.cribbageGame.endGame(winner);
 
     return Promise.resolve(winner);
