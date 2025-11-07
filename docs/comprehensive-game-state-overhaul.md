@@ -767,22 +767,6 @@ export interface UiState {
     }[];
   };
   
-  // === Interaction State ===
-  interactions: {
-    // Current selection state
-    selectedCards: {
-      playerId: string;
-      cards: Card[];
-    } | null;
-    
-    // Drag and drop state
-    dragState: {
-      card: Card;
-      from: { playerId: string; position: string };
-      currentPosition: { x: number; y: number };
-    } | null;
-  };
-  
   // === Timing and Pacing ===
   timing: {
     // Current processing delay
@@ -805,7 +789,8 @@ export function deriveUiState(
   gameState: GameState | null,
   gameEvent: GameEvent | null,
   previousUiState: UiState | null,
-  playerId: string | null
+  playerId: string | null,
+  processedSnapshotIds: Set<number> // Track processed snapshots to prevent duplicates
 ): UiState {
   if (!gameState) {
     return getEmptyUiState();
@@ -830,10 +815,9 @@ export function deriveUiState(
     },
     
     // === Transient UI (from GameEvent + previous state) ===
-    animations: deriveAnimations(gameState, gameEvent, previousUiState),
-    popups: derivePopups(gameState, gameEvent, previousUiState),
+    animations: deriveAnimations(gameState, gameEvent, previousUiState, processedSnapshotIds),
+    popups: derivePopups(gameState, gameEvent, previousUiState, processedSnapshotIds),
     highlights: deriveHighlights(gameState, gameEvent, playerId),
-    interactions: deriveInteractions(gameState, gameEvent, previousUiState, playerId),
     timing: deriveTiming(gameState, gameEvent),
   };
   
@@ -843,7 +827,8 @@ export function deriveUiState(
 function deriveAnimations(
   gameState: GameState,
   gameEvent: GameEvent | null,
-  previousUiState: UiState | null
+  previousUiState: UiState | null,
+  processedSnapshotIds: Set<number>
 ): UiState['animations'] {
   const cardAnimations: UiState['animations']['cardAnimations'] = [];
   const now = Date.now();
@@ -852,62 +837,79 @@ function deriveAnimations(
     return { cardAnimations: [], phaseTransition: null };
   }
   
-  // Card played animation
-  if (gameEvent.actionType === ActionType.PLAY_CARD && gameEvent.cards) {
-    cardAnimations.push({
-      id: `play-${gameEvent.snapshotId}`,
-      type: 'play',
-      card: gameEvent.cards[0],
-      from: {
-        playerId: gameEvent.playerId!,
-        position: 'peggingHand',
-      },
-      to: {
-        position: 'peggingStack',
-      },
-      duration: 500,
-      startTime: now,
+  // Keep previous animations that haven't expired
+  const previousAnimations = previousUiState?.animations.cardAnimations.filter(
+    anim => now < anim.startTime + anim.duration
+  ) || [];
+  
+  // Track existing animation IDs to prevent duplicates
+  const existingIds = new Set(previousAnimations.map(a => a.id));
+  
+  // Card played animation (only if not already processed)
+  if (gameEvent.actionType === ActionType.PLAY_CARD && gameEvent.cards && !processedSnapshotIds.has(gameEvent.snapshotId)) {
+    const animId = `play-${gameEvent.snapshotId}`;
+    if (!existingIds.has(animId)) {
+      cardAnimations.push({
+        id: animId,
+        type: 'play',
+        card: gameEvent.cards[0],
+        from: {
+          playerId: gameEvent.playerId!,
+          position: 'peggingHand',
+        },
+        to: {
+          position: 'peggingStack',
+        },
+        duration: 500,
+        startTime: now,
+      });
+    }
+  }
+  
+  // Card discarded animation (only if not already processed)
+  if (gameEvent.actionType === ActionType.DISCARD && gameEvent.cards && !processedSnapshotIds.has(gameEvent.snapshotId)) {
+    gameEvent.cards.forEach((card, index) => {
+      const animId = `discard-${gameEvent.snapshotId}-${index}`;
+      if (!existingIds.has(animId)) {
+        cardAnimations.push({
+          id: animId,
+          type: 'discard',
+          card,
+          from: {
+            playerId: gameEvent.playerId!,
+            position: 'hand',
+          },
+          to: {
+            position: 'crib',
+          },
+          duration: 600,
+          startTime: now + (index * 100), // Stagger animations
+        });
+      }
     });
   }
   
-  // Card discarded animation
-  if (gameEvent.actionType === ActionType.DISCARD && gameEvent.cards) {
+  // Deal animation (only if not already processed)
+  if (gameEvent.actionType === ActionType.DEAL && gameEvent.cards && !processedSnapshotIds.has(gameEvent.snapshotId)) {
     gameEvent.cards.forEach((card, index) => {
-      cardAnimations.push({
-        id: `discard-${gameEvent.snapshotId}-${index}`,
-        type: 'discard',
-        card,
-        from: {
-          playerId: gameEvent.playerId!,
-          position: 'hand',
-        },
-        to: {
-          position: 'crib',
-        },
-        duration: 600,
-        startTime: now + (index * 100), // Stagger animations
-      });
-    });
-  }
-  
-  // Deal animation
-  if (gameEvent.actionType === ActionType.DEAL && gameEvent.cards) {
-    gameEvent.cards.forEach((card, index) => {
-      cardAnimations.push({
-        id: `deal-${gameEvent.snapshotId}-${index}`,
-        type: 'deal',
-        card,
-        from: {
-          playerId: gameEvent.playerId!,
-          position: 'deck',
-        },
-        to: {
-          position: 'hand',
-          playerId: gameEvent.playerId!,
-        },
-        duration: 400,
-        startTime: now + (index * 50), // Stagger deal animations
-      });
+      const animId = `deal-${gameEvent.snapshotId}-${index}`;
+      if (!existingIds.has(animId)) {
+        cardAnimations.push({
+          id: animId,
+          type: 'deal',
+          card,
+          from: {
+            playerId: gameEvent.playerId!,
+            position: 'deck',
+          },
+          to: {
+            position: 'hand',
+            playerId: gameEvent.playerId!,
+          },
+          duration: 400,
+          startTime: now + (index * 50), // Stagger deal animations
+        });
+      }
     });
   }
   
@@ -921,11 +923,6 @@ function deriveAnimations(
       }
     : previousUiState?.animations.phaseTransition;
   
-  // Keep previous animations that haven't expired
-  const previousAnimations = previousUiState?.animations.cardAnimations.filter(
-    anim => now < anim.startTime + anim.duration
-  ) || [];
-  
   return {
     cardAnimations: [...previousAnimations, ...cardAnimations],
     phaseTransition,
@@ -935,62 +932,13 @@ function deriveAnimations(
 function derivePopups(
   gameState: GameState,
   gameEvent: GameEvent | null,
-  previousUiState: UiState | null
+  previousUiState: UiState | null,
+  processedSnapshotIds: Set<number>
 ): UiState['popups'] {
   const now = Date.now();
   const scorePopups: UiState['popups']['scorePopups'] = [];
   const goMessages: UiState['popups']['goMessages'] = [];
   const messages: UiState['popups']['messages'] = [];
-  
-  if (!gameEvent) {
-    // Keep existing popups that haven't expired
-    return {
-      scorePopups: previousUiState?.popups.scorePopups.filter(
-        p => now < p.startTime + p.duration
-      ) || [],
-      goMessages: previousUiState?.popups.goMessages.filter(
-        m => now < m.startTime + m.duration
-      ) || [],
-      messages: previousUiState?.popups.messages.filter(
-        m => now < m.startTime + m.duration
-      ) || [],
-    };
-  }
-  
-  // Score popup
-  if (gameEvent.scoreChange > 0 && gameEvent.playerId) {
-    const reason = getScoreReason(gameEvent.actionType);
-    scorePopups.push({
-      playerId: gameEvent.playerId,
-      points: gameEvent.scoreChange,
-      reason,
-      startTime: now,
-      duration: 3000,
-    });
-  }
-  
-  // "GO" message
-  if (gameEvent.actionType === ActionType.GO && gameEvent.playerId) {
-    goMessages.push({
-      playerId: gameEvent.playerId,
-      startTime: now,
-      duration: 2000,
-    });
-  }
-  
-  // Phase transition messages
-  if (gameEvent.actionType === ActionType.BEGIN_PHASE) {
-    const phaseMessage = getPhaseMessage(gameState.currentPhase);
-    if (phaseMessage) {
-      messages.push({
-        id: `phase-${gameEvent.snapshotId}`,
-        text: phaseMessage,
-        type: 'info',
-        startTime: now,
-        duration: 2000,
-      });
-    }
-  }
   
   // Keep previous popups that haven't expired
   const previousScorePopups = previousUiState?.popups.scorePopups.filter(
@@ -1002,6 +950,67 @@ function derivePopups(
   const previousMessages = previousUiState?.popups.messages.filter(
     m => now < m.startTime + m.duration
   ) || [];
+  
+  // Track existing popup IDs to prevent duplicates
+  const existingScorePopupIds = new Set(previousScorePopups.map(p => `${p.playerId}-${p.startTime}`));
+  const existingGoMessageIds = new Set(previousGoMessages.map(m => `${m.playerId}-${m.startTime}`));
+  const existingMessageIds = new Set(previousMessages.map(m => m.id));
+  
+  if (!gameEvent) {
+    // No new event, just return existing popups
+    return {
+      scorePopups: previousScorePopups,
+      goMessages: previousGoMessages,
+      messages: previousMessages,
+    };
+  }
+  
+  // Only process if this snapshot hasn't been processed before
+  if (!processedSnapshotIds.has(gameEvent.snapshotId)) {
+    // Score popup
+    if (gameEvent.scoreChange > 0 && gameEvent.playerId) {
+      const popupId = `${gameEvent.playerId}-${now}`;
+      if (!existingScorePopupIds.has(popupId)) {
+        const reason = getScoreReason(gameEvent.actionType, gameEvent, gameState);
+        scorePopups.push({
+          playerId: gameEvent.playerId,
+          points: gameEvent.scoreChange,
+          reason, // Future-proofed: can be enhanced with detailed reasons (see todo.md)
+          startTime: now,
+          duration: 3000,
+        });
+      }
+    }
+    
+    // "GO" message
+    if (gameEvent.actionType === ActionType.GO && gameEvent.playerId) {
+      const messageId = `${gameEvent.playerId}-${now}`;
+      if (!existingGoMessageIds.has(messageId)) {
+        goMessages.push({
+          playerId: gameEvent.playerId,
+          startTime: now,
+          duration: 2000,
+        });
+      }
+    }
+    
+    // Phase transition messages
+    if (gameEvent.actionType === ActionType.BEGIN_PHASE) {
+      const phaseMessage = getPhaseMessage(gameState.currentPhase);
+      if (phaseMessage) {
+        const messageId = `phase-${gameEvent.snapshotId}`;
+        if (!existingMessageIds.has(messageId)) {
+          messages.push({
+            id: messageId,
+            text: phaseMessage,
+            type: 'info',
+            startTime: now,
+            duration: 2000,
+          });
+        }
+      }
+    }
+  }
   
   return {
     scorePopups: [...previousScorePopups, ...scorePopups],
@@ -1057,20 +1066,6 @@ function deriveHighlights(
   };
 }
 
-function deriveInteractions(
-  gameState: GameState,
-  gameEvent: GameEvent | null,
-  previousUiState: UiState | null,
-  playerId: string | null
-): UiState['interactions'] {
-  // Interactions are typically managed by component state, but we can derive
-  // initial state from gameState (e.g., if player needs to select cards)
-  
-  return {
-    selectedCards: previousUiState?.interactions.selectedCards || null,
-    dragState: previousUiState?.interactions.dragState || null,
-  };
-}
 
 function deriveTiming(
   gameState: GameState,
@@ -1103,9 +1098,15 @@ function deriveTiming(
 }
 
 // Helper functions
-function getScoreReason(actionType: ActionType): string {
+function getScoreReason(
+  actionType: ActionType,
+  gameEvent: GameEvent,
+  gameState: GameState
+): string {
   // Map action types to user-friendly reasons
-  // This could be enhanced to include more specific reasons from scoring logic
+  // TODO: Enhance with detailed reasons like "fifteen", "pair", "run of 3" (see todo.md)
+  // Future enhancement: Derive from gameEvent.cards and gameState.peggingStack
+  // or add scoring reason metadata to GameEvent (requires core-side changes)
   if (actionType === ActionType.SCORE_HAND) return 'hand';
   if (actionType === ActionType.SCORE_CRIB) return 'crib';
   if (actionType === ActionType.LAST_CARD) return 'lastCard';
@@ -1157,6 +1158,7 @@ const useGameState = (playerId: string | null) => {
   
   const { setUiState } = useUiStateStore();
   const previousUiStateRef = useRef<UiState | null>(null);
+  const processedSnapshotIdsRef = useRef<Set<number>>(new Set());
   
   const processQueue = () => {
     // ... existing queue processing ...
@@ -1168,12 +1170,24 @@ const useGameState = (playerId: string | null) => {
       gameState,
       gameEvent,
       previousUiStateRef.current,
-      playerId
+      playerId,
+      processedSnapshotIdsRef.current
     );
+    
+    // Mark this snapshot as processed to prevent duplicates
+    if (gameEvent) {
+      processedSnapshotIdsRef.current.add(gameEvent.snapshotId);
+      // Clean up old snapshot IDs (keep last 100 to prevent memory leak)
+      if (processedSnapshotIdsRef.current.size > 100) {
+        const idsArray = Array.from(processedSnapshotIdsRef.current);
+        const oldestIds = idsArray.slice(0, idsArray.length - 100);
+        oldestIds.forEach(id => processedSnapshotIdsRef.current.delete(id));
+      }
+    }
     
     // Update stores
     setGameState(gameState);
-    setRecentGameEvent(gameEvent);
+    // NOTE: recentGameEvent removed in migration - components use uiState instead
     setUiState(uiState); // NEW: Set centralized UI state
     
     // Store for next iteration
@@ -1557,84 +1571,21 @@ function deriveAnimations(
 3. ✅ **Filter expired**: Remove expired animations/popups when deriving new state
 4. ✅ **Use animation libraries**: `react-native-reanimated` handles timing independently
 5. ✅ **Unique IDs**: Use unique IDs (e.g., `snapshotId` + event type) to prevent duplicates
-6. ✅ **Component-level checks**: Components can also check expiration for fine-grained control
+6. ✅ **Track processed snapshots**: Use `processedSnapshotIds` Set to prevent duplicate animations/popups
+7. ✅ **Component-level checks**: Components can also check expiration for fine-grained control
 
 This approach ensures that transient UI elements persist across multiple game state updates, allowing smooth, staggered animations even when new events arrive mid-animation.
 
-**Markdown Flow Spec** (for reference and AI assistance):
+#### Performance Considerations
 
-```markdown
-# Cribbage Game UI Flow Specification
+**Memoization**: The derivation function is called on every `GameSnapshot` processing. For now, we're not memoizing because:
+- Derivation is mostly object creation and simple checks (should be fast)
+- `GameSnapshot` processing already happens sequentially with delays
+- If profiling shows performance issues, we can add memoization later
 
-## PHASE: DEALING
-- **Show**: Deck, empty hands
-- **Animate**: Cards fanning into player hands (staggered, 50ms delay)
-- **Duration**: 300ms per card
-- **Popups**: None
-- **Highlights**: None
-- **Wait for**: All cards dealt
+**Memory Management**: `processedSnapshotIds` Set is cleaned up automatically (keeps last 100 IDs) to prevent memory leaks during long games.
 
-## PHASE: DISCARDING
-- **Show**: Player hands, discard pile slot
-- **Animate**: Selected cards sliding to discard pile (staggered, 100ms delay)
-- **Duration**: 600ms per card
-- **Popups**: None
-- **Highlights**: 
-  - Highlight valid discard combinations
-  - Highlight waiting players
-- **Wait for**: All players to discard
-
-## PHASE: CUTTING
-- **Show**: Deck, turn card slot
-- **Animate**: Deck cut, turn card flip
-- **Duration**: 800ms
-- **Popups**: 
-  - "Cut the deck" message (if player's turn)
-- **Highlights**: Highlight player who should cut
-- **Wait for**: Deck cut
-
-## PHASE: PEGGING
-- **Show**: Pegging track, player hands, played cards stack
-- **Animate**: 
-  - Card slides from hand to pegging stack (500ms)
-  - Score burst appears above player (if score > 0)
-  - "GO" message appears next to player (if GO)
-- **Duration**: 
-  - Card play: 500ms
-  - Score popup: 3000ms
-  - GO message: 2000ms
-- **Popups**:
-  - Score popup: "+X points" with reason (fifteen, pair, run, etc.)
-  - "GO" message next to player who said go
-- **Highlights**:
-  - Highlight current player's turn
-  - Highlight valid plays (green glow on valid cards)
-  - Highlight invalid plays (red glow, if attempted)
-- **Wait for**: Player to play card or say GO
-
-## PHASE: COUNTING
-- **Show**: All hands face up, crib face up, score piles
-- **Animate**: 
-  - Hands flip to show cards
-  - Score calculations appear
-  - Score popups for each scoring combination
-- **Duration**: 
-  - Hand flip: 800ms
-  - Score popup per combination: 2000ms
-  - Total phase: 3000ms minimum
-- **Popups**:
-  - Score popup for each scoring combination
-  - "+X for [reason]" messages
-- **Highlights**:
-  - Highlight scoring combinations
-  - Highlight current hand being scored
-- **Wait for**: All hands scored
-
-## TRANSITIONS
-- **Phase Change**: Fade to black (400ms) → Show new phase (400ms)
-- **Round End**: Confetti animation (2000ms)
-- **Game End**: Winner announcement (5000ms)
-```
+**UI Flow Specification**: See `cribbage-with-friends-app/docs/UI_FLOW_SPEC.md` for detailed flow specification document.
 
 #### Benefits
 
@@ -1649,11 +1600,39 @@ This approach ensures that transient UI elements persist across multiple game st
 
 #### Migration Strategy
 
-**Phase 1**: Create `deriveUiState` function and `useUiStateStore`
-**Phase 2**: Update `useGameState` to call `deriveUiState` and set UI state
-**Phase 3**: Update one component at a time to use `uiState` instead of processing events
-**Phase 4**: Remove all event processing logic from components
-**Phase 5**: Add UI flow spec document for reference
+**Component Migration Order** (recommended):
+1. `PlayerHandOverlay` - Proof of concept, simplest component
+2. `PlayerHand` - Uses `recentGameEvent` for counting phase logic
+3. `PlayArea` - Minimal event processing
+4. Other components as needed
+
+**Implementation Phases**:
+
+**Phase 1**: Foundation
+- Create `UiState` type definition file (`types/uiState.ts`)
+- Create `deriveUiState` function (`utils/uiState.ts`)
+- Create `useUiStateStore` Zustand store (`state/uiStateStore.ts`)
+- Add unit tests for derivation functions
+- Create `UI_FLOW_SPEC.md` document (see separate file)
+
+**Phase 2**: Integration
+- Update `useGameState` to call `deriveUiState()` and set UI state
+- Add `processedSnapshotIds` tracking to prevent duplicates
+- Remove `recentGameEvent` usage from `useGameState` (rip the bandaid off)
+
+**Phase 3**: Component Migration (all at once)
+- Update `PlayerHandOverlay` to use `uiState`
+- Update `PlayerHand` to use `uiState`
+- Update `PlayArea` to use `uiState`
+- Update any other components that process events
+- Remove all `recentGameEvent` usage from components
+
+**Phase 4**: Cleanup
+- Remove `recentGameEvent` from `useGameStateStore`
+- Remove all event processing logic from components
+- Verify all components are "dumb renderers"
+
+**Note**: We're removing old stuff in one fell swoop - no backwards compatibility during migration. This keeps the codebase clean and avoids confusing intermediate states.
 
 ---
 
@@ -1735,32 +1714,39 @@ This approach ensures that transient UI elements persist across multiple game st
 
 **Goal**: Create centralized UI state derivation system
 
-1. **Create `UiState` type** with all UI-relevant state
-2. **Implement `deriveUiState()` function** with all derivation logic
-3. **Create `useUiStateStore`** Zustand store
-4. **Update `useGameState` hook** to call `deriveUiState()` and set UI state
-5. **Create UI flow specification** markdown document
-6. **Update one component** (`PlayerHandOverlay`) as proof of concept
-7. **Test** that UI state derivation works correctly
+1. **Create `UiState` type** with all UI-relevant state (`types/uiState.ts`)
+2. **Implement `deriveUiState()` function** with all derivation logic (`utils/uiState.ts`)
+3. **Create `useUiStateStore`** Zustand store (`state/uiStateStore.ts`)
+4. **Add `processedSnapshotIds` tracking** to prevent duplicates
+5. **Update `useGameState` hook** to call `deriveUiState()` and set UI state
+6. **Remove `recentGameEvent` usage** from `useGameState` (rip the bandaid off)
+7. **Create UI flow specification** markdown document (`docs/UI_FLOW_SPEC.md`)
+8. **Add comprehensive unit tests** for derivation functions
 
 **Testing**:
-- Unit tests for `deriveUiState()` function
+- Unit tests for `deriveUiState()` function with various `GameState`/`GameEvent` combinations
+- Unit tests for transient state persistence (popups surviving multiple updates)
+- Unit tests for animation deduplication
+- Unit tests for edge cases (null states, rapid events, etc.)
 - Integration test with queue system
 - Visual verification of UI behavior
 
 ### Phase 7: Component Migration (Week 10-11)
 
-**Goal**: Migrate all components to use centralized UI state
+**Goal**: Migrate all components to use centralized UI state (all at once)
 
-1. **Update `PlayerHand` component** to use `uiState`
-2. **Update `PlayArea` component** to use `uiState`
-3. **Update other game components** one by one
-4. **Remove all event processing logic** from components
-5. **Remove `recentGameEvent` usage** from components (keep in store for backwards compat)
+1. **Update `PlayerHandOverlay` component** to use `uiState` (proof of concept)
+2. **Update `PlayerHand` component** to use `uiState`
+3. **Update `PlayArea` component** to use `uiState`
+4. **Update any other components** that process events
+5. **Remove all `recentGameEvent` usage** from components
+6. **Remove all event processing logic** from components
+7. **Remove `recentGameEvent` from `useGameStateStore`** (cleanup)
 
 **Testing**:
 - Visual regression testing
 - Verify all animations/popups still work
+- Verify no `recentGameEvent` references remain
 - Performance testing
 
 ### Phase 8: Cleanup & Optimization (Week 12)
@@ -1830,6 +1816,118 @@ describe('GameState redaction', () => {
     const self = redacted.players.find(p => p.id === 'player1');
     
     expect(self.hand.every(card => card !== 'UNKNOWN')).toBe(true);
+  });
+});
+```
+
+**For UI State Derivation**:
+```typescript
+describe('deriveUiState', () => {
+  it('should create score popup for scoring events', () => {
+    const gameState = createMockGameState();
+    const gameEvent = createMockGameEvent({
+      actionType: ActionType.PLAY_CARD,
+      scoreChange: 2,
+      playerId: 'player1',
+      snapshotId: 1,
+    });
+    const processedIds = new Set<number>();
+    
+    const uiState = deriveUiState(gameState, gameEvent, null, 'player1', processedIds);
+    
+    expect(uiState.popups.scorePopups).toHaveLength(1);
+    expect(uiState.popups.scorePopups[0].playerId).toBe('player1');
+    expect(uiState.popups.scorePopups[0].points).toBe(2);
+  });
+  
+  it('should persist popups across multiple updates', () => {
+    const gameState = createMockGameState();
+    const event1 = createMockGameEvent({
+      actionType: ActionType.PLAY_CARD,
+      scoreChange: 2,
+      playerId: 'player1',
+      snapshotId: 1,
+    });
+    const processedIds = new Set<number>();
+    
+    const uiState1 = deriveUiState(gameState, event1, null, 'player1', processedIds);
+    processedIds.add(1);
+    
+    // Simulate new event arriving 500ms later
+    const event2 = createMockGameEvent({
+      actionType: ActionType.PLAY_CARD,
+      scoreChange: 0,
+      playerId: 'player2',
+      snapshotId: 2,
+    });
+    
+    // Mock Date.now to return time 500ms after first popup
+    const originalNow = Date.now;
+    Date.now = jest.fn(() => originalNow() + 500);
+    
+    const uiState2 = deriveUiState(gameState, event2, uiState1, 'player1', processedIds);
+    
+    // First popup should still be present (hasn't expired)
+    expect(uiState2.popups.scorePopups).toHaveLength(1);
+    expect(uiState2.popups.scorePopups[0].playerId).toBe('player1');
+    
+    Date.now = originalNow;
+  });
+  
+  it('should prevent duplicate animations for same snapshot', () => {
+    const gameState = createMockGameState();
+    const gameEvent = createMockGameEvent({
+      actionType: ActionType.PLAY_CARD,
+      cards: [{ suit: 'hearts', rank: '5' }],
+      playerId: 'player1',
+      snapshotId: 1,
+    });
+    const processedIds = new Set<number>();
+    
+    const uiState1 = deriveUiState(gameState, gameEvent, null, 'player1', processedIds);
+    processedIds.add(1);
+    
+    // Process same event again
+    const uiState2 = deriveUiState(gameState, gameEvent, uiState1, 'player1', processedIds);
+    
+    // Should not create duplicate animation
+    const playAnimations = uiState2.animations.cardAnimations.filter(
+      a => a.id === `play-${gameEvent.snapshotId}`
+    );
+    expect(playAnimations).toHaveLength(1);
+  });
+  
+  it('should handle null gameState gracefully', () => {
+    const uiState = deriveUiState(null, null, null, null, new Set());
+    
+    expect(uiState).toBeDefined();
+    expect(uiState.popups.scorePopups).toHaveLength(0);
+    expect(uiState.animations.cardAnimations).toHaveLength(0);
+  });
+  
+  it('should filter expired popups', () => {
+    const gameState = createMockGameState();
+    const gameEvent = createMockGameEvent({
+      actionType: ActionType.PLAY_CARD,
+      scoreChange: 2,
+      playerId: 'player1',
+      snapshotId: 1,
+    });
+    const processedIds = new Set<number>();
+    
+    const uiState1 = deriveUiState(gameState, gameEvent, null, 'player1', processedIds);
+    processedIds.add(1);
+    
+    // Mock Date.now to return time after popup duration (3000ms)
+    const originalNow = Date.now;
+    Date.now = jest.fn(() => originalNow() + 3500);
+    
+    const uiState2 = deriveUiState(gameState, null, uiState1, 'player1', processedIds);
+    
+    // Popup should be filtered out (expired)
+    expect(uiState2.popups.scorePopups).toHaveLength(0);
+    
+    Date.now = originalNow;
   });
 });
 ```
