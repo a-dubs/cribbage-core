@@ -49,6 +49,7 @@ export class CribbageGame extends EventEmitter {
       peggingTotal: 0,
       roundNumber: 0,
       snapshotId: 0,
+      waitingForPlayers: [],
     };
 
     // this.gameEventRecords = [];
@@ -127,6 +128,7 @@ export class CribbageGame extends EventEmitter {
     this.gameState.peggingGoPlayers = [];
     this.gameState.peggingLastCardPlayer = null;
     this.gameState.peggingTotal = 0;
+    this.gameState.waitingForPlayers = [];
     // reset all players' hands
     this.gameState.players.forEach(player => {
       player.hand = [];

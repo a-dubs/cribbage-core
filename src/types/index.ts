@@ -30,6 +30,11 @@ export enum ActionType {
   START_PEGGING_ROUND = 'START_PEGGING_ROUND', // Start a new round of pegging
   START_ROUND = 'START_ROUND', // Start a new round of the game
   WIN = 'WIN', // Player wins the game
+  // Waiting action types - indicate when the game is waiting for a player decision
+  WAITING_FOR_DEAL = 'WAITING_FOR_DEAL',
+  WAITING_FOR_DISCARD = 'WAITING_FOR_DISCARD',
+  WAITING_FOR_PLAY_CARD = 'WAITING_FOR_PLAY_CARD',
+  WAITING_FOR_CONTINUE = 'WAITING_FOR_CONTINUE',
 }
 
 /**
@@ -126,6 +131,15 @@ export interface GameEvent {
 }
 
 /**
+ * Interface for tracking a player decision request
+ */
+export interface WaitingForPlayer {
+  playerId: string; // ID of the player we're waiting on
+  decisionType: AgentDecisionType; // Type of decision being requested
+  requestTimestamp: Date; // When the request was made
+}
+
+/**
  * Interface for the overall game
  */
 export interface GameState {
@@ -142,6 +156,7 @@ export interface GameState {
   peggingTotal: number; // Total value of the cards played in the current pegging stack
   snapshotId: number;
   roundNumber: number;
+  waitingForPlayers: WaitingForPlayer[]; // List of players we're currently waiting on for decisions (supports parallel decisions)
 }
 
 export interface GameSnapshot {
