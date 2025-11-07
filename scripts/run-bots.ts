@@ -3,7 +3,7 @@ import { RandomAgent } from '../src/agents/RandomAgent';
 import { SimpleAgent } from '../src/agents/SimpleAgent';
 // import { HumanAgent } from '../src/agents/HumanAgent';
 import { GameStatistics } from '../src/core/statistics';
-import { GameEvent, PlayerIdAndName } from '../src/types';
+import { GameEvent, PlayerIdAndName, ActionType } from '../src/types';
 import { scoreHand } from '../src/core/scoring';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -72,6 +72,7 @@ interface GameResult {
   winnerName: string;
   scores: { playerId: string; playerName: string; score: number }[];
   rounds: number;
+  gameHistory: GameEvent[];
 }
 
 const gameResults: GameResult[] = [];
@@ -94,12 +95,38 @@ function printStatistics(
   const bestHand = GameStatistics.bestPlayedHand(playerId, gameHistory);
   const hisHeelsCount = GameStatistics.scoredHisHeels(playerId, gameHistory);
 
+  // Count decision requests for this player
+  const decisionRequests = gameHistory.filter(
+    e =>
+      e.playerId === playerId &&
+      (e.actionType === ActionType.WAITING_FOR_DEAL ||
+        e.actionType === ActionType.WAITING_FOR_DISCARD ||
+        e.actionType === ActionType.WAITING_FOR_PLAY_CARD ||
+        e.actionType === ActionType.WAITING_FOR_CONTINUE)
+  );
+  const dealRequests = decisionRequests.filter(
+    e => e.actionType === ActionType.WAITING_FOR_DEAL
+  ).length;
+  const discardRequests = decisionRequests.filter(
+    e => e.actionType === ActionType.WAITING_FOR_DISCARD
+  ).length;
+  const playCardRequests = decisionRequests.filter(
+    e => e.actionType === ActionType.WAITING_FOR_PLAY_CARD
+  ).length;
+  const continueRequests = decisionRequests.filter(
+    e => e.actionType === ActionType.WAITING_FOR_CONTINUE
+  ).length;
+
   logger.log(`Points from pegging: ${pointsFromPegging}`, toStdout);
   logger.log(`Average hand score: ${avgHandScore.toFixed(1)}`, toStdout);
   logger.log(`Average crib score: ${avgCribScore.toFixed(1)}`, toStdout);
   logger.log(`Max hand score: ${maxHandScore}`, toStdout);
   logger.log(`Max crib score: ${maxCribScore}`, toStdout);
   logger.log(`Scored "his heels": ${hisHeelsCount} times`, toStdout);
+  logger.log(
+    `Decision requests: DEAL=${dealRequests}, DISCARD=${discardRequests}, PLAY_CARD=${playCardRequests}, CONTINUE=${continueRequests} (total: ${decisionRequests.length})`,
+    toStdout
+  );
   if (bestHand) {
     // log the best hand and the turn card using bestHand.hand and bestHand.turnCard
     logger.log(
@@ -166,6 +193,35 @@ async function main(gameNumber: number, totalGames: number): Promise<GameResult>
     .getGameSnapshotHistory()
     .map(snapshot => snapshot.gameEvent);
 
+  // Log decision request statistics for the game
+  const allDecisionRequests = gameHistory.filter(
+    e =>
+      e.actionType === ActionType.WAITING_FOR_DEAL ||
+      e.actionType === ActionType.WAITING_FOR_DISCARD ||
+      e.actionType === ActionType.WAITING_FOR_PLAY_CARD ||
+      e.actionType === ActionType.WAITING_FOR_CONTINUE
+  );
+  logger.log(
+    `\nDecision requests tracked in game history: ${allDecisionRequests.length} total`,
+    false
+  );
+  logger.log(
+    `  - WAITING_FOR_DEAL: ${allDecisionRequests.filter(e => e.actionType === ActionType.WAITING_FOR_DEAL).length}`,
+    false
+  );
+  logger.log(
+    `  - WAITING_FOR_DISCARD: ${allDecisionRequests.filter(e => e.actionType === ActionType.WAITING_FOR_DISCARD).length}`,
+    false
+  );
+  logger.log(
+    `  - WAITING_FOR_PLAY_CARD: ${allDecisionRequests.filter(e => e.actionType === ActionType.WAITING_FOR_PLAY_CARD).length}`,
+    false
+  );
+  logger.log(
+    `  - WAITING_FOR_CONTINUE: ${allDecisionRequests.filter(e => e.actionType === ActionType.WAITING_FOR_CONTINUE).length}`,
+    false
+  );
+
   // read in game-history.json from project root and append gameHistory to it
   const filePath = '/Users/a-dubs/personal/cribbage/game-history.json';
   let existingHistory: GameEvent[] = [];
@@ -202,6 +258,7 @@ async function main(gameNumber: number, totalGames: number): Promise<GameResult>
     winnerName,
     scores,
     rounds: NumberOfRounds,
+    gameHistory,
   };
   gameResults.push(gameResult);
 
@@ -316,6 +373,23 @@ void (async () => {
       `Max crib score: avg: ${avg(maxCribScore)}, min: ${min(
         maxCribScore
       )}, max: ${max(maxCribScore)}`
+    );
+    
+    // Decision request statistics (aggregate across all games)
+    const allDecisionRequests = gameResults.flatMap(r => r.gameHistory).filter(
+      e =>
+        e.playerId === playerId &&
+        (e.actionType === ActionType.WAITING_FOR_DEAL ||
+          e.actionType === ActionType.WAITING_FOR_DISCARD ||
+          e.actionType === ActionType.WAITING_FOR_PLAY_CARD ||
+          e.actionType === ActionType.WAITING_FOR_CONTINUE)
+    );
+    const dealReqs = allDecisionRequests.filter(e => e.actionType === ActionType.WAITING_FOR_DEAL).length;
+    const discardReqs = allDecisionRequests.filter(e => e.actionType === ActionType.WAITING_FOR_DISCARD).length;
+    const playCardReqs = allDecisionRequests.filter(e => e.actionType === ActionType.WAITING_FOR_PLAY_CARD).length;
+    const continueReqs = allDecisionRequests.filter(e => e.actionType === ActionType.WAITING_FOR_CONTINUE).length;
+    console.log(
+      `Decision requests: DEAL=${dealReqs}, DISCARD=${discardReqs}, PLAY_CARD=${playCardReqs}, CONTINUE=${continueReqs} (total: ${allDecisionRequests.length})`
     );
     console.log('------------------------------');
   }
