@@ -385,14 +385,32 @@ async function handleStartGame(): Promise<void> {
 
 function sendMostRecentGameData(socket: Socket): void {
   console.log('Sending most recent game data to client');
-  if (mostRecentWaitingForPlayer) {
-    socket.emit('waitingForPlayer', mostRecentWaitingForPlayer);
-  }
+  
+  // Send GameSnapshot first (contains waiting state in GameState)
   if (mostRecentGameSnapshot) {
     socket.emit('gameSnapshot', mostRecentGameSnapshot);
+    
+    // Derive waiting state from GameSnapshot for reconnecting clients
+    const waitingForPlayers = mostRecentGameSnapshot.gameState.waitingForPlayers;
+    if (waitingForPlayers && waitingForPlayers.length > 0) {
+      // Send waiting state for each waiting player
+      waitingForPlayers.forEach(waiting => {
+        const waitingData: EmittedWaitingForPlayer = {
+          playerId: waiting.playerId,
+          waitingFor: waiting.decisionType,
+        };
+        socket.emit('waitingForPlayer', waitingData);
+      });
+    }
   } else {
     console.log('no mostRecentGameSnapshot to send...');
   }
+  
+  // Keep legacy emit for backward compatibility (fallback)
+  if (mostRecentWaitingForPlayer) {
+    socket.emit('waitingForPlayer', mostRecentWaitingForPlayer);
+  }
+  
   socket.emit('currentRoundGameEvents', currentRoundGameEvents);
   socket.emit('playAgainVotes', Array.from(playAgainVotes));
 }
