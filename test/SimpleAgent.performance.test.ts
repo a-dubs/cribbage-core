@@ -1,9 +1,9 @@
-import { SimpleAgent } from '../src/agents/SimpleAgent';
+import { ExhaustiveSimpleAgent } from '../src/agents/ExhaustiveSimpleAgent';
 import { CribbageGame } from '../src/core/CribbageGame';
 import { GameState, Card } from '../src/types';
 
 describe('SimpleAgent Performance Tests', () => {
-  let agent: SimpleAgent;
+  let agent: ExhaustiveSimpleAgent;
   let game: CribbageGame;
   let gameState: GameState;
 

@@ -1,5 +1,5 @@
 import { CribbageGame } from '../src/core/CribbageGame';
-import { ActionType, Phase } from '../src/types';
+import { ActionType, Phase, Card } from '../src/types';
 
 describe('CribbageGame Setter Methods', () => {
   let game: CribbageGame;
@@ -30,7 +30,7 @@ describe('CribbageGame Setter Methods', () => {
     });
 
     it('should include cards in event when provided', () => {
-      const cards = ['ACE_SPADES', 'TWO_SPADES'] as const;
+      const cards: Card[] = ['ACE_SPADES', 'TWO_SPADES'];
       game.addScoreToPlayer('player-1', 10, ActionType.SCORE_HAND, cards);
 
       const history = game.getGameSnapshotHistory();
