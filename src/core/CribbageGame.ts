@@ -438,6 +438,44 @@ export class CribbageGame extends EventEmitter {
   }
 
   /**
+   * Add score to a player and automatically log the event
+   * This is a setter method that enforces event logging for score changes
+   * @param playerId - ID of the player receiving points
+   * @param points - Number of points to add
+   * @param reason - ActionType that caused the score change
+   * @param cards - Optional cards involved in the scoring (for event logging)
+   */
+  public addScoreToPlayer(
+    playerId: string,
+    points: number,
+    reason: ActionType,
+    cards: Card[] | null = null
+  ): void {
+    const player = this.gameState.players.find(p => p.id === playerId);
+    if (!player) {
+      throw new Error(`Player ${playerId} not found`);
+    }
+
+    player.score += points;
+
+    // Automatically log event
+    this.recordGameEvent(reason, playerId, cards, points);
+  }
+
+  /**
+   * Set the game phase and automatically log the event
+   * This is a setter method that enforces event logging for phase changes
+   * @param newPhase - The new phase to transition to
+   * @param reason - ActionType that caused the phase change
+   */
+  public setPhase(newPhase: Phase, reason: ActionType): void {
+    this.gameState.currentPhase = newPhase;
+
+    // Automatically log event
+    this.recordGameEvent(reason, null, null, 0);
+  }
+
+  /**
    * Add a player to the waiting list for a decision request
    * @param playerId - ID of the player we're waiting on
    * @param decisionType - Type of decision being requested
