@@ -7,6 +7,7 @@ import {
   GameEvent,
   PlayerIdAndName,
   GameSnapshot,
+  AgentDecisionType,
 } from '../types';
 import {
   parseCard,
@@ -434,6 +435,56 @@ export class CribbageGame extends EventEmitter {
       score
     );
     return score;
+  }
+
+  /**
+   * Add a player to the waiting list for a decision request
+   * @param playerId - ID of the player we're waiting on
+   * @param decisionType - Type of decision being requested
+   */
+  public addWaitingForPlayer(
+    playerId: string,
+    decisionType: AgentDecisionType
+  ): void {
+    // Check if player already exists in waiting list
+    if (
+      !this.gameState.waitingForPlayers.find(w => w.playerId === playerId)
+    ) {
+      this.gameState.waitingForPlayers.push({
+        playerId,
+        decisionType,
+        requestTimestamp: new Date(),
+      });
+    }
+  }
+
+  /**
+   * Remove a player from the waiting list
+   * @param playerId - ID of the player to remove from waiting list
+   */
+  public removeWaitingForPlayer(playerId: string): void {
+    this.gameState.waitingForPlayers = this.gameState.waitingForPlayers.filter(
+      w => w.playerId !== playerId
+    );
+  }
+
+  /**
+   * Clear all waiting players from the waiting list
+   */
+  public clearAllWaiting(): void {
+    this.gameState.waitingForPlayers = [];
+  }
+
+  /**
+   * Get a redacted version of the game state for a specific player
+   * Currently returns the full state (stub implementation)
+   * @param forPlayerId - ID of the player requesting the state
+   * @returns Redacted game state (currently returns full state)
+   */
+  public getRedactedGameState(forPlayerId: string): GameState {
+    // TODO: Implement redaction logic in Phase 5
+    // For now, return the full state
+    return this.gameState;
   }
 
   public getGameState(): GameState {
