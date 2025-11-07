@@ -577,6 +577,34 @@ void (async () => {
       console.log(
         `Response times: avg: ${avgResponseTime.toFixed(0)}ms, min: ${minResponseTime}ms, max: ${maxResponseTime}ms`
       );
+      
+      // Breakdown by decision type
+      const byDecisionType: Record<string, ResponseTime[]> = {};
+      for (const rt of allResponseTimes) {
+        if (!byDecisionType[rt.decisionType]) {
+          byDecisionType[rt.decisionType] = [];
+        }
+        byDecisionType[rt.decisionType].push(rt);
+      }
+      
+      const decisionTypeNames: Record<string, string> = {
+        [ActionType.WAITING_FOR_DEAL]: 'DEAL',
+        [ActionType.WAITING_FOR_DISCARD]: 'DISCARD',
+        [ActionType.WAITING_FOR_PLAY_CARD]: 'PLAY_CARD',
+        [ActionType.WAITING_FOR_CONTINUE]: 'CONTINUE',
+      };
+      
+      const breakdowns: string[] = [];
+      for (const [decisionType, times] of Object.entries(byDecisionType)) {
+        const avg = times.reduce((sum, rt) => sum + rt.durationMs, 0) / times.length;
+        const min = Math.min(...times.map(rt => rt.durationMs));
+        const max = Math.max(...times.map(rt => rt.durationMs));
+        const name = decisionTypeNames[decisionType] || decisionType;
+        breakdowns.push(`${name}: avg=${avg.toFixed(0)}ms (min=${min}ms, max=${max}ms, count=${times.length})`);
+      }
+      if (breakdowns.length > 0) {
+        console.log(`  Breakdown: ${breakdowns.join(', ')}`);
+      }
     }
 
     console.log('------------------------------');
