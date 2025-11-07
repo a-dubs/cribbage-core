@@ -1,6 +1,11 @@
 import { GameLoop } from '../src/gameplay/GameLoop';
 import { RandomAgent } from '../src/agents/RandomAgent';
 import { SimpleAgent } from '../src/agents/SimpleAgent';
+import {
+  RandomDelaySimpleAgent,
+  Fixed500msSimpleAgent,
+  Fixed200msSimpleAgent,
+} from '../src/agents/DelayedSimpleAgent';
 // import { HumanAgent } from '../src/agents/HumanAgent';
 import { GameStatistics } from '../src/core/statistics';
 import { GameEvent, PlayerIdAndName, ActionType } from '../src/types';
@@ -62,9 +67,21 @@ interface PlayerStatistics {
   avgCribScore: number;
   maxHandScore: number;
   maxCribScore: number;
+  avgResponseTime: number;
+  minResponseTime: number;
+  maxResponseTime: number;
+  firstResponseCount: number;
 }
 
 const playerStatistics: PlayerStatistics[] = [];
+
+interface ResponseTime {
+  playerId: string;
+  decisionType: string;
+  requestTime: Date;
+  responseTime: Date;
+  durationMs: number;
+}
 
 interface GameResult {
   gameNumber: number;
@@ -73,6 +90,7 @@ interface GameResult {
   scores: { playerId: string; playerName: string; score: number }[];
   rounds: number;
   gameHistory: GameEvent[];
+  responseTimes: ResponseTime[];
 }
 
 const gameResults: GameResult[] = [];
@@ -81,6 +99,7 @@ const winCounts: Record<string, number> = {};
 function printStatistics(
   playerId: string,
   gameHistory: GameEvent[],
+  responseTimes: ResponseTime[],
   toStdout = false
 ) {
   // Calculate statistics
@@ -127,6 +146,21 @@ function printStatistics(
     `Decision requests: DEAL=${dealRequests}, DISCARD=${discardRequests}, PLAY_CARD=${playCardRequests}, CONTINUE=${continueRequests} (total: ${decisionRequests.length})`,
     toStdout
   );
+
+  // Calculate response time statistics for this player
+  const playerResponseTimes = responseTimes.filter(rt => rt.playerId === playerId);
+  if (playerResponseTimes.length > 0) {
+    const avgResponseTime =
+      playerResponseTimes.reduce((sum, rt) => sum + rt.durationMs, 0) /
+      playerResponseTimes.length;
+    const minResponseTime = Math.min(...playerResponseTimes.map(rt => rt.durationMs));
+    const maxResponseTime = Math.max(...playerResponseTimes.map(rt => rt.durationMs));
+    logger.log(
+      `Response times: avg=${avgResponseTime.toFixed(0)}ms, min=${minResponseTime}ms, max=${maxResponseTime}ms`,
+      toStdout
+    );
+  }
+
   if (bestHand) {
     // log the best hand and the turn card using bestHand.hand and bestHand.turnCard
     logger.log(
@@ -141,6 +175,21 @@ function printStatistics(
     );
   } else logger.log('No best hand found', toStdout);
 
+  // Calculate response time statistics for storing
+  const avgResponseTime =
+    playerResponseTimes.length > 0
+      ? playerResponseTimes.reduce((sum, rt) => sum + rt.durationMs, 0) /
+        playerResponseTimes.length
+      : 0;
+  const minResponseTime =
+    playerResponseTimes.length > 0
+      ? Math.min(...playerResponseTimes.map(rt => rt.durationMs))
+      : 0;
+  const maxResponseTime =
+    playerResponseTimes.length > 0
+      ? Math.max(...playerResponseTimes.map(rt => rt.durationMs))
+      : 0;
+
   // Store statistics
   playerStatistics.push({
     playerId,
@@ -149,6 +198,10 @@ function printStatistics(
     avgCribScore,
     maxHandScore,
     maxCribScore,
+    avgResponseTime,
+    minResponseTime,
+    maxResponseTime,
+    firstResponseCount: 0, // Will be calculated in aggregate stats
   });
 }
 
@@ -171,20 +224,20 @@ async function main(gameNumber: number, totalGames: number): Promise<GameResult>
   logger.log(`\n=== Starting Game ${gameNumber}/${totalGames} ===`, true);
 
   const playersInfo: PlayerIdAndName[] = [
-    { id: 'bot-1', name: 'Random Bot' },
-    { id: 'bot-2', name: 'Simple Bot' },
+    { id: 'bot-1', name: 'Fixed 500ms Bot' },
+    { id: 'bot-2', name: 'Random Delay Bot (250-1000ms)' },
   ];
   const gameLoop = new GameLoop(playersInfo);
 
-  // Add a random bot agent
-  const randomBotAgent = new RandomAgent();
-  randomBotAgent.playerId = 'bot-1';
-  gameLoop.addAgent('bot-1', randomBotAgent);
+  // Add fixed 500ms delay agent
+  const fixed500msAgent = new Fixed500msSimpleAgent();
+  fixed500msAgent.playerId = 'bot-1';
+  gameLoop.addAgent('bot-1', fixed500msAgent);
 
-  // Add a simple bot agent
-  const simpleBotAgent = new SimpleAgent();
-  simpleBotAgent.playerId = 'bot-2';
-  gameLoop.addAgent('bot-2', simpleBotAgent);
+  // Add random delay agent (250-1000ms)
+  const randomDelayAgent = new RandomDelaySimpleAgent();
+  randomDelayAgent.playerId = 'bot-2';
+  gameLoop.addAgent('bot-2', randomDelayAgent);
 
   const result = await gameLoop.playGame();
 
@@ -192,6 +245,49 @@ async function main(gameNumber: number, totalGames: number): Promise<GameResult>
   const gameHistory = gameLoop.cribbageGame
     .getGameSnapshotHistory()
     .map(snapshot => snapshot.gameEvent);
+
+  // Track response times for decision requests
+  const responseTimes: ResponseTime[] = [];
+
+  // Match WAITING_FOR_* events with their corresponding action events
+  for (let i = 0; i < gameHistory.length; i++) {
+    const event = gameHistory[i];
+    if (
+      event.actionType === ActionType.WAITING_FOR_DEAL ||
+      event.actionType === ActionType.WAITING_FOR_DISCARD ||
+      event.actionType === ActionType.WAITING_FOR_PLAY_CARD ||
+      event.actionType === ActionType.WAITING_FOR_CONTINUE
+    ) {
+      // Find the corresponding action event (next event from same player)
+      for (let j = i + 1; j < gameHistory.length; j++) {
+        const nextEvent = gameHistory[j];
+        if (
+          nextEvent.playerId === event.playerId &&
+          (nextEvent.actionType === ActionType.DEAL ||
+            nextEvent.actionType === ActionType.DISCARD ||
+            nextEvent.actionType === ActionType.PLAY_CARD ||
+            // CONTINUE doesn't have a corresponding action type - it's just waiting then continuing
+            // So we'll match WAITING_FOR_CONTINUE with the next action from that player
+            (event.actionType === ActionType.WAITING_FOR_CONTINUE &&
+              nextEvent.playerId === event.playerId))
+        ) {
+          const requestTime = new Date(event.timestamp || Date.now());
+          const responseTime = new Date(nextEvent.timestamp || Date.now());
+          const durationMs = responseTime.getTime() - requestTime.getTime();
+          if (event.playerId && nextEvent.playerId) {
+            responseTimes.push({
+              playerId: event.playerId,
+              decisionType: event.actionType,
+              requestTime,
+              responseTime,
+              durationMs,
+            });
+          }
+          break;
+        }
+      }
+    }
+  }
 
   // Log decision request statistics for the game
   const allDecisionRequests = gameHistory.filter(
@@ -222,6 +318,19 @@ async function main(gameNumber: number, totalGames: number): Promise<GameResult>
     false
   );
 
+  // Log response time statistics
+  if (responseTimes.length > 0) {
+    const avgResponseTime =
+      responseTimes.reduce((sum, rt) => sum + rt.durationMs, 0) /
+      responseTimes.length;
+    const minResponseTime = Math.min(...responseTimes.map(rt => rt.durationMs));
+    const maxResponseTime = Math.max(...responseTimes.map(rt => rt.durationMs));
+    logger.log(
+      `\nResponse time statistics: avg=${avgResponseTime.toFixed(0)}ms, min=${minResponseTime}ms, max=${maxResponseTime}ms`,
+      false
+    );
+  }
+
   // read in game-history.json from project root and append gameHistory to it
   const filePath = '/Users/a-dubs/personal/cribbage/game-history.json';
   let existingHistory: GameEvent[] = [];
@@ -251,7 +360,7 @@ async function main(gameNumber: number, totalGames: number): Promise<GameResult>
   }
   winCounts[result] += 1;
 
-  // Store game result
+  // Store game result with response times
   const gameResult: GameResult = {
     gameNumber,
     winner: result,
@@ -259,6 +368,7 @@ async function main(gameNumber: number, totalGames: number): Promise<GameResult>
     scores,
     rounds: NumberOfRounds,
     gameHistory,
+    responseTimes,
   };
   gameResults.push(gameResult);
 
@@ -273,7 +383,7 @@ async function main(gameNumber: number, totalGames: number): Promise<GameResult>
   for (const playerId of playerIds) {
     logger.log('\n------------------------------');
     logger.log(`Player ${playerId} statistics:`);
-    printStatistics(playerId, gameHistory, false);
+    printStatistics(playerId, gameHistory, responseTimes, false);
   }
   
   // Add massive separator at end of game in log file (5 rows above and 5 rows below header)
@@ -391,6 +501,22 @@ void (async () => {
     console.log(
       `Decision requests: DEAL=${dealReqs}, DISCARD=${discardReqs}, PLAY_CARD=${playCardReqs}, CONTINUE=${continueReqs} (total: ${allDecisionRequests.length})`
     );
+
+    // Response time statistics (aggregate across all games)
+    const allResponseTimes = gameResults.flatMap(r =>
+      r.responseTimes.filter(rt => rt.playerId === playerId)
+    );
+    if (allResponseTimes.length > 0) {
+      const avgResponseTime =
+        allResponseTimes.reduce((sum, rt) => sum + rt.durationMs, 0) /
+        allResponseTimes.length;
+      const minResponseTime = Math.min(...allResponseTimes.map(rt => rt.durationMs));
+      const maxResponseTime = Math.max(...allResponseTimes.map(rt => rt.durationMs));
+      console.log(
+        `Response times: avg: ${avgResponseTime.toFixed(0)}ms, min: ${minResponseTime}ms, max: ${maxResponseTime}ms`
+      );
+    }
+
     console.log('------------------------------');
   }
 
