@@ -64,4 +64,14 @@ export class RandomAgent implements GameAgent {
       Array.from(randomIndices).map(index => player.hand[index])
     );
   }
+
+  async waitForContinue(
+    game: GameState,
+    playerId: string,
+    continueDescription: string
+  ): Promise<void> {
+    // Bots automatically continue - no need to wait
+    // This simulates the continue request flow for testing
+    return Promise.resolve();
+  }
 }
