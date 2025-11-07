@@ -3,7 +3,6 @@ import { Server, Socket } from 'socket.io';
 import { GameLoop } from './gameplay/GameLoop';
 import {
   ActionType,
-  EmittedWaitingForPlayer,
   GameAgent,
   GameEvent,
   PlayerIdAndName,
@@ -167,7 +166,6 @@ const playerIdToSocketId: Map<string, string> = new Map();
 const playAgainVotes: Set<string> = new Set();
 let gameLoop: GameLoop | null = null;
 let mostRecentGameSnapshot: GameSnapshot | null = null;
-let mostRecentWaitingForPlayer: EmittedWaitingForPlayer | null = null;
 let currentRoundGameEvents: GameEvent[] = [];
 
 io.on('connection', socket => {
@@ -361,10 +359,6 @@ async function handleStartGame(): Promise<void> {
     }
     io.emit('currentRoundGameEvents', currentRoundGameEvents);
   });
-  gameLoop.on('waitingForPlayer', (waitingData: EmittedWaitingForPlayer) => {
-    io.emit('waitingForPlayer', waitingData);
-    mostRecentWaitingForPlayer = waitingData;
-  });
   // send the connected players to the clients
   emitConnectedPlayers();
 
@@ -386,29 +380,11 @@ async function handleStartGame(): Promise<void> {
 function sendMostRecentGameData(socket: Socket): void {
   console.log('Sending most recent game data to client');
   
-  // Send GameSnapshot first (contains waiting state in GameState)
+  // Send GameSnapshot (contains waiting state in GameState.waitingForPlayers)
   if (mostRecentGameSnapshot) {
     socket.emit('gameSnapshot', mostRecentGameSnapshot);
-    
-    // Derive waiting state from GameSnapshot for reconnecting clients
-    const waitingForPlayers = mostRecentGameSnapshot.gameState.waitingForPlayers;
-    if (waitingForPlayers && waitingForPlayers.length > 0) {
-      // Send waiting state for each waiting player
-      waitingForPlayers.forEach(waiting => {
-        const waitingData: EmittedWaitingForPlayer = {
-          playerId: waiting.playerId,
-          waitingFor: waiting.decisionType,
-        };
-        socket.emit('waitingForPlayer', waitingData);
-      });
-    }
   } else {
     console.log('no mostRecentGameSnapshot to send...');
-  }
-  
-  // Keep legacy emit for backward compatibility (fallback)
-  if (mostRecentWaitingForPlayer) {
-    socket.emit('waitingForPlayer', mostRecentWaitingForPlayer);
   }
   
   socket.emit('currentRoundGameEvents', currentRoundGameEvents);

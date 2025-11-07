@@ -6,7 +6,6 @@ import {
   PlayerIdAndName,
   GameEvent,
   GameState,
-  EmittedWaitingForPlayer,
   AgentDecisionType,
   GameSnapshot,
   ActionType,
@@ -88,12 +87,6 @@ export class GameLoop extends EventEmitter {
       if (sendWaitingForPlayer) {
         // Request decision and record in GameState/GameEvent
         this.requestDecision(playerID, AgentDecisionType.CONTINUE);
-        // Keep emit for backward compatibility during transition
-        const continueData: EmittedWaitingForPlayer = {
-          playerId: playerID,
-          waitingFor: AgentDecisionType.CONTINUE,
-        };
-        this.emit('waitingForPlayer', continueData);
       }
       await agent.waitForContinue(
         this.cribbageGame.getGameState(),
@@ -153,12 +146,6 @@ export class GameLoop extends EventEmitter {
 
       // Request decision and record in GameState/GameEvent
       this.requestDecision(currentPlayerId, AgentDecisionType.PLAY_CARD);
-      // Keep emit for backward compatibility during transition
-      const emittedWaitingForPlayerData: EmittedWaitingForPlayer = {
-        playerId: currentPlayerId,
-        waitingFor: AgentDecisionType.PLAY_CARD,
-      };
-      this.emit('waitingForPlayer', emittedWaitingForPlayerData);
 
       // get the card the agent wants to play
       console.log(`Calling makeMove for player ${currentPlayerId}`);
@@ -226,12 +213,6 @@ export class GameLoop extends EventEmitter {
     const dealer = this.cribbageGame.getPlayer(this.cribbageGame.getDealerId());
     // Request decision and record in GameState/GameEvent
     this.requestDecision(dealer.id, AgentDecisionType.DEAL);
-    // Keep emit for backward compatibility during transition
-    const waitingForPlayerData: EmittedWaitingForPlayer = {
-      playerId: dealer.id,
-      waitingFor: AgentDecisionType.DEAL,
-    };
-    this.emit('waitingForPlayer', waitingForPlayerData);
     await this.sendContinue(dealer.id, 'Deal the cards');
     // await this.sendContinue(dealer.id, 'Shuffle the cards');
     this.cribbageGame.deal();
@@ -242,12 +223,6 @@ export class GameLoop extends EventEmitter {
       if (!agent) throw new Error(`No agent for player ${player.id}`);
       // Request decision and record in GameState/GameEvent
       this.requestDecision(player.id, AgentDecisionType.DISCARD);
-      // Keep emit for backward compatibility during transition
-      const emittedWaitingForPlayerData: EmittedWaitingForPlayer = {
-        playerId: player.id,
-        waitingFor: AgentDecisionType.DISCARD,
-      };
-      this.emit('waitingForPlayer', emittedWaitingForPlayerData);
       const discards = await agent.discard(
         this.cribbageGame.getGameState(),
         player.id,
