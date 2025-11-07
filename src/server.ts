@@ -6,7 +6,6 @@ import {
   EmittedWaitingForPlayer,
   GameAgent,
   GameEvent,
-  GameState,
   PlayerIdAndName,
   GameInfo,
   GameStateAndEvent,
@@ -82,6 +81,7 @@ interface LoginData {
 const GAME_EVENTS_FILE = path.join(JSON_DB_DIR, 'gameEvents.json');
 const GAME_INFO_FILE = path.join(JSON_DB_DIR, 'gameInfo.json');
 
+// TODO: convert this to store gamestate and game events since game events alone are not sufficient
 // just write to json file for now (append to list of game events)
 const sendGameEventToDB = (gameEvent: GameEvent): void => {
   try {
@@ -166,8 +166,6 @@ const connectedPlayers: Map<string, PlayerInfo> = new Map();
 const playerIdToSocketId: Map<string, string> = new Map();
 const playAgainVotes: Set<string> = new Set();
 let gameLoop: GameLoop | null = null;
-let mostRecentGameState: GameState | null = null;
-let mostRecentGameEvent: GameEvent | null = null;
 let mostRecentGameStateAndEvent: GameStateAndEvent | null = null;
 let mostRecentWaitingForPlayer: EmittedWaitingForPlayer | null = null;
 let currentRoundGameEvents: GameEvent[] = [];
@@ -353,25 +351,14 @@ async function handleStartGame(): Promise<void> {
   });
 
   // Emit game state changes
-  gameLoop.on('gameStateChange', (newGameState: GameState) => {
-    io.emit('gameStateChange', newGameState);
-    mostRecentGameState = newGameState;
-  });
-  gameLoop.on(
-    'gameStateAndEvent',
-    (newGameStateAndEvent: GameStateAndEvent) => {
-      io.emit('gameStateAndEvent', newGameStateAndEvent);
-      mostRecentGameStateAndEvent = newGameStateAndEvent;
-    }
-  );
-  gameLoop.on('gameEvent', (gameEvent: GameEvent) => {
-    io.emit('gameEvent', gameEvent);
-    mostRecentGameEvent = gameEvent;
-    if (gameEvent.actionType === ActionType.START_ROUND) {
+  gameLoop.on('gameStateAndEvent', (newGSE: GameStateAndEvent) => {
+    io.emit('gameStateAndEvent', newGSE);
+    mostRecentGameStateAndEvent = newGSE;
+    sendGameEventToDB(newGSE.gameEvent);
+    currentRoundGameEvents.push(newGSE.gameEvent);
+    if (newGSE.gameEvent.actionType === ActionType.START_ROUND) {
       currentRoundGameEvents = [];
     }
-    currentRoundGameEvents.push(gameEvent);
-    sendGameEventToDB(gameEvent);
     io.emit('currentRoundGameEvents', currentRoundGameEvents);
   });
   gameLoop.on('waitingForPlayer', (waitingData: EmittedWaitingForPlayer) => {
@@ -398,24 +385,13 @@ async function handleStartGame(): Promise<void> {
 
 function sendMostRecentGameData(socket: Socket): void {
   console.log('Sending most recent game data to client');
-  if (mostRecentGameState) {
-    socket.emit('gameStateChange', mostRecentGameState);
-  } else {
-    socket.emit('gameStateChange', gameLoop?.cribbageGame.getGameState());
-  }
-  if (mostRecentGameEvent) {
-    socket.emit('gameEvent', mostRecentGameEvent);
-  } else {
-    const allGameEvents = gameLoop?.cribbageGame.getGameEventRecords();
-    if (allGameEvents) {
-      socket.emit('gameEvent', allGameEvents[allGameEvents.length - 1]);
-    }
-  }
   if (mostRecentWaitingForPlayer) {
     socket.emit('waitingForPlayer', mostRecentWaitingForPlayer);
   }
   if (mostRecentGameStateAndEvent) {
     socket.emit('gameStateAndEvent', mostRecentGameStateAndEvent);
+  } else {
+    console.log('no mostRecentGameStateAndEvent to send...');
   }
   socket.emit('currentRoundGameEvents', currentRoundGameEvents);
   socket.emit('playAgainVotes', Array.from(playAgainVotes));

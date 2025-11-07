@@ -193,6 +193,7 @@ export class GameLoop extends EventEmitter {
     };
     this.emit('waitingForPlayer', waitingForPlayerData);
     await this.sendContinue(dealer.id, 'Deal the cards');
+    // await this.sendContinue(dealer.id, 'Shuffle the cards');
     this.cribbageGame.deal();
 
     // Crib phase: Agents discard to crib
