@@ -8,16 +8,24 @@ import {
 } from '../src/agents/DelayedSimpleAgent';
 // import { HumanAgent } from '../src/agents/HumanAgent';
 import { GameStatistics } from '../src/core/statistics';
-import { GameEvent, PlayerIdAndName, ActionType } from '../src/types';
+import { GameEvent, PlayerIdAndName, ActionType, GameAgent } from '../src/types';
 import { scoreHand } from '../src/core/scoring';
 import * as fs from 'fs';
 import * as path from 'path';
 
 // Parse command line arguments
+// Usage: node run-bots.js [number-of-games] [agent-type-1] [agent-type-2]
+// Agent types: 'random', 'simple', 'random-delay', 'fixed-500ms', 'fixed-200ms'
+// Default: 10 games, 'random' vs 'simple'
 const numGames = parseInt(process.argv[2] || '10', 10);
+const agentType1 = process.argv[3] || 'random';
+const agentType2 = process.argv[4] || 'simple';
+
 if (isNaN(numGames) || numGames < 1) {
-  console.error('Usage: node run-bots.js [number-of-games]');
-  console.error('Example: node run-bots.js 2');
+  console.error('Usage: node run-bots.js [number-of-games] [agent-type-1] [agent-type-2]');
+  console.error('Example: node run-bots.js 2 random simple');
+  console.error('Example: node run-bots.js 2 fixed-500ms random-delay');
+  console.error('Agent types: random, simple, random-delay, fixed-500ms, fixed-200ms');
   process.exit(1);
 }
 
@@ -222,22 +230,65 @@ async function main(gameNumber: number, totalGames: number): Promise<GameResult>
   logStream.write(separator);
   
   logger.log(`\n=== Starting Game ${gameNumber}/${totalGames} ===`, true);
+  logger.log(`Agent 1: ${agentType1}, Agent 2: ${agentType2}`, true);
+
+  // Create agent instances based on type
+  function createAgent(type: string, playerId: string): GameAgent {
+    let agent: GameAgent;
+    let name: string;
+    
+    switch (type) {
+      case 'random':
+        agent = new RandomAgent();
+        name = 'Random Bot';
+        break;
+      case 'simple':
+        agent = new SimpleAgent();
+        name = 'Simple Bot';
+        break;
+      case 'random-delay':
+        agent = new RandomDelaySimpleAgent();
+        name = 'Random Delay Bot (250-1000ms)';
+        break;
+      case 'fixed-500ms':
+        agent = new Fixed500msSimpleAgent();
+        name = 'Fixed 500ms Bot';
+        break;
+      case 'fixed-200ms':
+        agent = new Fixed200msSimpleAgent();
+        name = 'Fixed 200ms Bot';
+        break;
+      default:
+        throw new Error(`Unknown agent type: ${type}`);
+    }
+    
+    agent.playerId = playerId;
+    return agent;
+  }
+
+  const agent1 = createAgent(agentType1, 'bot-1');
+  const agent2 = createAgent(agentType2, 'bot-2');
+  
+  const agent1Name = agentType1 === 'random' ? 'Random Bot' :
+                     agentType1 === 'simple' ? 'Simple Bot' :
+                     agentType1 === 'random-delay' ? 'Random Delay Bot (250-1000ms)' :
+                     agentType1 === 'fixed-500ms' ? 'Fixed 500ms Bot' :
+                     'Fixed 200ms Bot';
+  
+  const agent2Name = agentType2 === 'random' ? 'Random Bot' :
+                     agentType2 === 'simple' ? 'Simple Bot' :
+                     agentType2 === 'random-delay' ? 'Random Delay Bot (250-1000ms)' :
+                     agentType2 === 'fixed-500ms' ? 'Fixed 500ms Bot' :
+                     'Fixed 200ms Bot';
 
   const playersInfo: PlayerIdAndName[] = [
-    { id: 'bot-1', name: 'Fixed 500ms Bot' },
-    { id: 'bot-2', name: 'Random Delay Bot (250-1000ms)' },
+    { id: 'bot-1', name: agent1Name },
+    { id: 'bot-2', name: agent2Name },
   ];
   const gameLoop = new GameLoop(playersInfo);
 
-  // Add fixed 500ms delay agent
-  const fixed500msAgent = new Fixed500msSimpleAgent();
-  fixed500msAgent.playerId = 'bot-1';
-  gameLoop.addAgent('bot-1', fixed500msAgent);
-
-  // Add random delay agent (250-1000ms)
-  const randomDelayAgent = new RandomDelaySimpleAgent();
-  randomDelayAgent.playerId = 'bot-2';
-  gameLoop.addAgent('bot-2', randomDelayAgent);
+  gameLoop.addAgent('bot-1', agent1);
+  gameLoop.addAgent('bot-2', agent2);
 
   const result = await gameLoop.playGame();
 

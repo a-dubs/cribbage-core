@@ -4,6 +4,7 @@ import { GameState, Card } from '../types';
 import { RandomAgent } from './RandomAgent';
 
 const AGENT_ID = 'simple-bot-v1.0';
+const DEBUG_TIMING = process.env.DEBUG_SIMPLE_AGENT_TIMING === 'true';
 
 export class SimpleAgent extends RandomAgent {
   playerId: string = AGENT_ID;
@@ -15,6 +16,7 @@ export class SimpleAgent extends RandomAgent {
   }
 
   private getBestHand(hand: Card[]): Card[] {
+    const startTime = DEBUG_TIMING ? Date.now() : 0;
     // score all possible hands with all possible discards with any possible remaining cut card
     // choose the discard that results in the highest score
     let bestHand = hand.slice(0, 4);
@@ -46,6 +48,10 @@ export class SimpleAgent extends RandomAgent {
         }
       }
     }
+    if (DEBUG_TIMING) {
+      const duration = Date.now() - startTime;
+      console.log(`[SimpleAgent.getBestHand] ${duration}ms for hand of ${hand.length} cards`);
+    }
     return bestHand;
   }
 
@@ -54,6 +60,7 @@ export class SimpleAgent extends RandomAgent {
     playerId: string,
     numberOfCardsToDiscard: number
   ): Promise<Card[]> {
+    const startTime = DEBUG_TIMING ? Date.now() : 0;
     // score all possible hands with all possible discards with any possible remaining cut card
     // choose the discard that results in the highest score
 
@@ -64,10 +71,17 @@ export class SimpleAgent extends RandomAgent {
 
     const bestHand = this.getBestHand(player.hand);
     const discards = player.hand.filter(card => !bestHand.includes(card));
+    
+    if (DEBUG_TIMING) {
+      const duration = Date.now() - startTime;
+      console.log(`[SimpleAgent.discard] ${duration}ms for player ${playerId}`);
+    }
+    
     return Promise.resolve(discards);
   }
 
   makeMove(game: GameState, playerId: string): Promise<Card | null> {
+    const startTime = DEBUG_TIMING ? Date.now() : 0;
     // filter by cards that can be played (sum of stack + card <= 31) using game.peggingStack
     // then choose the card that would result in the highest potential net score (score earned - score given to opponent)
     // for score earned, calculate how many points would be earned by playing each card
@@ -85,6 +99,7 @@ export class SimpleAgent extends RandomAgent {
       return Promise.resolve(null);
     }
 
+    const parseStartTime = DEBUG_TIMING ? Date.now() : 0;
     const parsedHand = player.peggingHand.map(card => parseCard(card));
     const parsedStack = game.peggingStack.map(card => parseCard(card));
     // filter full deck by:
@@ -99,6 +114,9 @@ export class SimpleAgent extends RandomAgent {
           !player.peggingHand.includes(card) &&
           card !== game.turnCard
       );
+    const parseDuration = DEBUG_TIMING ? Date.now() - parseStartTime : 0;
+
+    const filterStartTime = DEBUG_TIMING ? Date.now() : 0;
     const parsedValidPlayedCards = parsedHand.filter(card => {
       const sum = parsedStack.reduce(
         (acc, c) => acc + c.pegValue,
@@ -114,7 +132,9 @@ export class SimpleAgent extends RandomAgent {
     const validPlayedCards = player.peggingHand.filter(card =>
       parsedValidPlayedCards.some(c => c.runValue === parseCard(card).runValue)
     );
+    const filterDuration = DEBUG_TIMING ? Date.now() - filterStartTime : 0;
 
+    const scoringStartTime = DEBUG_TIMING ? Date.now() : 0;
     const cardNetScores: { card: Card; netScore: number }[] = [];
     for (const card of validPlayedCards) {
       const scoreEarned = scorePegging(game.peggingStack.concat(card));
@@ -140,9 +160,20 @@ export class SimpleAgent extends RandomAgent {
       const netScore = scoreEarned - avgScoreGiven;
       cardNetScores.push({ card, netScore });
     }
+    const scoringDuration = DEBUG_TIMING ? Date.now() - scoringStartTime : 0;
+    
+    const selectStartTime = DEBUG_TIMING ? Date.now() : 0;
     const bestCard = cardNetScores.reduce((a, b) =>
       a.netScore > b.netScore ? a : b
     );
+    const selectDuration = DEBUG_TIMING ? Date.now() - selectStartTime : 0;
+    
+    if (DEBUG_TIMING) {
+      const totalDuration = Date.now() - startTime;
+      console.log(`[SimpleAgent.makeMove] ${totalDuration}ms total (parse: ${parseDuration}ms, filter: ${filterDuration}ms, scoring: ${scoringDuration}ms, select: ${selectDuration}ms)`);
+      console.log(`  - Valid cards: ${validPlayedCards.length}, Possible remaining: ${possibleRemainingCards.length}`);
+    }
+    
     return Promise.resolve(bestCard.card);
   }
 }
