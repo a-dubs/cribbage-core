@@ -193,6 +193,13 @@ io.on('connection', socket => {
     });
   });
 
+  socket.on('restartGame', () => {
+    console.log('Received restartGame event from socket:', socket.id);
+    handleRestartGame().catch(error => {
+      console.error('Error restarting game:', error);
+    });
+  });
+
   socket.on('playAgain', () => {
     const playerId = [...playerIdToSocketId.entries()].find(
       ([, id]) => id === socket.id
@@ -375,6 +382,36 @@ async function handleStartGame(): Promise<void> {
 
   // Start the game
   await startGame();
+}
+
+async function handleRestartGame(): Promise<void> {
+  console.log('Restarting game...');
+  
+  // Check if restart is enabled (development only)
+  const RESTART_ENABLED = process.env.ENABLE_RESTART_GAME === 'true';
+  if (!RESTART_ENABLED) {
+    console.log('Restart game is disabled. Set ENABLE_RESTART_GAME=true to enable.');
+    return;
+  }
+
+  // Clear current game state
+  if (gameLoop) {
+    console.log('Clearing current game loop...');
+    // Remove all listeners to prevent memory leaks
+    gameLoop.removeAllListeners();
+    gameLoop = null;
+  }
+
+  // Reset state
+  playAgainVotes.clear();
+  mostRecentGameSnapshot = null;
+  currentRoundGameEvents = [];
+
+  // Emit game reset event to all clients
+  io.emit('gameReset');
+
+  // Start a new game
+  await handleStartGame();
 }
 
 function sendMostRecentGameData(socket: Socket): void {
