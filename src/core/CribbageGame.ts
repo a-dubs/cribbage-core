@@ -548,14 +548,60 @@ export class CribbageGame extends EventEmitter {
 
   /**
    * Get a redacted version of the game state for a specific player
-   * Currently returns the full state (stub implementation)
+   * Opponents' hands and pegging hands are redacted to 'UNKNOWN' cards
    * @param forPlayerId - ID of the player requesting the state
-   * @returns Redacted game state (currently returns full state)
+   * @returns Redacted game state where opponents' cards are hidden
    */
   public getRedactedGameState(forPlayerId: string): GameState {
-    // TODO: Implement redaction logic in Phase 5
-    // For now, return the full state
-    return this.gameState;
+    const requestingPlayer = this.gameState.players.find(
+      p => p.id === forPlayerId
+    );
+    if (!requestingPlayer) {
+      throw new Error(`Player ${forPlayerId} not found`);
+    }
+
+    // Create redacted players array
+    const redactedPlayers = this.gameState.players.map(player => {
+      if (player.id === forPlayerId) {
+        // This player sees their own cards
+        return {
+          ...player,
+          hand: [...player.hand],
+          peggingHand: [...player.peggingHand],
+        };
+      } else {
+        // Opponents' hands are redacted
+        return {
+          ...player,
+          hand: player.hand.map(() => 'UNKNOWN' as Card),
+          peggingHand: player.peggingHand.map(() => 'UNKNOWN' as Card),
+        };
+      }
+    });
+
+    // Determine if crib should be visible
+    // Crib is only visible during counting phase, and only to the dealer
+    const isCountingPhase =
+      this.gameState.currentPhase === Phase.COUNTING;
+    const isDealer = requestingPlayer.isDealer;
+    const cribVisible = isCountingPhase && isDealer;
+
+    // Redact crib if not visible
+    const redactedCrib = cribVisible
+      ? [...this.gameState.crib]
+      : this.gameState.crib.map(() => 'UNKNOWN' as Card);
+
+    // Redact deck contents (keep count visible via length)
+    const redactedDeck = this.gameState.deck.map(() => 'UNKNOWN' as Card);
+
+    // Return redacted game state
+    return {
+      ...this.gameState,
+      players: redactedPlayers,
+      crib: redactedCrib,
+      deck: redactedDeck,
+      // All other fields remain visible (scores, pegging stack, turn card, etc.)
+    };
   }
 
   public getGameState(): GameState {

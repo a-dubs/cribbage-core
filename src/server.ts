@@ -355,15 +355,33 @@ async function handleStartGame(): Promise<void> {
     }
   });
 
-  // Emit game state changes
+  // Emit game state changes with redaction per player
   gameLoop.on('gameSnapshot', (newSnapshot: GameSnapshot) => {
-    io.emit('gameSnapshot', newSnapshot);
+    // Store the full snapshot for internal use (agents, database, etc.)
     mostRecentGameSnapshot = newSnapshot;
     sendGameEventToDB(newSnapshot.gameEvent);
     currentRoundGameEvents.push(newSnapshot.gameEvent);
     if (newSnapshot.gameEvent.actionType === ActionType.START_ROUND) {
       currentRoundGameEvents = [];
     }
+
+    // Send redacted GameSnapshot to each player
+    // Each player only sees their own cards, opponents' cards are 'UNKNOWN'
+    connectedPlayers.forEach(playerInfo => {
+      const socketId = playerIdToSocketId.get(playerInfo.id);
+      if (socketId) {
+        const redactedGameState = gameLoop!.cribbageGame.getRedactedGameState(
+          playerInfo.id
+        );
+        const redactedSnapshot: GameSnapshot = {
+          gameState: redactedGameState,
+          gameEvent: newSnapshot.gameEvent, // Events are public, no redaction needed
+        };
+        io.to(socketId).emit('gameSnapshot', redactedSnapshot);
+      }
+    });
+
+    // Emit current round game events (public information)
     io.emit('currentRoundGameEvents', currentRoundGameEvents);
   });
   // send the connected players to the clients
@@ -417,9 +435,26 @@ async function handleRestartGame(): Promise<void> {
 function sendMostRecentGameData(socket: Socket): void {
   console.log('Sending most recent game data to client');
   
-  // Send GameSnapshot (contains waiting state in GameState.waitingForPlayers)
-  if (mostRecentGameSnapshot) {
-    socket.emit('gameSnapshot', mostRecentGameSnapshot);
+  // Find which player this socket belongs to
+  const playerId = [...playerIdToSocketId.entries()].find(
+    ([, id]) => id === socket.id
+  )?.[0];
+
+  if (!playerId) {
+    console.error('Could not find player ID for socket:', socket.id);
+    return;
+  }
+
+  // Send redacted GameSnapshot for this specific player
+  if (mostRecentGameSnapshot && gameLoop) {
+    const redactedGameState = gameLoop.cribbageGame.getRedactedGameState(
+      playerId
+    );
+    const redactedSnapshot: GameSnapshot = {
+      gameState: redactedGameState,
+      gameEvent: mostRecentGameSnapshot.gameEvent,
+    };
+    socket.emit('gameSnapshot', redactedSnapshot);
   } else {
     console.log('no mostRecentGameSnapshot to send...');
   }

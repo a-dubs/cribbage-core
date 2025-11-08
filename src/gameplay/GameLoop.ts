@@ -88,8 +88,12 @@ export class GameLoop extends EventEmitter {
         // Request decision and record in GameState/GameEvent
         this.requestDecision(playerID, AgentDecisionType.CONTINUE);
       }
+      // Pass redacted game state so agent can't see opponents' cards
+      const redactedGameState = this.cribbageGame.getRedactedGameState(
+        playerID
+      );
       await agent.waitForContinue(
-        this.cribbageGame.getGameState(),
+        redactedGameState,
         playerID,
         continueDescription
       );
@@ -148,11 +152,12 @@ export class GameLoop extends EventEmitter {
       this.requestDecision(currentPlayerId, AgentDecisionType.PLAY_CARD);
 
       // get the card the agent wants to play
+      // Pass redacted game state so agent can't see opponents' cards
       console.log(`Calling makeMove for player ${currentPlayerId}`);
-      const card = await agent.makeMove(
-        this.cribbageGame.getGameState(),
+      const redactedGameState = this.cribbageGame.getRedactedGameState(
         currentPlayerId
       );
+      const card = await agent.makeMove(redactedGameState, currentPlayerId);
       roundOverLastPlayer = this.cribbageGame.playCard(currentPlayerId, card);
       const parsedStack = this.cribbageGame
         .getGameState()
@@ -223,8 +228,12 @@ export class GameLoop extends EventEmitter {
       if (!agent) throw new Error(`No agent for player ${player.id}`);
       // Request decision and record in GameState/GameEvent
       this.requestDecision(player.id, AgentDecisionType.DISCARD);
+      // Pass redacted game state so agent can't see opponents' cards
+      const redactedGameState = this.cribbageGame.getRedactedGameState(
+        player.id
+      );
       const discards = await agent.discard(
-        this.cribbageGame.getGameState(),
+        redactedGameState,
         player.id,
         this.cribbageGame.getGameState().players.length === 2 ? 2 : 1
       );
