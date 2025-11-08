@@ -373,16 +373,23 @@ async function handleStartGame(): Promise<void> {
         const redactedGameState = gameLoop!.cribbageGame.getRedactedGameState(
           playerInfo.id
         );
+        const redactedGameEvent = gameLoop!.cribbageGame.getRedactedGameEvent(
+          newSnapshot.gameEvent,
+          playerInfo.id
+        );
         const redactedSnapshot: GameSnapshot = {
           gameState: redactedGameState,
-          gameEvent: newSnapshot.gameEvent, // Events are public, no redaction needed
+          gameEvent: redactedGameEvent,
         };
         io.to(socketId).emit('gameSnapshot', redactedSnapshot);
+
+        // Also send redacted current round game events to this player
+        const redactedRoundEvents = currentRoundGameEvents.map(event =>
+          gameLoop!.cribbageGame.getRedactedGameEvent(event, playerInfo.id)
+        );
+        io.to(socketId).emit('currentRoundGameEvents', redactedRoundEvents);
       }
     });
-
-    // Emit current round game events (public information)
-    io.emit('currentRoundGameEvents', currentRoundGameEvents);
   });
   // send the connected players to the clients
   emitConnectedPlayers();
@@ -450,16 +457,28 @@ function sendMostRecentGameData(socket: Socket): void {
     const redactedGameState = gameLoop.cribbageGame.getRedactedGameState(
       playerId
     );
+    const redactedGameEvent = gameLoop.cribbageGame.getRedactedGameEvent(
+      mostRecentGameSnapshot.gameEvent,
+      playerId
+    );
     const redactedSnapshot: GameSnapshot = {
       gameState: redactedGameState,
-      gameEvent: mostRecentGameSnapshot.gameEvent,
+      gameEvent: redactedGameEvent,
     };
     socket.emit('gameSnapshot', redactedSnapshot);
   } else {
     console.log('no mostRecentGameSnapshot to send...');
   }
   
-  socket.emit('currentRoundGameEvents', currentRoundGameEvents);
+  // Send redacted current round game events
+  if (gameLoop && mostRecentGameSnapshot) {
+    const redactedRoundEvents = currentRoundGameEvents.map(event =>
+      gameLoop!.cribbageGame.getRedactedGameEvent(event, playerId)
+    );
+    socket.emit('currentRoundGameEvents', redactedRoundEvents);
+  } else {
+    socket.emit('currentRoundGameEvents', currentRoundGameEvents);
+  }
   socket.emit('playAgainVotes', Array.from(playAgainVotes));
 }
 

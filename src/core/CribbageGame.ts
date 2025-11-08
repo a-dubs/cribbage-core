@@ -604,6 +604,91 @@ export class CribbageGame extends EventEmitter {
     };
   }
 
+  /**
+   * Get a redacted version of a game event for a specific player
+   * Opponents' cards in events are redacted to 'UNKNOWN' cards
+   * @param gameEvent - The game event to redact
+   * @param forPlayerId - ID of the player requesting the event
+   * @returns Redacted game event where opponents' cards are hidden
+   */
+  public getRedactedGameEvent(
+    gameEvent: GameEvent,
+    forPlayerId: string
+  ): GameEvent {
+    const requestingPlayer = this.gameState.players.find(
+      p => p.id === forPlayerId
+    );
+    if (!requestingPlayer) {
+      throw new Error(`Player ${forPlayerId} not found`);
+    }
+
+    // If no cards in event, return as-is
+    if (!gameEvent.cards || gameEvent.cards.length === 0) {
+      return gameEvent;
+    }
+
+    // Determine if event is from opponent
+    const isOpponentEvent = gameEvent.playerId !== null && gameEvent.playerId !== forPlayerId;
+    const isDealer = requestingPlayer.isDealer;
+    const isCountingPhase = this.gameState.currentPhase === Phase.COUNTING;
+
+    // Redaction rules based on action type
+    let shouldRedact = false;
+
+    switch (gameEvent.actionType) {
+      case ActionType.DISCARD:
+        // Opponent's discards are private
+        shouldRedact = isOpponentEvent;
+        break;
+
+      case ActionType.DEAL:
+        // Opponent's dealt cards are private
+        shouldRedact = isOpponentEvent;
+        break;
+
+      case ActionType.PLAY_CARD:
+        // Played cards are public (everyone sees what was played)
+        shouldRedact = false;
+        break;
+
+      case ActionType.SCORE_HAND:
+        // During counting phase, hands are shown (public)
+        // But we should still redact opponent's hand cards in the event
+        // since the event shows the hand that was scored
+        shouldRedact = isOpponentEvent;
+        break;
+
+      case ActionType.SCORE_CRIB:
+        // Crib is only visible to dealer during counting phase
+        shouldRedact = !(isDealer && isCountingPhase);
+        break;
+
+      case ActionType.TURN_CARD:
+        // Turn card is public
+        shouldRedact = false;
+        break;
+
+      case ActionType.SCORE_HEELS:
+        // Turn card is public
+        shouldRedact = false;
+        break;
+
+      default:
+        // Other events: no cards or public
+        shouldRedact = false;
+        break;
+    }
+
+    if (shouldRedact) {
+      return {
+        ...gameEvent,
+        cards: gameEvent.cards.map(() => 'UNKNOWN' as Card),
+      };
+    }
+
+    return gameEvent;
+  }
+
   public getGameState(): GameState {
     return this.gameState;
   }
