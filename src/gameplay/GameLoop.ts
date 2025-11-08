@@ -266,7 +266,7 @@ export class GameLoop extends EventEmitter {
     const continueToScoringPromises = this.cribbageGame
       .getGameState()
       .players.map(player =>
-        this.sendContinue(player.id, 'Ready for counting', false)
+        this.sendContinue(player.id, 'Ready for counting', true)
       );
     await Promise.all(continueToScoringPromises);
 
@@ -315,7 +315,7 @@ export class GameLoop extends EventEmitter {
     const continueToNextRoundPromises = this.cribbageGame
       .getGameState()
       .players.map(player =>
-        this.sendContinue(player.id, 'Ready for next round', false)
+        this.sendContinue(player.id, 'Ready for next round', true)
       );
     await Promise.all(continueToNextRoundPromises);
 
