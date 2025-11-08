@@ -18,7 +18,9 @@ export function isValidPeggingPlay(
   if (card === null) {
     console.log('Trying to say "Go"');
     const validCards = [];
-    for (const c of player.peggingHand) {
+    // Filter out UNKNOWN cards (redacted cards) before checking
+    const knownCards = player.peggingHand.filter(c => c !== 'UNKNOWN');
+    for (const c of knownCards) {
       if (currentSum + parseCard(c).pegValue <= 31) {
         validCards.push(c);
       }
@@ -32,6 +34,10 @@ export function isValidPeggingPlay(
     return validCards.length === 0;
   }
   // Check if the card can be played without exceeding 31
+  // Note: card should never be UNKNOWN here (only current player's cards), but check anyway
+  if (card === 'UNKNOWN') {
+    return false;
+  }
   return (
     player.peggingHand.includes(card) &&
     currentSum + parseCard(card).pegValue <= 31
@@ -46,7 +52,9 @@ export function getInvalidPeggingPlayReason(
   const currentSum = sumOfPeggingStack(game.peggingStack);
   if (card === null) {
     // Check if the player has any valid card to play
-    const validCards = player.peggingHand.filter(
+    // Filter out UNKNOWN cards (redacted cards) before checking
+    const knownCards = player.peggingHand.filter(c => c !== 'UNKNOWN');
+    const validCards = knownCards.filter(
       c => currentSum + parseCard(c).pegValue <= 31
     );
     if (validCards.length !== 0) {
@@ -55,6 +63,10 @@ export function getInvalidPeggingPlayReason(
     return null;
   }
   // Check if the card can be played without exceeding 31
+  // Note: card should never be UNKNOWN here (only current player's cards), but check anyway
+  if (card === 'UNKNOWN') {
+    return 'Cannot play unknown card';
+  }
   if (!player.peggingHand.includes(card)) {
     return 'Card not in hand';
   }
@@ -66,9 +78,11 @@ export function getInvalidPeggingPlayReason(
 
 export function handHasValidPlay(game: GameState, hand: Card[]): boolean {
   const currentSum = sumOfPeggingStack(game.peggingStack);
+  // Filter out UNKNOWN cards (redacted cards) before checking
+  const knownCards = hand.filter(card => card !== 'UNKNOWN');
   return (
-    hand.length > 0 &&
-    hand.some(card => currentSum + parseCard(card).pegValue <= 31)
+    knownCards.length > 0 &&
+    knownCards.some(card => currentSum + parseCard(card).pegValue <= 31)
   );
 }
 
