@@ -1,0 +1,15 @@
+node_modules
+lib
+dist-scripts
+coverage
+logs
+.git
+.env
+.env.*
+*.log
+*.md
+test
+docs
+scripts
+tsconfig.scripts.json
+
