@@ -43,29 +43,9 @@ export class GameLoop extends EventEmitter {
   }
 
   /**
-   * Map AgentDecisionType to corresponding WAITING_FOR_* ActionType
-   * @param decisionType - The decision type to map
-   * @returns The corresponding ActionType
-   */
-  private getWaitingActionType(decisionType: AgentDecisionType): ActionType {
-    switch (decisionType) {
-      case AgentDecisionType.DEAL:
-        return ActionType.WAITING_FOR_DEAL;
-      case AgentDecisionType.DISCARD:
-        return ActionType.WAITING_FOR_DISCARD;
-      case AgentDecisionType.PLAY_CARD:
-        return ActionType.WAITING_FOR_PLAY_CARD;
-      case AgentDecisionType.CONTINUE:
-        return ActionType.WAITING_FOR_CONTINUE;
-      default:
-        throw new Error(`Unknown decision type: ${decisionType}`);
-    }
-  }
-
-  /**
-   * Request a decision from a player and record it in GameState/GameEvent
+   * Request a decision from a player and update GameState
    * This helper method integrates decision requests into the canonical game state
-   * Sets waiting state in GameState and records WAITING_FOR_* event in game history
+   * Sets waiting state in GameState (no event is recorded, as waiting state is already in GameState)
    * @param playerId - ID of the player we're waiting on
    * @param decisionType - Type of decision being requested
    */
@@ -73,8 +53,8 @@ export class GameLoop extends EventEmitter {
     playerId: string,
     decisionType: AgentDecisionType
   ): void {
-    const waitingActionType = this.getWaitingActionType(decisionType);
-    this.cribbageGame.recordWaitingEvent(waitingActionType, playerId, decisionType);
+    // Add to waiting list in GameState (no event needed - waiting state is in GameState.waitingForPlayers)
+    this.cribbageGame.addWaitingForPlayer(playerId, decisionType);
   }
 
   private async sendContinue(

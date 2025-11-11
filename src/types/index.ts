@@ -30,11 +30,6 @@ export enum ActionType {
   START_PEGGING_ROUND = 'START_PEGGING_ROUND', // Start a new round of pegging
   START_ROUND = 'START_ROUND', // Start a new round of the game
   WIN = 'WIN', // Player wins the game
-  // Waiting action types - indicate when the game is waiting for a player decision
-  WAITING_FOR_DEAL = 'WAITING_FOR_DEAL',
-  WAITING_FOR_DISCARD = 'WAITING_FOR_DISCARD',
-  WAITING_FOR_PLAY_CARD = 'WAITING_FOR_PLAY_CARD',
-  WAITING_FOR_CONTINUE = 'WAITING_FOR_CONTINUE',
 }
 
 /**

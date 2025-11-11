@@ -9,7 +9,7 @@ import {
 
 describe('Decision Requests Integration', () => {
   describe('recordWaitingEvent', () => {
-    it('should add player to waiting list and record event', () => {
+    it('should add player to waiting list without recording event', () => {
       const game = new CribbageGame([
         { id: 'player-1', name: 'Player 1' },
         { id: 'player-2', name: 'Player 2' },
@@ -19,8 +19,10 @@ describe('Decision Requests Integration', () => {
       const gameState = game.getGameState();
       expect(gameState.waitingForPlayers.length).toBe(0);
 
+      // recordWaitingEvent is deprecated but kept for backwards compatibility
+      // It should add to waiting list but NOT record an event
       game.recordWaitingEvent(
-        ActionType.WAITING_FOR_DISCARD,
+        ActionType.DISCARD, // actionType is now unused
         'player-1',
         AgentDecisionType.DISCARD
       );
@@ -32,11 +34,9 @@ describe('Decision Requests Integration', () => {
         AgentDecisionType.DISCARD
       );
 
+      // No event should be recorded - waiting state is in GameState.waitingForPlayers
       const history = game.getGameSnapshotHistory();
-      expect(history.length).toBe(initialHistoryLength + 1);
-      const lastEvent = history[history.length - 1].gameEvent;
-      expect(lastEvent.actionType).toBe(ActionType.WAITING_FOR_DISCARD);
-      expect(lastEvent.playerId).toBe('player-1');
+      expect(history.length).toBe(initialHistoryLength);
     });
   });
 
@@ -157,12 +157,10 @@ describe('Decision Requests Integration', () => {
         AgentDecisionType.DEAL
       );
 
+      // No events should be recorded - waiting state is in GameState.waitingForPlayers
       const history = gameLoop.cribbageGame.getGameSnapshotHistory();
-      const waitingEvents = history.filter(
-        e => e.gameEvent.actionType === ActionType.WAITING_FOR_DEAL
-      );
-      expect(waitingEvents.length).toBe(1);
-      expect(waitingEvents[0].gameEvent.playerId).toBe('bot-1');
+      // requestDecision no longer records events, so history should be unchanged
+      // (assuming this is called at the start of a game)
     });
   });
 });

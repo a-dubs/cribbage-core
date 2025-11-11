@@ -22,15 +22,15 @@ export interface GameEvent {
   gameId: string;                    // Unique identifier for the game (uuid)
   snapshotId: number;                // Ties this game event to a unique snapshot/version of the game state
   phase: Phase;                      // Current phase of the game
-  actionType: ActionType;            // Last action type taken in the game (includes WAITING_FOR_* types)
-  playerId: string | null;           // ID of the player who took the last action (or player being waited on for WAITING_FOR_* events)
+  actionType: ActionType;            // Last action type taken in the game
+  playerId: string | null;           // ID of the player who took the last action
   cards: Card[] | null;              // Card(s) involved in the last action, if any
   scoreChange: number;                // Points gained from the last action, if any
   timestamp: Date;                   // Time of the last action
 }
 ```
 
-**Note:** The `actionType` field can now include waiting action types (`WAITING_FOR_DEAL`, `WAITING_FOR_DISCARD`, `WAITING_FOR_PLAY_CARD`, `WAITING_FOR_CONTINUE`) which indicate when the game is waiting for a player decision. These events are recorded when decision requests are made and help track the game's waiting state in the event history.
+**Note:** Decision requests are tracked in `GameState.waitingForPlayers` array, not as separate events in the game history. The `actionType` field only includes actual game actions (DEAL, DISCARD, PLAY_CARD, etc.), not waiting states.
 
 ### Key Characteristics
 
@@ -45,7 +45,7 @@ export interface GameEvent {
 - Created in `recordGameEvent()` method whenever a game action occurs
 - Each event increments the `snapshotId` to create a unique version identifier
 - Events are paired with the current `GameState` to create `GameSnapshot` objects
-- New `recordWaitingEvent()` method records `WAITING_FOR_*` events and adds players to `waitingForPlayers` array
+- Decision requests are tracked in `GameState.waitingForPlayers` array (no separate events are recorded)
 
 ```80:103:cribbage-core/src/core/CribbageGame.ts
   private recordGameEvent(
@@ -77,7 +77,7 @@ export interface GameEvent {
 **Waiting State Management:**
 - `addWaitingForPlayer()` - Adds a player to the `waitingForPlayers` array
 - `removeWaitingForPlayer()` - Removes a player from the waiting list when they respond
-- `recordWaitingEvent()` - Records a `WAITING_FOR_*` event and adds to waiting list
+- `recordWaitingEvent()` - Deprecated: Just calls `addWaitingForPlayer()` (no events are recorded)
 - `clearAllWaiting()` - Clears all waiting players (used during phase transitions)
 
 #### server.ts
@@ -346,13 +346,13 @@ export interface GameSnapshot {
 **History Access:**
 - Use `getGameSnapshotHistory()` to retrieve the complete game history
 - Each snapshot includes both the game state and the event that created it
-- The history includes `WAITING_FOR_*` events, providing a complete record of when decisions were requested
+- The history includes all game actions (DEAL, DISCARD, PLAY_CARD, etc.) but not waiting states
+- Waiting states are tracked in `GameState.waitingForPlayers` array, not as separate events
 
 #### GameLoop.ts
 - Listens for `gameSnapshot` events from `CribbageGame`
 - Re-emits them to the server layer
-- Uses `requestDecision()` helper to record waiting events in `GameState` and `GameEvent` history
-- Integrates decision requests into the canonical game state via `recordWaitingEvent()`
+- Uses `requestDecision()` helper to add waiting state to `GameState.waitingForPlayers` (no events recorded)
 
 ```36:38:cribbage-core/src/gameplay/GameLoop.ts
     this.cribbageGame.on('gameSnapshot', (newGameSnapshot: GameSnapshot) => {
@@ -361,9 +361,9 @@ export interface GameSnapshot {
 ```
 
 **Decision Request Integration:**
-- `requestDecision()` - Helper method that calls `recordWaitingEvent()` to add waiting state to `GameState.waitingForPlayers` and record a `WAITING_FOR_*` event
+- `requestDecision()` - Helper method that adds waiting state to `GameState.waitingForPlayers` (no events recorded)
 - Used throughout `GameLoop` when requesting decisions from agents (deal, discard, play card, continue)
-- Ensures decision requests are part of the canonical game state and event history
+- Ensures decision requests are part of the canonical game state (via `waitingForPlayers` array)
 
 #### server.ts
 - Receives `GameSnapshot` from `GameLoop`
@@ -434,7 +434,7 @@ function sendMostRecentGameData(socket: Socket): void {
 | **Mutability** | Immutable (historical record) | Mutable (updated during gameplay) |
 | **Contains** | Action details (who, what, when, score change) | All cards, players, scores, phase, waiting state, etc. |
 | **Use Case** | History, replay, debugging | Decision making, rendering |
-| **Decision Requests** | Includes `WAITING_FOR_*` action types | Includes `waitingForPlayers` array |
+| **Decision Requests** | Not tracked (only actual actions) | Includes `waitingForPlayers` array |
 
 ### GameSnapshot vs Individual Types
 
@@ -512,9 +512,9 @@ Split into gameState and gameEvent
 ### Decision Request Integration
 - Added `WaitingForPlayer` interface
 - Added `waitingForPlayers: WaitingForPlayer[]` to `GameState`
-- Added `WAITING_FOR_*` action types to `ActionType` enum
-- Added methods: `addWaitingForPlayer()`, `removeWaitingForPlayer()`, `recordWaitingEvent()`, `clearAllWaiting()`
-- Decision requests are now part of the canonical game state and event history
+- Added methods: `addWaitingForPlayer()`, `removeWaitingForPlayer()`, `clearAllWaiting()`
+- `recordWaitingEvent()` is deprecated (just calls `addWaitingForPlayer()`, no events recorded)
+- Decision requests are tracked in `GameState.waitingForPlayers` array (not as separate events)
 
 ### Card Type Updates
 - `Card` type includes `'UNKNOWN'` value for redacted cards (opponents' cards that shouldn't be revealed)

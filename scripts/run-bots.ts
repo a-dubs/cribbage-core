@@ -127,26 +127,16 @@ function printStatistics(
   const bestHand = GameStatistics.bestPlayedHand(playerId, gameHistory);
   const hisHeelsCount = GameStatistics.scoredHisHeels(playerId, gameHistory);
 
-  // Count decision requests for this player
-  const decisionRequests = gameHistory.filter(
-    e =>
-      e.playerId === playerId &&
-      (e.actionType === ActionType.WAITING_FOR_DEAL ||
-        e.actionType === ActionType.WAITING_FOR_DISCARD ||
-        e.actionType === ActionType.WAITING_FOR_PLAY_CARD ||
-        e.actionType === ActionType.WAITING_FOR_CONTINUE)
-  );
-  const dealRequests = decisionRequests.filter(
-    e => e.actionType === ActionType.WAITING_FOR_DEAL
+  // Count decision requests by counting actual actions (DEAL, DISCARD, PLAY_CARD)
+  // Note: CONTINUE doesn't have a corresponding action type, so we can't count it
+  const dealRequests = gameHistory.filter(
+    e => e.playerId === playerId && e.actionType === ActionType.DEAL
   ).length;
-  const discardRequests = decisionRequests.filter(
-    e => e.actionType === ActionType.WAITING_FOR_DISCARD
+  const discardRequests = gameHistory.filter(
+    e => e.playerId === playerId && e.actionType === ActionType.DISCARD
   ).length;
-  const playCardRequests = decisionRequests.filter(
-    e => e.actionType === ActionType.WAITING_FOR_PLAY_CARD
-  ).length;
-  const continueRequests = decisionRequests.filter(
-    e => e.actionType === ActionType.WAITING_FOR_CONTINUE
+  const playCardRequests = gameHistory.filter(
+    e => e.playerId === playerId && e.actionType === ActionType.PLAY_CARD
   ).length;
 
   logger.log(`Points from pegging: ${pointsFromPegging}`, toStdout);
@@ -156,7 +146,7 @@ function printStatistics(
   logger.log(`Max crib score: ${maxCribScore}`, toStdout);
   logger.log(`Scored "his heels": ${hisHeelsCount} times`, toStdout);
   logger.log(
-    `Decision requests: DEAL=${dealRequests}, DISCARD=${discardRequests}, PLAY_CARD=${playCardRequests}, CONTINUE=${continueRequests} (total: ${decisionRequests.length})`,
+    `Player actions: DEAL=${dealRequests}, DISCARD=${discardRequests}, PLAY_CARD=${playCardRequests}`,
     toStdout
   );
 
@@ -308,90 +298,9 @@ async function main(gameNumber: number, totalGames: number): Promise<GameResult>
     .getGameSnapshotHistory()
     .map(snapshot => snapshot.gameEvent);
 
-  // Track response times for decision requests
+  // Response time tracking removed - WAITING_FOR_* events no longer exist
+  // Response times would need to be tracked differently (e.g., from GameState.waitingForPlayers snapshots)
   const responseTimes: ResponseTime[] = [];
-
-  // Match WAITING_FOR_* events with their corresponding action events
-  for (let i = 0; i < gameHistory.length; i++) {
-    const event = gameHistory[i];
-    if (
-      event.actionType === ActionType.WAITING_FOR_DEAL ||
-      event.actionType === ActionType.WAITING_FOR_DISCARD ||
-      event.actionType === ActionType.WAITING_FOR_PLAY_CARD ||
-      event.actionType === ActionType.WAITING_FOR_CONTINUE
-    ) {
-      // Find the corresponding action event (next event from same player)
-      for (let j = i + 1; j < gameHistory.length; j++) {
-        const nextEvent = gameHistory[j];
-        if (
-          nextEvent.playerId === event.playerId &&
-          (nextEvent.actionType === ActionType.DEAL ||
-            nextEvent.actionType === ActionType.DISCARD ||
-            nextEvent.actionType === ActionType.PLAY_CARD ||
-            // CONTINUE doesn't have a corresponding action type - it's just waiting then continuing
-            // So we'll match WAITING_FOR_CONTINUE with the next action from that player
-            (event.actionType === ActionType.WAITING_FOR_CONTINUE &&
-              nextEvent.playerId === event.playerId))
-        ) {
-          const requestTime = new Date(event.timestamp || Date.now());
-          const responseTime = new Date(nextEvent.timestamp || Date.now());
-          const durationMs = responseTime.getTime() - requestTime.getTime();
-          if (event.playerId && nextEvent.playerId) {
-            responseTimes.push({
-              playerId: event.playerId,
-              decisionType: event.actionType,
-              requestTime,
-              responseTime,
-              durationMs,
-            });
-          }
-          break;
-        }
-      }
-    }
-  }
-
-  // Log decision request statistics for the game
-  const allDecisionRequests = gameHistory.filter(
-    e =>
-      e.actionType === ActionType.WAITING_FOR_DEAL ||
-      e.actionType === ActionType.WAITING_FOR_DISCARD ||
-      e.actionType === ActionType.WAITING_FOR_PLAY_CARD ||
-      e.actionType === ActionType.WAITING_FOR_CONTINUE
-  );
-  logger.log(
-    `\nDecision requests tracked in game history: ${allDecisionRequests.length} total`,
-    false
-  );
-  logger.log(
-    `  - WAITING_FOR_DEAL: ${allDecisionRequests.filter(e => e.actionType === ActionType.WAITING_FOR_DEAL).length}`,
-    false
-  );
-  logger.log(
-    `  - WAITING_FOR_DISCARD: ${allDecisionRequests.filter(e => e.actionType === ActionType.WAITING_FOR_DISCARD).length}`,
-    false
-  );
-  logger.log(
-    `  - WAITING_FOR_PLAY_CARD: ${allDecisionRequests.filter(e => e.actionType === ActionType.WAITING_FOR_PLAY_CARD).length}`,
-    false
-  );
-  logger.log(
-    `  - WAITING_FOR_CONTINUE: ${allDecisionRequests.filter(e => e.actionType === ActionType.WAITING_FOR_CONTINUE).length}`,
-    false
-  );
-
-  // Log response time statistics
-  if (responseTimes.length > 0) {
-    const avgResponseTime =
-      responseTimes.reduce((sum, rt) => sum + rt.durationMs, 0) /
-      responseTimes.length;
-    const minResponseTime = Math.min(...responseTimes.map(rt => rt.durationMs));
-    const maxResponseTime = Math.max(...responseTimes.map(rt => rt.durationMs));
-    logger.log(
-      `\nResponse time statistics: avg=${avgResponseTime.toFixed(0)}ms, min=${minResponseTime}ms, max=${maxResponseTime}ms`,
-      false
-    );
-  }
 
   // read in game-history.json from project root and append gameHistory to it
   const filePath = '/Users/a-dubs/personal/cribbage/game-history.json';
@@ -547,21 +456,16 @@ void (async () => {
       )}, max: ${max(maxCribScore)}`
     );
     
-    // Decision request statistics (aggregate across all games)
-    const allDecisionRequests = gameResults.flatMap(r => r.gameHistory).filter(
-      e =>
-        e.playerId === playerId &&
-        (e.actionType === ActionType.WAITING_FOR_DEAL ||
-          e.actionType === ActionType.WAITING_FOR_DISCARD ||
-          e.actionType === ActionType.WAITING_FOR_PLAY_CARD ||
-          e.actionType === ActionType.WAITING_FOR_CONTINUE)
+    // Player action statistics (aggregate across all games)
+    // Count actual actions instead of decision requests (WAITING_FOR_* events no longer exist)
+    const allActions = gameResults.flatMap(r => r.gameHistory).filter(
+      e => e.playerId === playerId
     );
-    const dealReqs = allDecisionRequests.filter(e => e.actionType === ActionType.WAITING_FOR_DEAL).length;
-    const discardReqs = allDecisionRequests.filter(e => e.actionType === ActionType.WAITING_FOR_DISCARD).length;
-    const playCardReqs = allDecisionRequests.filter(e => e.actionType === ActionType.WAITING_FOR_PLAY_CARD).length;
-    const continueReqs = allDecisionRequests.filter(e => e.actionType === ActionType.WAITING_FOR_CONTINUE).length;
+    const dealReqs = allActions.filter(e => e.actionType === ActionType.DEAL).length;
+    const discardReqs = allActions.filter(e => e.actionType === ActionType.DISCARD).length;
+    const playCardReqs = allActions.filter(e => e.actionType === ActionType.PLAY_CARD).length;
     console.log(
-      `Decision requests: DEAL=${dealReqs}, DISCARD=${discardReqs}, PLAY_CARD=${playCardReqs}, CONTINUE=${continueReqs} (total: ${allDecisionRequests.length})`
+      `Player actions: DEAL=${dealReqs}, DISCARD=${discardReqs}, PLAY_CARD=${playCardReqs}`
     );
 
     // Response time statistics (aggregate across all games)
@@ -587,12 +491,8 @@ void (async () => {
         byDecisionType[rt.decisionType].push(rt);
       }
       
-      const decisionTypeNames: Record<string, string> = {
-        [ActionType.WAITING_FOR_DEAL]: 'DEAL',
-        [ActionType.WAITING_FOR_DISCARD]: 'DISCARD',
-        [ActionType.WAITING_FOR_PLAY_CARD]: 'PLAY_CARD',
-        [ActionType.WAITING_FOR_CONTINUE]: 'CONTINUE',
-      };
+      // Response time breakdown by decision type removed - WAITING_FOR_* events no longer exist
+      // Would need to track decision types differently to restore this feature
       
       const breakdowns: string[] = [];
       for (const [decisionType, times] of Object.entries(byDecisionType)) {

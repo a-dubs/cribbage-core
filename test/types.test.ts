@@ -8,14 +8,7 @@ import { CribbageGame } from '../src/core/CribbageGame';
 
 describe('Type System Tests', () => {
   describe('ActionType enum', () => {
-    it('should include WAITING_FOR_* action types', () => {
-      expect(ActionType.WAITING_FOR_DEAL).toBe('WAITING_FOR_DEAL');
-      expect(ActionType.WAITING_FOR_DISCARD).toBe('WAITING_FOR_DISCARD');
-      expect(ActionType.WAITING_FOR_PLAY_CARD).toBe('WAITING_FOR_PLAY_CARD');
-      expect(ActionType.WAITING_FOR_CONTINUE).toBe('WAITING_FOR_CONTINUE');
-    });
-
-    it('should maintain backward compatibility with existing action types', () => {
+    it('should include all action types', () => {
       expect(ActionType.DEAL).toBe('DEAL');
       expect(ActionType.DISCARD).toBe('DISCARD');
       expect(ActionType.PLAY_CARD).toBe('PLAY_CARD');

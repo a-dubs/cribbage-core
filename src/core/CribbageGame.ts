@@ -511,22 +511,21 @@ export class CribbageGame extends EventEmitter {
   }
 
   /**
-   * Record a waiting event in game history
-   * This method adds the player to waiting list and records the event
-   * @param actionType - The WAITING_FOR_* action type
+   * Add a player to the waiting list (deprecated - use addWaitingForPlayer directly)
+   * This method is kept for backwards compatibility but just calls addWaitingForPlayer
+   * @param actionType - Unused (kept for backwards compatibility)
    * @param playerId - ID of the player we're waiting on
    * @param decisionType - Type of decision being requested
+   * @deprecated Use addWaitingForPlayer directly instead
    */
   public recordWaitingEvent(
     actionType: ActionType,
     playerId: string,
     decisionType: AgentDecisionType
   ): void {
-    // Add to waiting list
+    // Just add to waiting list - no event is recorded
+    // Waiting state is already in GameState.waitingForPlayers, no need for separate events
     this.addWaitingForPlayer(playerId, decisionType);
-
-    // Record the event
-    this.recordGameEvent(actionType, playerId, null, 0);
   }
 
   /**
