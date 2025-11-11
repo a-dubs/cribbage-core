@@ -69,6 +69,24 @@ export class GameLoop extends EventEmitter {
     this.emit('serverFrame', frame);
   }
 
+  private async waitForRequestToClear(requestId: string): Promise<void> {
+    if (!this.decisionRequests.find(r => r.requestId === requestId)) {
+      return;
+    }
+    await new Promise<void>(resolve => {
+      const onFrame = () => {
+        const stillExists = this.decisionRequests.some(
+          r => r.requestId === requestId
+        );
+        if (!stillExists) {
+          this.off('serverFrame', onFrame);
+          resolve();
+        }
+      };
+      this.on('serverFrame', onFrame);
+    });
+  }
+
   private createDecisionRequest(
     playerId: string,
     type: AgentDecisionType | 'CUT_DECK',
@@ -76,6 +94,17 @@ export class GameLoop extends EventEmitter {
     minSelections?: number,
     maxSelections?: number
   ): Promise<DecisionResponse> {
+    // Reuse existing outstanding request for this player/type to prevent duplicates
+    const existing = this.decisionRequests.find(
+      r => r.playerId === playerId && r.type === (type === 'CUT_DECK' ? 'CUT_DECK' : (type as any))
+    );
+    if (existing) {
+      // Wait until the existing request is cleared, then create a fresh one
+      // This ensures we don't spam multiple requests in tight loops
+      return this.waitForRequestToClear(existing.requestId).then(() =>
+        this.createDecisionRequest(playerId, type, payload, minSelections, maxSelections)
+      );
+    }
     const requestId = this.generateRequestId(playerId, type);
     const request: DecisionRequest = {
       requestId,
