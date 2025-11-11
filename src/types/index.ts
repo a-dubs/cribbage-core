@@ -30,11 +30,6 @@ export enum ActionType {
   START_PEGGING_ROUND = 'START_PEGGING_ROUND', // Start a new round of pegging
   START_ROUND = 'START_ROUND', // Start a new round of the game
   WIN = 'WIN', // Player wins the game
-  // Waiting action types - indicate when the game is waiting for a player decision
-  WAITING_FOR_DEAL = 'WAITING_FOR_DEAL',
-  WAITING_FOR_DISCARD = 'WAITING_FOR_DISCARD',
-  WAITING_FOR_PLAY_CARD = 'WAITING_FOR_PLAY_CARD',
-  WAITING_FOR_CONTINUE = 'WAITING_FOR_CONTINUE',
 }
 
 /**
@@ -130,13 +125,28 @@ export interface GameEvent {
   // peggingTotal?: number; // Total value of the cards played in the current pegging stack
 }
 
-/**
- * Interface for tracking a player decision request
- */
-export interface WaitingForPlayer {
-  playerId: string; // ID of the player we're waiting on
-  decisionType: AgentDecisionType; // Type of decision being requested
-  requestTimestamp: Date; // When the request was made
+// Transport-layer decision request/response and server frame (ephemeral)
+export type DecisionType =
+  | 'DEAL'
+  | 'DISCARD'
+  | 'PLAY_CARD'
+  | 'CONTINUE'
+  | 'CUT_DECK';
+
+export interface DecisionRequest {
+  requestId: string;
+  playerId: string;
+  type: DecisionType;
+  payload?: unknown;
+  minSelections?: number;
+  maxSelections?: number;
+}
+
+export interface DecisionResponse {
+  requestId: string;
+  playerId: string;
+  type: DecisionType;
+  payload?: unknown;
 }
 
 /**
@@ -156,12 +166,16 @@ export interface GameState {
   peggingTotal: number; // Total value of the cards played in the current pegging stack
   snapshotId: number;
   roundNumber: number;
-  waitingForPlayers: WaitingForPlayer[]; // List of players we're currently waiting on for decisions (supports parallel decisions)
 }
 
 export interface GameSnapshot {
   gameState: GameState; // Current state of the game
   gameEvent: GameEvent; // Last event that occurred in the game
+}
+
+export interface ServerFrame {
+  snapshot: GameSnapshot;
+  decisionRequests: DecisionRequest[];
 }
 
 /**
@@ -190,6 +204,12 @@ export interface GameAgent {
     playerId: string,
     continueDescription: string
   ): Promise<void>;
+  // New optional action: cut deck; returns an index in [0, maxIndex]
+  cutDeck?(
+    game: GameState,
+    playerId: string,
+    maxIndex: number
+  ): Promise<number>;
 }
 
 export type ScoreType =
@@ -270,6 +290,7 @@ export enum AgentDecisionType {
   DISCARD = 'DISCARD',
   CONTINUE = 'CONTINUE',
   DEAL = 'DEAL',
+  CUT_DECK = 'CUT_DECK',
 }
 
 // map AgentDecisionType to the corresponding EmittedData type

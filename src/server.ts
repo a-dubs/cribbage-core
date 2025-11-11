@@ -8,6 +8,7 @@ import {
   PlayerIdAndName,
   GameInfo,
   GameSnapshot,
+  DecisionResponse,
 } from './types';
 import { WebSocketAgent } from './agents/WebSocketAgent';
 import { ExhaustiveSimpleAgent } from './agents/ExhaustiveSimpleAgent';
@@ -239,6 +240,18 @@ io.on('connection', socket => {
     }
   });
 
+  socket.on('decisionResponse', (response: DecisionResponse) => {
+    if (!gameLoop) {
+      console.error('Received decisionResponse but game loop not initialized');
+      return;
+    }
+    try {
+      gameLoop.submitDecisionResponse(response);
+    } catch (err) {
+      console.error('Error handling decisionResponse:', err);
+    }
+  });
+
   socket.on('heartbeat', () => {
     console.log('Received heartbeat from client');
   });
@@ -357,16 +370,17 @@ async function handleStartGame(): Promise<void> {
 
   // Emit game state changes with redaction per player
   gameLoop.on('gameSnapshot', (newSnapshot: GameSnapshot) => {
-    // Store the full snapshot for internal use (agents, database, etc.)
+    // Maintain DB and per-round tracking
     mostRecentGameSnapshot = newSnapshot;
     sendGameEventToDB(newSnapshot.gameEvent);
     currentRoundGameEvents.push(newSnapshot.gameEvent);
     if (newSnapshot.gameEvent.actionType === ActionType.START_ROUND) {
       currentRoundGameEvents = [];
     }
+  });
 
-    // Send redacted GameSnapshot to each player
-    // Each player only sees their own cards, opponents' cards are 'UNKNOWN'
+  // Broadcast server frames that include snapshot + decisionRequests
+  gameLoop.on('serverFrame', frame => {
     connectedPlayers.forEach(playerInfo => {
       const socketId = playerIdToSocketId.get(playerInfo.id);
       if (socketId) {
@@ -374,14 +388,17 @@ async function handleStartGame(): Promise<void> {
           playerInfo.id
         );
         const redactedGameEvent = gameLoop!.cribbageGame.getRedactedGameEvent(
-          newSnapshot.gameEvent,
+          frame.snapshot.gameEvent,
           playerInfo.id
         );
         const redactedSnapshot: GameSnapshot = {
           gameState: redactedGameState,
           gameEvent: redactedGameEvent,
         };
-        io.to(socketId).emit('gameSnapshot', redactedSnapshot);
+        io.to(socketId).emit('serverFrame', {
+          snapshot: redactedSnapshot,
+          decisionRequests: frame.decisionRequests,
+        });
 
         // Also send redacted current round game events to this player
         const redactedRoundEvents = currentRoundGameEvents.map(event =>

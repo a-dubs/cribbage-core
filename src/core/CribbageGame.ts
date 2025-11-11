@@ -50,7 +50,6 @@ export class CribbageGame extends EventEmitter {
       peggingTotal: 0,
       roundNumber: 0,
       snapshotId: 0,
-      waitingForPlayers: [],
     };
 
     // this.gameEventRecords = [];
@@ -129,7 +128,6 @@ export class CribbageGame extends EventEmitter {
     this.gameState.peggingGoPlayers = [];
     this.gameState.peggingLastCardPlayer = null;
     this.gameState.peggingTotal = 0;
-    this.gameState.waitingForPlayers = [];
     // reset all players' hands
     this.gameState.players.forEach(player => {
       player.hand = [];
@@ -171,12 +169,6 @@ export class CribbageGame extends EventEmitter {
       throw new Error('Cannot deal cards outside of the dealing phase.');
     }
 
-    // Clear waiting state before action
-    const dealer = this.gameState.players.find(p => p.isDealer);
-    if (dealer) {
-      this.removeWaitingForPlayer(dealer.id);
-    }
-
     this.shuffleDeck();
 
     this.gameState.players.forEach((player: Player) => {
@@ -198,8 +190,6 @@ export class CribbageGame extends EventEmitter {
       // console.log(`Player ${playerId} hand: ${player.hand.join(', ')}`);
       // console.log(`Player ${playerId} discards: ${cards.join(', ')}`);
     }
-    // Clear waiting state before action
-    this.removeWaitingForPlayer(playerId);
     // Remove cards from player's hand and add to the crib
     player.hand = player.hand.filter((card: Card) => !cards.includes(card));
     this.gameState.crib.push(...cards);
@@ -223,9 +213,6 @@ export class CribbageGame extends EventEmitter {
     if (this.gameState.currentPhase !== Phase.CUTTING) {
       throw new Error('Cannot cut deck outside of the cutting phase.');
     }
-
-    // Clear waiting state before action
-    this.removeWaitingForPlayer(playerId);
 
     this.recordGameEvent(ActionType.CUT, playerId, null, 0);
 
@@ -302,9 +289,6 @@ export class CribbageGame extends EventEmitter {
     // if (!isValidPeggingPlay(this.game, player, card)) {
     //   throw new Error('Invalid card play.');
     // }
-
-    // Clear waiting state before action
-    this.removeWaitingForPlayer(playerId);
 
     if (card) {
       player.playedCards.push(card);
@@ -487,63 +471,6 @@ export class CribbageGame extends EventEmitter {
 
     // Automatically log event
     this.recordGameEvent(reason, null, null, 0);
-  }
-
-  /**
-   * Add a player to the waiting list for a decision request
-   * @param playerId - ID of the player we're waiting on
-   * @param decisionType - Type of decision being requested
-   */
-  public addWaitingForPlayer(
-    playerId: string,
-    decisionType: AgentDecisionType
-  ): void {
-    // Check if player already exists in waiting list
-    if (
-      !this.gameState.waitingForPlayers.find(w => w.playerId === playerId)
-    ) {
-      this.gameState.waitingForPlayers.push({
-        playerId,
-        decisionType,
-        requestTimestamp: new Date(),
-      });
-    }
-  }
-
-  /**
-   * Record a waiting event in game history
-   * This method adds the player to waiting list and records the event
-   * @param actionType - The WAITING_FOR_* action type
-   * @param playerId - ID of the player we're waiting on
-   * @param decisionType - Type of decision being requested
-   */
-  public recordWaitingEvent(
-    actionType: ActionType,
-    playerId: string,
-    decisionType: AgentDecisionType
-  ): void {
-    // Add to waiting list
-    this.addWaitingForPlayer(playerId, decisionType);
-
-    // Record the event
-    this.recordGameEvent(actionType, playerId, null, 0);
-  }
-
-  /**
-   * Remove a player from the waiting list
-   * @param playerId - ID of the player to remove from waiting list
-   */
-  public removeWaitingForPlayer(playerId: string): void {
-    this.gameState.waitingForPlayers = this.gameState.waitingForPlayers.filter(
-      w => w.playerId !== playerId
-    );
-  }
-
-  /**
-   * Clear all waiting players from the waiting list
-   */
-  public clearAllWaiting(): void {
-    this.gameState.waitingForPlayers = [];
   }
 
   /**
