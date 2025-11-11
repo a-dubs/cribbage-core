@@ -1,0 +1,13 @@
+{
+    "compilerOptions": {
+      "outDir": "./dist-scripts", // Separate output directory for scripts
+      "rootDir": "../cribbage-core",
+      "module": "CommonJS",
+      "target": "ES2020",
+      "strict": true,
+      "esModuleInterop": true
+    },
+    "include": ["scripts/**/*"],
+    "exclude": ["node_modules", "lib", "test"]
+  }
+  

@@ -1,9 +1,21 @@
 import { RandomAgent } from './RandomAgent';
-import { SimpleAgent } from './SimpleAgent';
+import { ExhaustiveSimpleAgent } from './ExhaustiveSimpleAgent';
+import { HeuristicSimpleAgent } from './HeuristicSimpleAgent';
 import { WebSocketAgent } from './WebSocketAgent';
+import {
+  DelayedSimpleAgent,
+  RandomDelaySimpleAgent,
+  Fixed500msSimpleAgent,
+  Fixed200msSimpleAgent,
+} from './DelayedSimpleAgent';
 
 export const agents = {
   RandomAgent,
-  SimpleAgent,
+  ExhaustiveSimpleAgent,
+  HeuristicSimpleAgent,
   WebSocketAgent,
+  DelayedSimpleAgent,
+  RandomDelaySimpleAgent,
+  Fixed500msSimpleAgent,
+  Fixed200msSimpleAgent,
 };

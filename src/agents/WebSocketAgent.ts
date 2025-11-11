@@ -29,15 +29,17 @@ export class WebSocketAgent implements GameAgent {
   }
 
   updateSocket(newSocket: Socket): void {
-    if (this.socket) {
+    if (this.socket && this.socket?.id !== newSocket.id) {
+      console.log('[WebSocketAgent] Old socket id:', this.socket.id);
       // Clean up any event listeners that this agent attached to the old socket.
       // Adjust the event names if you've added additional listeners.
       this.socket.removeAllListeners('makeMoveResponse');
       this.socket.removeAllListeners('discardResponse');
       this.socket.removeAllListeners('disconnect');
+      // Update the socket reference to the new socket.
+      this.socket = newSocket;
+      console.log('[WebSocketAgent] New socket id:', this.socket.id);
     }
-    // Update the socket reference to the new socket.
-    this.socket = newSocket;
   }
   // In your WebSocketAgent class:
 

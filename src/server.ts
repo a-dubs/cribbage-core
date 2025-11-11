@@ -3,15 +3,14 @@ import { Server, Socket } from 'socket.io';
 import { GameLoop } from './gameplay/GameLoop';
 import {
   ActionType,
-  EmittedWaitingForPlayer,
   GameAgent,
   GameEvent,
-  GameState,
   PlayerIdAndName,
   GameInfo,
+  GameSnapshot,
 } from './types';
 import { WebSocketAgent } from './agents/WebSocketAgent';
-import { SimpleAgent } from './agents/SimpleAgent';
+import { ExhaustiveSimpleAgent } from './agents/ExhaustiveSimpleAgent';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
@@ -39,7 +38,26 @@ console.log('WEB_APP_ORIGIN:', WEB_APP_ORIGIN);
 
 console.log('Cribbage-core server starting...');
 
-const server = http.createServer();
+const server = http.createServer((req, res) => {
+  if (req.method === 'GET' && req.url === '/ping') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('pong');
+    return;
+  }
+  if (req.method === 'GET' && req.url === '/connected-players') {
+    const playersIdAndName: PlayerIdAndName[] = [];
+    connectedPlayers.forEach(playerInfo => {
+      playersIdAndName.push({ id: playerInfo.id, name: playerInfo.name });
+    });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(playersIdAndName));
+    return;
+  }
+  // fallback for other routes
+  res.writeHead(404, { 'Content-Type': 'text/plain' });
+  res.end('Not found');
+});
+
 const io = new Server(server, {
   cors: {
     origin: WEB_APP_ORIGIN,
@@ -62,6 +80,7 @@ interface LoginData {
 const GAME_EVENTS_FILE = path.join(JSON_DB_DIR, 'gameEvents.json');
 const GAME_INFO_FILE = path.join(JSON_DB_DIR, 'gameInfo.json');
 
+// TODO: convert this to store gamestate and game events since game events alone are not sufficient
 // just write to json file for now (append to list of game events)
 const sendGameEventToDB = (gameEvent: GameEvent): void => {
   try {
@@ -146,32 +165,38 @@ const connectedPlayers: Map<string, PlayerInfo> = new Map();
 const playerIdToSocketId: Map<string, string> = new Map();
 const playAgainVotes: Set<string> = new Set();
 let gameLoop: GameLoop | null = null;
-let mostRecentGameState: GameState | null = null;
-let mostRecentGameEvent: GameEvent | null = null;
-let mostRecentWaitingForPlayer: EmittedWaitingForPlayer | null = null;
+let mostRecentGameSnapshot: GameSnapshot | null = null;
 let currentRoundGameEvents: GameEvent[] = [];
 
 io.on('connection', socket => {
   const token = socket.handshake.auth.token;
-  if (token !== 'dummy-auth-token') {
-    console.log('Authentication failed for socket:', socket.id);
+  if (token !== WEBSOCKET_AUTH_TOKEN) {
+    console.log('Incorrect socket token for socket:', socket.id);
     socket.disconnect();
     return;
   }
-
-  console.log('A user connected:', socket.id);
+  console.log('New socket connection:', socket.id);
 
   // send the connected players to the clients even before login
   // so they can see who is already connected
   emitConnectedPlayers();
 
   socket.on('login', (data: LoginData) => {
+    console.log('Received login event from socket:', socket.id);
     handleLogin(socket, data);
   });
 
   socket.on('startGame', () => {
+    console.log('Received startGame event from socket:', socket.id);
     handleStartGame().catch(error => {
       console.error('Error starting game:', error);
+    });
+  });
+
+  socket.on('restartGame', () => {
+    console.log('Received restartGame event from socket:', socket.id);
+    handleRestartGame().catch(error => {
+      console.error('Error restarting game:', error);
     });
   });
 
@@ -198,9 +223,9 @@ io.on('connection', socket => {
   });
 
   socket.on('disconnect', () => {
-    console.log('A user disconnected:', socket.id);
+    console.log('A socket disconnected:', socket.id);
     // only remove the player if the game loop is not running
-    if (!GameLoop) {
+    if (!gameLoop) {
       playerIdToSocketId.forEach((socketId, playerId) => {
         if (socketId === socket.id) {
           connectedPlayers.delete(playerId);
@@ -222,6 +247,7 @@ io.on('connection', socket => {
 function handleLogin(socket: Socket, data: LoginData): void {
   const { username, name } = data;
   let agent: WebSocketAgent;
+  console.log('Handling login for user:', username);
 
   // Replace old socket if player reconnects
   const oldPlayerInfo = connectedPlayers.get(username);
@@ -230,14 +256,22 @@ function handleLogin(socket: Socket, data: LoginData): void {
     console.log(
       `Player ${username} reconnected. Updating socket for their WebSocketAgent.`
     );
-    oldPlayerInfo.agent.socket.disconnect(true); // Disconnect old socket if applicable
     agent = oldPlayerInfo.agent;
-    agent.updateSocket(socket);
-    // if the game loop is running, send the most recent game data to the client
-    if (gameLoop) {
-      sendMostRecentGameData(socket);
+    console.log(
+      `Old socket ID: ${oldPlayerInfo.agent.socket.id}, New socket ID: ${socket.id}`
+    );
+    // compare the socket ids and if they are different, replace the socket
+    if (oldPlayerInfo.agent.socket.id !== socket.id) {
+      console.log(
+        `Replacing old socket ${oldPlayerInfo.agent.socket.id} with new socket ${socket.id}`
+      );
+      oldPlayerInfo.agent.socket.disconnect(true); // Disconnect old socket if applicable
+      agent.updateSocket(socket);
     }
   } else {
+    console.log(
+      `Player ${username} logged in for the first time. Creating new WebSocketAgent.`
+    );
     agent = new WebSocketAgent(socket, username);
   }
   const playerInfo: PlayerInfo = { id: username, name, agent };
@@ -245,8 +279,17 @@ function handleLogin(socket: Socket, data: LoginData): void {
   playerIdToSocketId.set(username, socket.id);
 
   connectedPlayers.set(username, playerInfo);
-  socket.emit('loggedIn', 'You are logged in!');
+  console.log('emitting loggedIn event to client:', username);
+  const loggedInData: PlayerIdAndName = {
+    id: username,
+    name,
+  };
+  socket.emit('loggedIn', loggedInData);
   emitConnectedPlayers();
+  // if the game loop is running, send the most recent game data to the client
+  if (gameLoop) {
+    sendMostRecentGameData(socket);
+  }
 }
 
 // create function that emits the current connected players to all clients
@@ -255,16 +298,28 @@ function emitConnectedPlayers(): void {
   connectedPlayers.forEach(playerInfo => {
     playersIdAndName.push({ id: playerInfo.id, name: playerInfo.name });
   });
+  console.log('Emitting connected players to all clients:', playersIdAndName);
   io.emit('connectedPlayers', playersIdAndName);
+  // for (const [_, playerInfo] of connectedPlayers) {
+  //   if (playerInfo.agent instanceof WebSocketAgent) {
+  //     // Emit to the specific player
+  //     playerInfo.agent.socket.emit('connectedPlayers', playersIdAndName);
+  //   }
+
+  // }
 }
 
 async function handleStartGame(): Promise<void> {
+  if (gameLoop) {
+    console.error('Game loop already running. Cannot start a new game.');
+    throw new Error('Game loop already running. Cannot start a new game.');
+  }
   console.log('Starting game...');
   // If only one player is connected, add a bot
   if (connectedPlayers.size === 1) {
     console.log('Adding a bot to start the game.');
     const botName = 'Simple Optimal Bot';
-    const botAgent = new SimpleAgent();
+    const botAgent = new ExhaustiveSimpleAgent();
     const botId = botAgent.playerId;
     const botPlayerInfo: PlayerInfo = {
       id: botId,
@@ -300,24 +355,41 @@ async function handleStartGame(): Promise<void> {
     }
   });
 
-  // Emit game state changes
-  gameLoop.on('gameStateChange', (newGameState: GameState) => {
-    io.emit('gameStateChange', newGameState);
-    mostRecentGameState = newGameState;
-  });
-  gameLoop.on('gameEvent', (gameEvent: GameEvent) => {
-    io.emit('gameEvent', gameEvent);
-    mostRecentGameEvent = gameEvent;
-    if (gameEvent.actionType === ActionType.START_ROUND) {
+  // Emit game state changes with redaction per player
+  gameLoop.on('gameSnapshot', (newSnapshot: GameSnapshot) => {
+    // Store the full snapshot for internal use (agents, database, etc.)
+    mostRecentGameSnapshot = newSnapshot;
+    sendGameEventToDB(newSnapshot.gameEvent);
+    currentRoundGameEvents.push(newSnapshot.gameEvent);
+    if (newSnapshot.gameEvent.actionType === ActionType.START_ROUND) {
       currentRoundGameEvents = [];
     }
-    currentRoundGameEvents.push(gameEvent);
-    sendGameEventToDB(gameEvent);
-    io.emit('currentRoundGameEvents', currentRoundGameEvents);
-  });
-  gameLoop.on('waitingForPlayer', (waitingData: EmittedWaitingForPlayer) => {
-    io.emit('waitingForPlayer', waitingData);
-    mostRecentWaitingForPlayer = waitingData;
+
+    // Send redacted GameSnapshot to each player
+    // Each player only sees their own cards, opponents' cards are 'UNKNOWN'
+    connectedPlayers.forEach(playerInfo => {
+      const socketId = playerIdToSocketId.get(playerInfo.id);
+      if (socketId) {
+        const redactedGameState = gameLoop!.cribbageGame.getRedactedGameState(
+          playerInfo.id
+        );
+        const redactedGameEvent = gameLoop!.cribbageGame.getRedactedGameEvent(
+          newSnapshot.gameEvent,
+          playerInfo.id
+        );
+        const redactedSnapshot: GameSnapshot = {
+          gameState: redactedGameState,
+          gameEvent: redactedGameEvent,
+        };
+        io.to(socketId).emit('gameSnapshot', redactedSnapshot);
+
+        // Also send redacted current round game events to this player
+        const redactedRoundEvents = currentRoundGameEvents.map(event =>
+          gameLoop!.cribbageGame.getRedactedGameEvent(event, playerInfo.id)
+        );
+        io.to(socketId).emit('currentRoundGameEvents', redactedRoundEvents);
+      }
+    });
   });
   // send the connected players to the clients
   emitConnectedPlayers();
@@ -337,18 +409,76 @@ async function handleStartGame(): Promise<void> {
   await startGame();
 }
 
+async function handleRestartGame(): Promise<void> {
+  console.log('Restarting game...');
+  
+  // Check if restart is enabled (development only)
+  const RESTART_ENABLED = process.env.ENABLE_RESTART_GAME === 'true';
+  if (!RESTART_ENABLED) {
+    console.log('Restart game is disabled. Set ENABLE_RESTART_GAME=true to enable.');
+    return;
+  }
+
+  // Clear current game state
+  if (gameLoop) {
+    console.log('Clearing current game loop...');
+    // Remove all listeners to prevent memory leaks
+    gameLoop.removeAllListeners();
+    gameLoop = null;
+  }
+
+  // Reset state
+  playAgainVotes.clear();
+  mostRecentGameSnapshot = null;
+  currentRoundGameEvents = [];
+
+  // Emit game reset event to all clients
+  io.emit('gameReset');
+
+  // Start a new game
+  await handleStartGame();
+}
+
 function sendMostRecentGameData(socket: Socket): void {
   console.log('Sending most recent game data to client');
-  if (mostRecentGameState) {
-    socket.emit('gameStateChange', mostRecentGameState);
+  
+  // Find which player this socket belongs to
+  const playerId = [...playerIdToSocketId.entries()].find(
+    ([, id]) => id === socket.id
+  )?.[0];
+
+  if (!playerId) {
+    console.error('Could not find player ID for socket:', socket.id);
+    return;
   }
-  if (mostRecentGameEvent) {
-    socket.emit('gameEvent', mostRecentGameEvent);
+
+  // Send redacted GameSnapshot for this specific player
+  if (mostRecentGameSnapshot && gameLoop) {
+    const redactedGameState = gameLoop.cribbageGame.getRedactedGameState(
+      playerId
+    );
+    const redactedGameEvent = gameLoop.cribbageGame.getRedactedGameEvent(
+      mostRecentGameSnapshot.gameEvent,
+      playerId
+    );
+    const redactedSnapshot: GameSnapshot = {
+      gameState: redactedGameState,
+      gameEvent: redactedGameEvent,
+    };
+    socket.emit('gameSnapshot', redactedSnapshot);
+  } else {
+    console.log('no mostRecentGameSnapshot to send...');
   }
-  if (mostRecentWaitingForPlayer) {
-    socket.emit('waitingForPlayer', mostRecentWaitingForPlayer);
+  
+  // Send redacted current round game events
+  if (gameLoop && mostRecentGameSnapshot) {
+    const redactedRoundEvents = currentRoundGameEvents.map(event =>
+      gameLoop!.cribbageGame.getRedactedGameEvent(event, playerId)
+    );
+    socket.emit('currentRoundGameEvents', redactedRoundEvents);
+  } else {
+    socket.emit('currentRoundGameEvents', currentRoundGameEvents);
   }
-  socket.emit('currentRoundGameEvents', currentRoundGameEvents);
   socket.emit('playAgainVotes', Array.from(playAgainVotes));
 }
 
@@ -359,7 +489,7 @@ async function startGame(): Promise<void> {
     );
     return;
   }
-
+  console.log('Starting game loop...');
   const winner = await gameLoop.playGame();
   endGameInDB(gameLoop.cribbageGame.getGameState().id, winner);
 
@@ -368,7 +498,7 @@ async function startGame(): Promise<void> {
 
   // Add all bot players to play again votes automatically
   connectedPlayers.forEach(playerInfo => {
-    if (playerInfo.agent instanceof SimpleAgent) {
+    if (playerInfo.agent instanceof ExhaustiveSimpleAgent) {
       playAgainVotes.add(playerInfo.id);
       console.log(
         `Bot player ${playerInfo.id} automatically voted to play again.`

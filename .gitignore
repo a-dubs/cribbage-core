@@ -118,3 +118,15 @@ dist
 # Compiled code
 lib/
 .env
+dist-scripts/
+
+# Generated test files
+test/*.test.js
+test/*.test.js.map
+test/*.test.d.ts
+test/*.test.d.ts.map
+
+.DS_Store
+
+# ignore anything ending in .ignore
+*.ignore

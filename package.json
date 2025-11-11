@@ -18,7 +18,7 @@
     "test:watch": "jest --watch",
     "test": "jest --coverage -- --silent=false",
     "typecheck": "tsc --noEmit",
-    "bots-test": "npm run clean && npm run build-scripts && node ./dist-scripts/scripts/run-bots.js",
+    "bots-test": "pnpm run clean && pnpm run build-scripts && node ./dist-scripts/scripts/run-bots.js",
     "play-against-bot": "npm run clean && npm run build-scripts && node ./dist-scripts/scripts/play-against-bot.js",
     "start-server": "DEBUG=socket.io:* node ./lib/server.js"
   },
@@ -128,9 +128,11 @@
     ]
   },
   "dependencies": {
+    "@babel/runtime": "^7.27.0",
     "@types/socket.io": "^3.0.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
+    "eventemitter3": "^5.0.1",
     "express": "^4.21.2",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",

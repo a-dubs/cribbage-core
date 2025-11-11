@@ -6,11 +6,12 @@ import {
   PlayerIdAndName,
   GameEvent,
   GameState,
-  EmittedWaitingForPlayer,
   AgentDecisionType,
+  GameSnapshot,
+  ActionType,
 } from '../types';
 import { displayCard, parseCard, suitToEmoji } from '../core/scoring';
-import { EventEmitter } from 'events';
+import EventEmitter from 'eventemitter3';
 import dotenv from 'dotenv';
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
@@ -32,10 +33,48 @@ export class GameLoop extends EventEmitter {
     this.cribbageGame.on('gameEvent', (gameEvent: GameEvent) => {
       this.emit('gameEvent', gameEvent);
     });
+    this.cribbageGame.on('gameSnapshot', (newGameSnapshot: GameSnapshot) => {
+      this.emit('gameSnapshot', newGameSnapshot);
+    });
   }
 
   public addAgent(playerId: string, agent: GameAgent): void {
     this.agents[playerId] = agent;
+  }
+
+  /**
+   * Map AgentDecisionType to corresponding WAITING_FOR_* ActionType
+   * @param decisionType - The decision type to map
+   * @returns The corresponding ActionType
+   */
+  private getWaitingActionType(decisionType: AgentDecisionType): ActionType {
+    switch (decisionType) {
+      case AgentDecisionType.DEAL:
+        return ActionType.WAITING_FOR_DEAL;
+      case AgentDecisionType.DISCARD:
+        return ActionType.WAITING_FOR_DISCARD;
+      case AgentDecisionType.PLAY_CARD:
+        return ActionType.WAITING_FOR_PLAY_CARD;
+      case AgentDecisionType.CONTINUE:
+        return ActionType.WAITING_FOR_CONTINUE;
+      default:
+        throw new Error(`Unknown decision type: ${decisionType}`);
+    }
+  }
+
+  /**
+   * Request a decision from a player and record it in GameState/GameEvent
+   * This helper method integrates decision requests into the canonical game state
+   * Sets waiting state in GameState and records WAITING_FOR_* event in game history
+   * @param playerId - ID of the player we're waiting on
+   * @param decisionType - Type of decision being requested
+   */
+  private requestDecision(
+    playerId: string,
+    decisionType: AgentDecisionType
+  ): void {
+    const waitingActionType = this.getWaitingActionType(decisionType);
+    this.cribbageGame.recordWaitingEvent(waitingActionType, playerId, decisionType);
   }
 
   private async sendContinue(
@@ -46,14 +85,15 @@ export class GameLoop extends EventEmitter {
     const agent = this.agents[playerID];
     if (agent.waitForContinue) {
       if (sendWaitingForPlayer) {
-        const continueData: EmittedWaitingForPlayer = {
-          playerId: playerID,
-          waitingFor: AgentDecisionType.CONTINUE,
-        };
-        this.emit('waitingForPlayer', continueData);
+        // Request decision and record in GameState/GameEvent
+        this.requestDecision(playerID, AgentDecisionType.CONTINUE);
       }
+      // Pass redacted game state so agent can't see opponents' cards
+      const redactedGameState = this.cribbageGame.getRedactedGameState(
+        playerID
+      );
       await agent.waitForContinue(
-        this.cribbageGame.getGameState(),
+        redactedGameState,
         playerID,
         continueDescription
       );
@@ -108,19 +148,16 @@ export class GameLoop extends EventEmitter {
       const agent = this.agents[currentPlayerId];
       if (!agent) throw new Error(`No agent for player ${currentPlayerId}`);
 
-      // emit event saying who's turn it is (who are we waiting on)
-      const emittedWaitingForPlayerData: EmittedWaitingForPlayer = {
-        playerId: currentPlayerId,
-        waitingFor: AgentDecisionType.PLAY_CARD,
-      };
-      this.emit('waitingForPlayer', emittedWaitingForPlayerData);
+      // Request decision and record in GameState/GameEvent
+      this.requestDecision(currentPlayerId, AgentDecisionType.PLAY_CARD);
 
       // get the card the agent wants to play
+      // Pass redacted game state so agent can't see opponents' cards
       console.log(`Calling makeMove for player ${currentPlayerId}`);
-      const card = await agent.makeMove(
-        this.cribbageGame.getGameState(),
+      const redactedGameState = this.cribbageGame.getRedactedGameState(
         currentPlayerId
       );
+      const card = await agent.makeMove(redactedGameState, currentPlayerId);
       roundOverLastPlayer = this.cribbageGame.playCard(currentPlayerId, card);
       const parsedStack = this.cribbageGame
         .getGameState()
@@ -179,27 +216,24 @@ export class GameLoop extends EventEmitter {
 
     // Prompt the dealer to deal
     const dealer = this.cribbageGame.getPlayer(this.cribbageGame.getDealerId());
-    // send waiting for player event to all players
-    const waitingForPlayerData: EmittedWaitingForPlayer = {
-      playerId: dealer.id,
-      waitingFor: AgentDecisionType.DEAL,
-    };
-    this.emit('waitingForPlayer', waitingForPlayerData);
+    // Request decision and record in GameState/GameEvent
+    this.requestDecision(dealer.id, AgentDecisionType.DEAL);
     await this.sendContinue(dealer.id, 'Deal the cards');
+    // await this.sendContinue(dealer.id, 'Shuffle the cards');
     this.cribbageGame.deal();
 
     // Crib phase: Agents discard to crib
     for (const player of this.cribbageGame.getGameState().players) {
       const agent = this.agents[player.id];
       if (!agent) throw new Error(`No agent for player ${player.id}`);
-      // emit event saying who's turn it is (who are we waiting on)
-      const emittedWaitingForPlayerData: EmittedWaitingForPlayer = {
-        playerId: player.id,
-        waitingFor: AgentDecisionType.DISCARD,
-      };
-      this.emit('waitingForPlayer', emittedWaitingForPlayerData);
+      // Request decision and record in GameState/GameEvent
+      this.requestDecision(player.id, AgentDecisionType.DISCARD);
+      // Pass redacted game state so agent can't see opponents' cards
+      const redactedGameState = this.cribbageGame.getRedactedGameState(
+        player.id
+      );
       const discards = await agent.discard(
-        this.cribbageGame.getGameState(),
+        redactedGameState,
         player.id,
         this.cribbageGame.getGameState().players.length === 2 ? 2 : 1
       );
@@ -241,7 +275,7 @@ export class GameLoop extends EventEmitter {
     const continueToScoringPromises = this.cribbageGame
       .getGameState()
       .players.map(player =>
-        this.sendContinue(player.id, 'Ready for counting', false)
+        this.sendContinue(player.id, 'Ready for counting', true)
       );
     await Promise.all(continueToScoringPromises);
 
@@ -283,11 +317,14 @@ export class GameLoop extends EventEmitter {
       if (player.score > 120) return player.id;
     }
 
+    // record end_phase event for the scoring phase
+    this.cribbageGame.endScoring();
+
     // Send wait request to all players in parallel and once all are done, continue
     const continueToNextRoundPromises = this.cribbageGame
       .getGameState()
       .players.map(player =>
-        this.sendContinue(player.id, 'Ready for next round', false)
+        this.sendContinue(player.id, 'Ready for next round', true)
       );
     await Promise.all(continueToNextRoundPromises);
 
@@ -312,8 +349,6 @@ export class GameLoop extends EventEmitter {
       winner = await this.doRound();
     }
 
-    // pause for a beat to let the players see the winner
-    await new Promise(resolve => setTimeout(resolve, 3000));
     this.cribbageGame.endGame(winner);
 
     return Promise.resolve(winner);

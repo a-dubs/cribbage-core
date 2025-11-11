@@ -6,14 +6,22 @@ import {
   GameState,
   GameEvent,
   PlayerIdAndName,
+  GameSnapshot,
+  AgentDecisionType,
 } from '../types';
-import { scoreHand, scorePegging, sumOfPeggingStack } from './scoring';
-import { EventEmitter } from 'events';
-import { isValidDiscard, isValidPeggingPlay } from './utils';
+import {
+  parseCard,
+  scoreHand,
+  scorePegging,
+  sumOfPeggingStack,
+} from './scoring';
+import EventEmitter from 'eventemitter3';
+import { isValidDiscard } from './utils';
 
 export class CribbageGame extends EventEmitter {
   private gameState: GameState;
-  private gameEventRecords: GameEvent[]; // Log of all game actions
+  // private gameEventRecords: GameEvent[]; // Log of all game actions
+  private gameSnapshotHistory: GameSnapshot[]; // Log of all game state and events
 
   constructor(playersInfo: PlayerIdAndName[], startingScore = 0) {
     super();
@@ -39,9 +47,14 @@ export class CribbageGame extends EventEmitter {
       peggingGoPlayers: [],
       peggingLastCardPlayer: null,
       playedCards: [],
+      peggingTotal: 0,
+      roundNumber: 0,
+      snapshotId: 0,
+      waitingForPlayers: [],
     };
 
-    this.gameEventRecords = [];
+    // this.gameEventRecords = [];
+    this.gameSnapshotHistory = [];
   }
 
   public generateDeck(): Card[] {
@@ -65,29 +78,28 @@ export class CribbageGame extends EventEmitter {
   }
 
   private recordGameEvent(
-    phase: Phase,
     actionType: ActionType,
     playerId: string | null,
     cards: Card[] | null,
     scoreChange: number
   ) {
+    this.gameState.snapshotId += 1;
     const gameEvent: GameEvent = {
-      id: this.gameState.id,
-      phase,
+      gameId: this.gameState.id,
+      phase: this.gameState.currentPhase,
       actionType,
       playerId,
       cards,
       scoreChange,
       timestamp: new Date(),
-      playedCards: this.gameState.playedCards,
+      snapshotId: this.gameState.snapshotId,
     };
-    if (phase === Phase.PEGGING) {
-      gameEvent.peggingStack = this.gameState.peggingStack;
-      gameEvent.peggingGoPlayers = this.gameState.peggingGoPlayers;
-    }
-    this.gameEventRecords.push(gameEvent);
-    this.emit('gameStateChange', this.gameState);
-    this.emit('gameEvent', gameEvent);
+    const newGameSnapshot = {
+      gameEvent,
+      gameState: this.gameState,
+    } as GameSnapshot;
+    this.gameSnapshotHistory.push(newGameSnapshot);
+    this.emit('gameSnapshot', newGameSnapshot);
   }
 
   public getCrib(): Card[] {
@@ -96,7 +108,7 @@ export class CribbageGame extends EventEmitter {
 
   public startRound(): void {
     // dont rotate dealer if this is the first round
-    if (this.gameEventRecords.length > 0) {
+    if (this.gameSnapshotHistory.length > 0) {
       this.gameState.deck = this.generateDeck();
       // Rotate dealer position
       const dealerIndex = this.gameState.players.findIndex(
@@ -107,29 +119,51 @@ export class CribbageGame extends EventEmitter {
         (dealerIndex + 1) % this.gameState.players.length
       ].isDealer = true;
     }
+    // increment round number
+    this.gameState.roundNumber += 1;
     this.gameState.crib = [];
     this.gameState.turnCard = null;
     this.gameState.currentPhase = Phase.DEALING;
     this.gameState.playedCards = [];
+    this.gameState.peggingStack = [];
+    this.gameState.peggingGoPlayers = [];
+    this.gameState.peggingLastCardPlayer = null;
+    this.gameState.peggingTotal = 0;
+    this.gameState.waitingForPlayers = [];
     // reset all players' hands
     this.gameState.players.forEach(player => {
       player.hand = [];
       player.peggingHand = [];
       player.playedCards = [];
     });
-    this.recordGameEvent(Phase.DEALING, ActionType.START_ROUND, null, null, 0);
+    this.recordGameEvent(ActionType.START_ROUND, null, null, 0);
+  }
+
+  public endScoring(): void {
+    if (this.gameState.currentPhase !== Phase.COUNTING) {
+      throw new Error('Cannot end scoring outside of the counting phase.');
+    }
+
+    this.recordGameEvent(ActionType.END_PHASE, null, null, 0);
   }
 
   public endGame(winnerId: string): void {
     const winner = this.gameState.players.find(p => p.id === winnerId);
     if (!winner) throw new Error(`Winner not found: ${winnerId}`);
-    this.recordGameEvent(
-      this.gameState.currentPhase,
-      ActionType.WIN,
-      winnerId,
-      null,
-      0
-    );
+    this.recordGameEvent(ActionType.WIN, winnerId, null, 0);
+  }
+
+  public shuffleDeck(): void {
+    if (this.gameState.currentPhase !== Phase.DEALING) {
+      throw new Error('Cannot shuffle cards outside of the dealing phase.');
+    }
+
+    this.gameState.deck = this.gameState.deck.sort(() => Math.random() - 0.5);
+  }
+
+  private beginDiscardingPhase(): void {
+    this.gameState.currentPhase = Phase.DISCARDING;
+    this.recordGameEvent(ActionType.BEGIN_PHASE, null, null, 0);
   }
 
   public deal(): void {
@@ -137,27 +171,21 @@ export class CribbageGame extends EventEmitter {
       throw new Error('Cannot deal cards outside of the dealing phase.');
     }
 
-    this.gameState.deck = this.gameState.deck.sort(() => Math.random() - 0.5);
+    // Clear waiting state before action
+    const dealer = this.gameState.players.find(p => p.isDealer);
+    if (dealer) {
+      this.removeWaitingForPlayer(dealer.id);
+    }
+
+    this.shuffleDeck();
 
     this.gameState.players.forEach((player: Player) => {
       player.hand = this.gameState.deck.splice(0, 6);
-      this.recordGameEvent(
-        Phase.DEALING,
-        ActionType.DEAL,
-        player.id,
-        player.hand,
-        0
-      );
+      this.recordGameEvent(ActionType.DEAL, player.id, player.hand, 0);
     });
 
-    this.gameState.currentPhase = Phase.DISCARDING;
-    this.recordGameEvent(
-      Phase.DISCARDING,
-      ActionType.BEGIN_PHASE,
-      null,
-      null,
-      0
-    );
+    // Advance to the discarding phase
+    this.beginDiscardingPhase();
   }
 
   public discardToCrib(playerId: string, cards: Card[]): void {
@@ -170,17 +198,13 @@ export class CribbageGame extends EventEmitter {
       // console.log(`Player ${playerId} hand: ${player.hand.join(', ')}`);
       // console.log(`Player ${playerId} discards: ${cards.join(', ')}`);
     }
+    // Clear waiting state before action
+    this.removeWaitingForPlayer(playerId);
     // Remove cards from player's hand and add to the crib
     player.hand = player.hand.filter((card: Card) => !cards.includes(card));
     this.gameState.crib.push(...cards);
     // Log the discard action
-    this.recordGameEvent(
-      this.gameState.currentPhase,
-      ActionType.DISCARD,
-      playerId,
-      cards,
-      0
-    );
+    this.recordGameEvent(ActionType.DISCARD, playerId, cards, 0);
   }
 
   public completeCribPhase(): void {
@@ -200,7 +224,10 @@ export class CribbageGame extends EventEmitter {
       throw new Error('Cannot cut deck outside of the cutting phase.');
     }
 
-    this.recordGameEvent(Phase.CUTTING, ActionType.CUT, playerId, null, 0);
+    // Clear waiting state before action
+    this.removeWaitingForPlayer(playerId);
+
+    this.recordGameEvent(ActionType.CUT, playerId, null, 0);
 
     const player = this.gameState.players.find(p => p.id === playerId);
     if (!player) throw new Error('Player not found.');
@@ -210,26 +237,14 @@ export class CribbageGame extends EventEmitter {
     if (!cutCard) throw new Error('No cards left in deck to cut.');
 
     this.gameState.turnCard = cutCard;
-    this.recordGameEvent(
-      Phase.CUTTING,
-      ActionType.TURN_CARD,
-      playerId,
-      [cutCard],
-      0
-    );
+    this.recordGameEvent(ActionType.TURN_CARD, playerId, [cutCard], 0);
 
     // If cut card is a Jack, the dealer scores 2 points
     if (cutCard.split('_')[0] === 'JACK') {
       const dealer = this.gameState.players.find(p => p.isDealer);
       if (!dealer) throw new Error('Dealer not found.');
       dealer.score += 2;
-      this.recordGameEvent(
-        Phase.CUTTING,
-        ActionType.SCORE_HEELS,
-        dealer.id,
-        [cutCard],
-        2
-      );
+      this.recordGameEvent(ActionType.SCORE_HEELS, dealer.id, [cutCard], 2);
     }
 
     // Advance to the pegging phase
@@ -268,16 +283,11 @@ export class CribbageGame extends EventEmitter {
   public startNewPeggingRound(): string | null {
     this.gameState.peggingStack = [];
     this.gameState.peggingGoPlayers = [];
+    this.gameState.peggingTotal = 0;
     const lastCardPlayer = this.gameState.peggingLastCardPlayer;
     this.gameState.peggingLastCardPlayer = null;
     console.log('PEGGING ROUND OVER; last card player:', lastCardPlayer, '\n');
-    this.recordGameEvent(
-      Phase.PEGGING,
-      ActionType.START_PEGGING_ROUND,
-      null,
-      null,
-      0
-    );
+    this.recordGameEvent(ActionType.START_PEGGING_ROUND, null, null, 0);
     return lastCardPlayer;
   }
 
@@ -293,8 +303,12 @@ export class CribbageGame extends EventEmitter {
     //   throw new Error('Invalid card play.');
     // }
 
+    // Clear waiting state before action
+    this.removeWaitingForPlayer(playerId);
+
     if (card) {
       player.playedCards.push(card);
+      this.gameState.peggingTotal += parseCard(card).pegValue;
     }
     // No card played = player says "Go"
     else {
@@ -311,20 +325,14 @@ export class CribbageGame extends EventEmitter {
         // give the player a point for playing the last card
         player.score += 1;
         // log the scoring of the last card
-        this.recordGameEvent(
-          Phase.PEGGING,
-          ActionType.LAST_CARD,
-          playerId,
-          null,
-          1
-        );
+        this.recordGameEvent(ActionType.LAST_CARD, playerId, null, 1);
         return lastPlayer;
       }
 
       // add player to list of players who have said "Go"
       if (!this.gameState.peggingGoPlayers.includes(playerId)) {
         this.gameState.peggingGoPlayers.push(playerId);
-        this.recordGameEvent(Phase.PEGGING, ActionType.GO, playerId, null, 0);
+        this.recordGameEvent(ActionType.GO, playerId, null, 0);
       }
       console.log(`Player ${playerId} said "Go"`);
       return null;
@@ -349,13 +357,7 @@ export class CribbageGame extends EventEmitter {
     this.gameState.peggingLastCardPlayer = playerId;
 
     // log the play action
-    this.recordGameEvent(
-      Phase.PEGGING,
-      ActionType.PLAY_CARD,
-      playerId,
-      [card],
-      score
-    );
+    this.recordGameEvent(ActionType.PLAY_CARD, playerId, [card], score);
 
     // if this is the last card in the pegging round, give the player a point for last
     const playersWithCards = this.gameState.players.filter(
@@ -365,13 +367,7 @@ export class CribbageGame extends EventEmitter {
       // give the player a point for playing the last card
       player.score += 1;
       // log the scoring of the last card
-      this.recordGameEvent(
-        Phase.PEGGING,
-        ActionType.LAST_CARD,
-        playerId,
-        null,
-        1
-      );
+      this.recordGameEvent(ActionType.LAST_CARD, playerId, null, 1);
       // call resetPeggingRound to reset the pegging round and return the ID of last card player
       console.log(`Player ${playerId} played the last card and scored 1 point`);
       return this.startNewPeggingRound();
@@ -409,6 +405,7 @@ export class CribbageGame extends EventEmitter {
     this.gameState.peggingStack = [];
     this.gameState.peggingGoPlayers = [];
     this.gameState.peggingLastCardPlayer = null;
+    this.gameState.peggingTotal = 0;
 
     // Advance to the counting phase
     this.gameState.currentPhase = Phase.COUNTING;
@@ -428,17 +425,14 @@ export class CribbageGame extends EventEmitter {
 
     const score = scoreHand(player.hand, this.gameState.turnCard, false);
     player.score += score;
-    this.recordGameEvent(
-      Phase.COUNTING,
-      ActionType.SCORE_HAND,
-      playerId,
-      player.hand,
-      score
-    );
+    this.recordGameEvent(ActionType.SCORE_HAND, playerId, player.hand, score);
     return score;
   }
 
   public scoreCrib(playerId: string): number {
+    if (this.gameState.currentPhase !== Phase.COUNTING) {
+      throw new Error('Cannot score crib outside of the counting phase.');
+    }
     const player = this.gameState.players.find(p => p.id === playerId);
     if (!player) throw new Error('Player not found.');
 
@@ -449,7 +443,6 @@ export class CribbageGame extends EventEmitter {
     const score = scoreHand(this.gameState.crib, this.gameState.turnCard, true);
     player.score += score;
     this.recordGameEvent(
-      Phase.COUNTING,
       ActionType.SCORE_CRIB,
       playerId,
       this.gameState.crib,
@@ -458,11 +451,253 @@ export class CribbageGame extends EventEmitter {
     return score;
   }
 
+  /**
+   * Add score to a player and automatically log the event
+   * This is a setter method that enforces event logging for score changes
+   * @param playerId - ID of the player receiving points
+   * @param points - Number of points to add
+   * @param reason - ActionType that caused the score change
+   * @param cards - Optional cards involved in the scoring (for event logging)
+   */
+  public addScoreToPlayer(
+    playerId: string,
+    points: number,
+    reason: ActionType,
+    cards: Card[] | null = null
+  ): void {
+    const player = this.gameState.players.find(p => p.id === playerId);
+    if (!player) {
+      throw new Error(`Player ${playerId} not found`);
+    }
+
+    player.score += points;
+
+    // Automatically log event
+    this.recordGameEvent(reason, playerId, cards, points);
+  }
+
+  /**
+   * Set the game phase and automatically log the event
+   * This is a setter method that enforces event logging for phase changes
+   * @param newPhase - The new phase to transition to
+   * @param reason - ActionType that caused the phase change
+   */
+  public setPhase(newPhase: Phase, reason: ActionType): void {
+    this.gameState.currentPhase = newPhase;
+
+    // Automatically log event
+    this.recordGameEvent(reason, null, null, 0);
+  }
+
+  /**
+   * Add a player to the waiting list for a decision request
+   * @param playerId - ID of the player we're waiting on
+   * @param decisionType - Type of decision being requested
+   */
+  public addWaitingForPlayer(
+    playerId: string,
+    decisionType: AgentDecisionType
+  ): void {
+    // Check if player already exists in waiting list
+    if (
+      !this.gameState.waitingForPlayers.find(w => w.playerId === playerId)
+    ) {
+      this.gameState.waitingForPlayers.push({
+        playerId,
+        decisionType,
+        requestTimestamp: new Date(),
+      });
+    }
+  }
+
+  /**
+   * Record a waiting event in game history
+   * This method adds the player to waiting list and records the event
+   * @param actionType - The WAITING_FOR_* action type
+   * @param playerId - ID of the player we're waiting on
+   * @param decisionType - Type of decision being requested
+   */
+  public recordWaitingEvent(
+    actionType: ActionType,
+    playerId: string,
+    decisionType: AgentDecisionType
+  ): void {
+    // Add to waiting list
+    this.addWaitingForPlayer(playerId, decisionType);
+
+    // Record the event
+    this.recordGameEvent(actionType, playerId, null, 0);
+  }
+
+  /**
+   * Remove a player from the waiting list
+   * @param playerId - ID of the player to remove from waiting list
+   */
+  public removeWaitingForPlayer(playerId: string): void {
+    this.gameState.waitingForPlayers = this.gameState.waitingForPlayers.filter(
+      w => w.playerId !== playerId
+    );
+  }
+
+  /**
+   * Clear all waiting players from the waiting list
+   */
+  public clearAllWaiting(): void {
+    this.gameState.waitingForPlayers = [];
+  }
+
+  /**
+   * Get a redacted version of the game state for a specific player
+   * Opponents' hands and pegging hands are redacted to 'UNKNOWN' cards
+   * @param forPlayerId - ID of the player requesting the state
+   * @returns Redacted game state where opponents' cards are hidden
+   */
+  public getRedactedGameState(forPlayerId: string): GameState {
+    const requestingPlayer = this.gameState.players.find(
+      p => p.id === forPlayerId
+    );
+    if (!requestingPlayer) {
+      throw new Error(`Player ${forPlayerId} not found`);
+    }
+
+    // Create redacted players array
+    const redactedPlayers = this.gameState.players.map(player => {
+      if (player.id === forPlayerId) {
+        // This player sees their own cards
+        return {
+          ...player,
+          hand: [...player.hand],
+          peggingHand: [...player.peggingHand],
+        };
+      } else {
+        // Opponents' hands are redacted
+        return {
+          ...player,
+          hand: player.hand.map(() => 'UNKNOWN' as Card),
+          peggingHand: player.peggingHand.map(() => 'UNKNOWN' as Card),
+        };
+      }
+    });
+
+    // Determine if crib should be visible
+    // Crib is only visible during counting phase, and only to the dealer
+    const isCountingPhase =
+      this.gameState.currentPhase === Phase.COUNTING;
+    const isDealer = requestingPlayer.isDealer;
+    const cribVisible = isCountingPhase && isDealer;
+
+    // Redact crib if not visible
+    const redactedCrib = cribVisible
+      ? [...this.gameState.crib]
+      : this.gameState.crib.map(() => 'UNKNOWN' as Card);
+
+    // Redact deck contents (keep count visible via length)
+    const redactedDeck = this.gameState.deck.map(() => 'UNKNOWN' as Card);
+
+    // Return redacted game state
+    return {
+      ...this.gameState,
+      players: redactedPlayers,
+      crib: redactedCrib,
+      deck: redactedDeck,
+      // All other fields remain visible (scores, pegging stack, turn card, etc.)
+    };
+  }
+
+  /**
+   * Get a redacted version of a game event for a specific player
+   * Opponents' cards in events are redacted to 'UNKNOWN' cards
+   * @param gameEvent - The game event to redact
+   * @param forPlayerId - ID of the player requesting the event
+   * @returns Redacted game event where opponents' cards are hidden
+   */
+  public getRedactedGameEvent(
+    gameEvent: GameEvent,
+    forPlayerId: string
+  ): GameEvent {
+    const requestingPlayer = this.gameState.players.find(
+      p => p.id === forPlayerId
+    );
+    if (!requestingPlayer) {
+      throw new Error(`Player ${forPlayerId} not found`);
+    }
+
+    // If no cards in event, return as-is
+    if (!gameEvent.cards || gameEvent.cards.length === 0) {
+      return gameEvent;
+    }
+
+    // Determine if event is from opponent
+    const isOpponentEvent = gameEvent.playerId !== null && gameEvent.playerId !== forPlayerId;
+    const isDealer = requestingPlayer.isDealer;
+    const isCountingPhase = this.gameState.currentPhase === Phase.COUNTING;
+
+    // Redaction rules based on action type
+    let shouldRedact = false;
+
+    switch (gameEvent.actionType) {
+      case ActionType.DISCARD:
+        // Opponent's discards are private
+        shouldRedact = isOpponentEvent;
+        break;
+
+      case ActionType.DEAL:
+        // Opponent's dealt cards are private
+        shouldRedact = isOpponentEvent;
+        break;
+
+      case ActionType.PLAY_CARD:
+        // Played cards are public (everyone sees what was played)
+        shouldRedact = false;
+        break;
+
+      case ActionType.SCORE_HAND:
+        // During counting phase, hands are shown (public)
+        // But we should still redact opponent's hand cards in the event
+        // since the event shows the hand that was scored
+        shouldRedact = isOpponentEvent;
+        break;
+
+      case ActionType.SCORE_CRIB:
+        // Crib is only visible to dealer during counting phase
+        shouldRedact = !(isDealer && isCountingPhase);
+        break;
+
+      case ActionType.TURN_CARD:
+        // Turn card is public
+        shouldRedact = false;
+        break;
+
+      case ActionType.SCORE_HEELS:
+        // Turn card is public
+        shouldRedact = false;
+        break;
+
+      default:
+        // Other events: no cards or public
+        shouldRedact = false;
+        break;
+    }
+
+    if (shouldRedact) {
+      return {
+        ...gameEvent,
+        cards: gameEvent.cards.map(() => 'UNKNOWN' as Card),
+      };
+    }
+
+    return gameEvent;
+  }
+
   public getGameState(): GameState {
     return this.gameState;
   }
 
-  public getGameEventRecords(): GameEvent[] {
-    return this.gameEventRecords;
+  // public getGameEventRecords(): GameEvent[] {
+  //   return this.gameEventRecords;
+  // }
+
+  public getGameSnapshotHistory(): GameSnapshot[] {
+    return this.gameSnapshotHistory;
   }
 }

@@ -15,7 +15,9 @@ export enum Phase {
  */
 export enum ActionType {
   BEGIN_PHASE = 'BEGIN_PHASE', // Used to indicate phase has changed w/o a specific action being taken by a player
+  END_PHASE = 'END_PHASE', // Used to indicate phase has ended w/o a specific action being taken by a player
   DEAL = 'DEAL',
+  SHUFFLE_DECK = 'SHUFFLE_DECK',
   DISCARD = 'DISCARD',
   PLAY_CARD = 'PLAY_CARD', // player plays a card during pegging phase
   GO = 'GO', // Player says "Go" during pegging phase when they can't play a card
@@ -28,6 +30,11 @@ export enum ActionType {
   START_PEGGING_ROUND = 'START_PEGGING_ROUND', // Start a new round of pegging
   START_ROUND = 'START_ROUND', // Start a new round of the game
   WIN = 'WIN', // Player wins the game
+  // Waiting action types - indicate when the game is waiting for a player decision
+  WAITING_FOR_DEAL = 'WAITING_FOR_DEAL',
+  WAITING_FOR_DISCARD = 'WAITING_FOR_DISCARD',
+  WAITING_FOR_PLAY_CARD = 'WAITING_FOR_PLAY_CARD',
+  WAITING_FOR_CONTINUE = 'WAITING_FOR_CONTINUE',
 }
 
 /**
@@ -108,17 +115,28 @@ export interface PlayerIdAndName {
  * Interface for the state of the game at any point in time
  */
 export interface GameEvent {
-  id: string; // Unique identifier for the game state (uuid)
+  gameId: string; // Unique identifier for the game (uuid)
+  snapshotId: number; // Ties this game event to a unique snapshot/version of the game state
   phase: Phase; // Current phase of the game
   actionType: ActionType; // Last action type taken in the game
   playerId: string | null; // ID of the player who took the last action
   cards: Card[] | null; // Card involved in the last action, if any
   scoreChange: number; // Points gained from the last action, if any
   timestamp: Date; // Time of the last action
-  peggingStack?: Card[]; // Stack of played cards during pegging (including card just played) (if phase is PEGGING)
-  peggingGoPlayers?: string[]; // List of players who have said "Go" during this pegging stack (if phase is PEGGING)
-  peggingLastCardPlayer?: string; // Player who played the last card during pegging (if phase is PEGGING)
-  playedCards: PlayedCard[]; // List of all cards played during the pegging phase to help with keeping track of played cards
+  // peggingStack?: Card[]; // Stack of played cards during pegging (including card just played) (if phase is PEGGING)
+  // peggingGoPlayers?: string[]; // List of players who have said "Go" during this pegging stack (if phase is PEGGING)
+  // peggingLastCardPlayer?: string; // Player who played the last card during pegging (if phase is PEGGING)
+  // playedCards: PlayedCard[]; // List of all cards played during the pegging phase to help with keeping track of played cards
+  // peggingTotal?: number; // Total value of the cards played in the current pegging stack
+}
+
+/**
+ * Interface for tracking a player decision request
+ */
+export interface WaitingForPlayer {
+  playerId: string; // ID of the player we're waiting on
+  decisionType: AgentDecisionType; // Type of decision being requested
+  requestTimestamp: Date; // When the request was made
 }
 
 /**
@@ -135,6 +153,15 @@ export interface GameState {
   peggingGoPlayers: string[]; // List of players who have said "Go" during this pegging stack
   peggingLastCardPlayer: string | null; // Player who played the last card during pegging
   playedCards: PlayedCard[]; // List of all cards played during the pegging phase to help with keeping track of played cards
+  peggingTotal: number; // Total value of the cards played in the current pegging stack
+  snapshotId: number;
+  roundNumber: number;
+  waitingForPlayers: WaitingForPlayer[]; // List of players we're currently waiting on for decisions (supports parallel decisions)
+}
+
+export interface GameSnapshot {
+  gameState: GameState; // Current state of the game
+  gameEvent: GameEvent; // Last event that occurred in the game
 }
 
 /**
@@ -248,7 +275,8 @@ export enum AgentDecisionType {
 // map AgentDecisionType to the corresponding EmittedData type
 export type EmittedDecisionRequest =
   | EmittedMakeMoveRequest
-  | EmittedDiscardRequest;
+  | EmittedDiscardRequest
+  | EmittedContinueRequest;
 
 export interface EmittedWaitingForPlayer extends EmittedData {
   waitingFor: AgentDecisionType;
