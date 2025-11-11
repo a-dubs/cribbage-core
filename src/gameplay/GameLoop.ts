@@ -155,30 +155,35 @@ export class GameLoop extends EventEmitter {
     sendWaitingForPlayer = true
   ): Promise<void> {
     const agent = this.agents[playerID];
-    if (agent.human && agent.waitForContinue) {
-      void sendWaitingForPlayer;
-      await this.createDecisionRequest(
-        playerID,
-        AgentDecisionType.CONTINUE,
-        { description: continueDescription },
-        0,
-        0
-      );
-      console.log(`Player ${playerID} is ready to continue`);
-      return;
+    // Always create a decision request; bots auto-respond, humans wait
+    const continuePromise = this.createDecisionRequest(
+      playerID,
+      AgentDecisionType.CONTINUE,
+      { description: continueDescription },
+      0,
+      0
+    );
+    if (!agent.human) {
+      if (agent.waitForContinue) {
+        const redactedGameState = this.cribbageGame.getRedactedGameState(
+          playerID
+        );
+        await agent.waitForContinue(
+          redactedGameState,
+          playerID,
+          continueDescription
+        );
+      }
+      this.submitDecisionResponse({
+        requestId: this.decisionRequests.find(
+          r => r.playerId === playerID && r.type === 'CONTINUE'
+        )!.requestId,
+        playerId: playerID,
+        type: 'CONTINUE',
+      });
     }
-    if (agent.waitForContinue) {
-      // Pass redacted game state so agent can't see opponents' cards
-      const redactedGameState = this.cribbageGame.getRedactedGameState(
-        playerID
-      );
-      await agent.waitForContinue(
-        redactedGameState,
-        playerID,
-        continueDescription
-      );
-      console.log(`Player ${playerID} is ready to continue`);
-    }
+    await continuePromise;
+    console.log(`Player ${playerID} is ready to continue`);
   }
 
   private async doPegging(): Promise<string | null> {
@@ -228,26 +233,34 @@ export class GameLoop extends EventEmitter {
       const agent = this.agents[currentPlayerId];
       if (!agent) throw new Error(`No agent for player ${currentPlayerId}`);
 
-      let selectedCard: Card | null = null;
-      if (agent.human) {
-        // Create a PLAY_CARD request and wait for response
-        const response = await this.createDecisionRequest(
-          currentPlayerId,
-          AgentDecisionType.PLAY_CARD,
-          undefined,
-          0,
-          1
-        );
-        selectedCard = (response.payload ?? null) as Card | null;
-      } else {
-        // get the card the agent wants to play
-        // Pass redacted game state so agent can't see opponents' cards
-        console.log(`Calling makeMove for player ${currentPlayerId}`);
+      // Always create request; bots auto-respond, humans wait
+      const playPromise = this.createDecisionRequest(
+        currentPlayerId,
+        AgentDecisionType.PLAY_CARD,
+        undefined,
+        0,
+        1
+      );
+      if (!agent.human) {
         const redactedGameState = this.cribbageGame.getRedactedGameState(
           currentPlayerId
         );
-        selectedCard = await agent.makeMove(redactedGameState, currentPlayerId);
+        const card = await agent.makeMove(
+          redactedGameState,
+          currentPlayerId
+        );
+        const req = this.decisionRequests.find(
+          r => r.playerId === currentPlayerId && r.type === 'PLAY_CARD'
+        )!;
+        this.submitDecisionResponse({
+          requestId: req.requestId,
+          playerId: currentPlayerId,
+          type: 'PLAY_CARD',
+          payload: card,
+        });
       }
+      const response = await playPromise;
+      const selectedCard = (response.payload ?? null) as Card | null;
       roundOverLastPlayer = this.cribbageGame.playCard(
         currentPlayerId,
         selectedCard
@@ -317,32 +330,37 @@ export class GameLoop extends EventEmitter {
     for (const player of this.cribbageGame.getGameState().players) {
       const agent = this.agents[player.id];
       if (!agent) throw new Error(`No agent for player ${player.id}`);
-      let discards: Card[];
       const numToDiscard =
         this.cribbageGame.getGameState().players.length === 2 ? 2 : 1;
-      if (agent.human) {
-        const response = await this.createDecisionRequest(
-          player.id,
-          AgentDecisionType.DISCARD,
-          { numberOfCardsToDiscard: numToDiscard },
-          numToDiscard,
-          numToDiscard
-        );
-        const payload = response.payload as { cards?: Card[] } | Card[] | undefined;
-        discards = Array.isArray(payload)
-          ? payload
-          : (payload?.cards ?? []);
-      } else {
-        // Pass redacted game state so agent can't see opponents' cards
+      const discardPromise = this.createDecisionRequest(
+        player.id,
+        AgentDecisionType.DISCARD,
+        { numberOfCardsToDiscard: numToDiscard },
+        numToDiscard,
+        numToDiscard
+      );
+      if (!agent.human) {
         const redactedGameState = this.cribbageGame.getRedactedGameState(
           player.id
         );
-        discards = await agent.discard(
+        const discards = await agent.discard(
           redactedGameState,
           player.id,
           numToDiscard
         );
+        const req = this.decisionRequests.find(
+          r => r.playerId === player.id && r.type === 'DISCARD'
+        )!;
+        this.submitDecisionResponse({
+          requestId: req.requestId,
+          playerId: player.id,
+          type: 'DISCARD',
+          payload: { cards: discards },
+        });
       }
+      const response = await discardPromise;
+      const payload = response.payload as { cards?: Card[] } | Card[] | undefined;
+      const discards = Array.isArray(payload) ? payload : (payload?.cards ?? []);
       this.cribbageGame.discardToCrib(player.id, discards);
     }
 
@@ -362,41 +380,49 @@ export class GameLoop extends EventEmitter {
     // New: allow agent to choose cut index (human via request, bot via agent or random)
     const maxIndex = this.cribbageGame.getGameState().deck.length - 1;
     const behindDealerAgent = this.agents[behindDealer.id];
-    let cutIndex: number;
-    if (behindDealerAgent?.human) {
-      const response = await this.createDecisionRequest(
-        behindDealer.id,
-        'CUT_DECK',
-        { maxIndex },
-        1,
-        1
-      );
-      const payload = response.payload as { index?: number } | number | undefined;
-      const index =
-        typeof payload === 'number' ? payload : (payload?.index ?? -1);
-      cutIndex =
-        index >= 0 && index <= maxIndex ? index : randomInt(0, maxIndex + 1);
-    } else if (
-      behindDealerAgent &&
-      typeof behindDealerAgent.cutDeck === 'function'
-    ) {
-      const redactedGameState = this.cribbageGame.getRedactedGameState(
-        behindDealer.id
-      );
-      cutIndex = await behindDealerAgent.cutDeck(
-        redactedGameState,
-        behindDealer.id,
-        maxIndex
-      );
-      if (cutIndex < 0 || cutIndex > maxIndex) {
-        console.warn(
-          `Agent returned out-of-range cut index ${cutIndex}. Using random instead.`
+    const cutPromise = this.createDecisionRequest(
+      behindDealer.id,
+      'CUT_DECK',
+      { maxIndex },
+      1,
+      1
+    );
+    if (!behindDealerAgent.human) {
+      let cutIndex: number;
+      if (typeof behindDealerAgent.cutDeck === 'function') {
+        const redactedGameState = this.cribbageGame.getRedactedGameState(
+          behindDealer.id
         );
+        cutIndex = await behindDealerAgent.cutDeck(
+          redactedGameState,
+          behindDealer.id,
+          maxIndex
+        );
+        if (cutIndex < 0 || cutIndex > maxIndex) {
+          console.warn(
+            `Agent returned out-of-range cut index ${cutIndex}. Using random instead.`
+          );
+          cutIndex = randomInt(0, maxIndex + 1);
+        }
+      } else {
         cutIndex = randomInt(0, maxIndex + 1);
       }
-    } else {
-      cutIndex = randomInt(0, maxIndex + 1);
+      const req = this.decisionRequests.find(
+        r => r.playerId === behindDealer.id && r.type === 'CUT_DECK'
+      )!;
+      this.submitDecisionResponse({
+        requestId: req.requestId,
+        playerId: behindDealer.id,
+        type: 'CUT_DECK',
+        payload: { index: cutIndex },
+      });
     }
+    const cutResponse = await cutPromise;
+    const cutIndex =
+      typeof cutResponse.payload === 'number'
+        ? (cutResponse.payload as number)
+        : (cutResponse.payload as { index?: number } | undefined)?.index ??
+          randomInt(0, maxIndex + 1);
     this.cribbageGame.cutDeck(behindDealer.id, cutIndex);
 
     const turnCard = this.cribbageGame.getGameState().turnCard;
