@@ -16,7 +16,7 @@ import {
   sumOfPeggingStack,
 } from './scoring';
 import EventEmitter from 'eventemitter3';
-import { isValidDiscard } from './utils';
+import { isValidDiscard, isValidPeggingPlay } from './utils';
 
 export class CribbageGame extends EventEmitter {
   private gameState: GameState;
@@ -286,9 +286,9 @@ export class CribbageGame extends EventEmitter {
 
     const player = this.gameState.players.find(p => p.id === playerId);
     if (!player) throw new Error('Player not found.');
-    // if (!isValidPeggingPlay(this.game, player, card)) {
-    //   throw new Error('Invalid card play.');
-    // }
+    if (!isValidPeggingPlay(this.gameState, player, card)) {
+      throw new Error('Invalid card play.');
+    }
 
     if (card) {
       player.playedCards.push(card);
