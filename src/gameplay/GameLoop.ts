@@ -155,7 +155,7 @@ export class GameLoop extends EventEmitter {
     sendWaitingForPlayer = true
   ): Promise<void> {
     const agent = this.agents[playerID];
-    // Always create a decision request; bots auto-respond, humans wait
+    // Always create a decision request
     const continuePromise = this.createDecisionRequest(
       playerID,
       AgentDecisionType.CONTINUE,
@@ -163,24 +163,16 @@ export class GameLoop extends EventEmitter {
       0,
       0
     );
-    if (!agent.human) {
-      if (agent.waitForContinue) {
-        const redactedGameState = this.cribbageGame.getRedactedGameState(
-          playerID
-        );
-        await agent.waitForContinue(
-          redactedGameState,
-          playerID,
-          continueDescription
-        );
-      }
-      this.submitDecisionResponse({
-        requestId: this.decisionRequests.find(
+    // Ask agent to respond (bots return immediately; humans return null and respond via socket)
+    if (agent.respondToDecision) {
+      const req =
+        this.decisionRequests.find(
           r => r.playerId === playerID && r.type === 'CONTINUE'
-        )!.requestId,
-        playerId: playerID,
-        type: 'CONTINUE',
-      });
+        ) || null;
+      const redacted = this.cribbageGame.getRedactedGameState(playerID);
+      const maybeResponse =
+        req && (await agent.respondToDecision(req, redacted));
+      if (maybeResponse) this.submitDecisionResponse(maybeResponse);
     }
     await continuePromise;
     console.log(`Player ${playerID} is ready to continue`);
@@ -233,7 +225,7 @@ export class GameLoop extends EventEmitter {
       const agent = this.agents[currentPlayerId];
       if (!agent) throw new Error(`No agent for player ${currentPlayerId}`);
 
-      // Always create request; bots auto-respond, humans wait
+      // Always create request
       const playPromise = this.createDecisionRequest(
         currentPlayerId,
         AgentDecisionType.PLAY_CARD,
@@ -241,23 +233,17 @@ export class GameLoop extends EventEmitter {
         0,
         1
       );
-      if (!agent.human) {
-        const redactedGameState = this.cribbageGame.getRedactedGameState(
+      if (agent.respondToDecision) {
+        const req =
+          this.decisionRequests.find(
+            r => r.playerId === currentPlayerId && r.type === 'PLAY_CARD'
+          ) || null;
+        const redacted = this.cribbageGame.getRedactedGameState(
           currentPlayerId
         );
-        const card = await agent.makeMove(
-          redactedGameState,
-          currentPlayerId
-        );
-        const req = this.decisionRequests.find(
-          r => r.playerId === currentPlayerId && r.type === 'PLAY_CARD'
-        )!;
-        this.submitDecisionResponse({
-          requestId: req.requestId,
-          playerId: currentPlayerId,
-          type: 'PLAY_CARD',
-          payload: card,
-        });
+        const maybeResponse =
+          req && (await agent.respondToDecision(req, redacted));
+        if (maybeResponse) this.submitDecisionResponse(maybeResponse);
       }
       const response = await playPromise;
       const selectedCard = (response.payload ?? null) as Card | null;
@@ -339,24 +325,15 @@ export class GameLoop extends EventEmitter {
         numToDiscard,
         numToDiscard
       );
-      if (!agent.human) {
-        const redactedGameState = this.cribbageGame.getRedactedGameState(
-          player.id
-        );
-        const discards = await agent.discard(
-          redactedGameState,
-          player.id,
-          numToDiscard
-        );
-        const req = this.decisionRequests.find(
-          r => r.playerId === player.id && r.type === 'DISCARD'
-        )!;
-        this.submitDecisionResponse({
-          requestId: req.requestId,
-          playerId: player.id,
-          type: 'DISCARD',
-          payload: { cards: discards },
-        });
+      if (agent.respondToDecision) {
+        const req =
+          this.decisionRequests.find(
+            r => r.playerId === player.id && r.type === 'DISCARD'
+          ) || null;
+        const redacted = this.cribbageGame.getRedactedGameState(player.id);
+        const maybeResponse =
+          req && (await agent.respondToDecision(req, redacted));
+        if (maybeResponse) this.submitDecisionResponse(maybeResponse);
       }
       const response = await discardPromise;
       const payload = response.payload as { cards?: Card[] } | Card[] | undefined;
@@ -387,35 +364,15 @@ export class GameLoop extends EventEmitter {
       1,
       1
     );
-    if (!behindDealerAgent.human) {
-      let cutIndex: number;
-      if (typeof behindDealerAgent.cutDeck === 'function') {
-        const redactedGameState = this.cribbageGame.getRedactedGameState(
-          behindDealer.id
-        );
-        cutIndex = await behindDealerAgent.cutDeck(
-          redactedGameState,
-          behindDealer.id,
-          maxIndex
-        );
-        if (cutIndex < 0 || cutIndex > maxIndex) {
-          console.warn(
-            `Agent returned out-of-range cut index ${cutIndex}. Using random instead.`
-          );
-          cutIndex = randomInt(0, maxIndex + 1);
-        }
-      } else {
-        cutIndex = randomInt(0, maxIndex + 1);
-      }
-      const req = this.decisionRequests.find(
-        r => r.playerId === behindDealer.id && r.type === 'CUT_DECK'
-      )!;
-      this.submitDecisionResponse({
-        requestId: req.requestId,
-        playerId: behindDealer.id,
-        type: 'CUT_DECK',
-        payload: { index: cutIndex },
-      });
+    if (behindDealerAgent.respondToDecision) {
+      const req =
+        this.decisionRequests.find(
+          r => r.playerId === behindDealer.id && r.type === 'CUT_DECK'
+        ) || null;
+      const redacted = this.cribbageGame.getRedactedGameState(behindDealer.id);
+      const maybeResponse =
+        req && (await behindDealerAgent.respondToDecision(req, redacted));
+      if (maybeResponse) this.submitDecisionResponse(maybeResponse);
     }
     const cutResponse = await cutPromise;
     const cutIndex =

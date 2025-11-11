@@ -210,6 +210,15 @@ export interface GameAgent {
     playerId: string,
     maxIndex: number
   ): Promise<number>;
+  /**
+   * Unified decision handler. Agents can:
+   * - return a DecisionResponse immediately (bots)
+   * - return null and let an external client respond later (humans)
+   */
+  respondToDecision?(
+    request: DecisionRequest,
+    game: GameState
+  ): Promise<DecisionResponse | null>;
 }
 
 export type ScoreType =

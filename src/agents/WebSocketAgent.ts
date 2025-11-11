@@ -11,6 +11,8 @@ import {
   AgentDecisionType,
   EmittedContinueResponse,
   EmittedContinueRequest,
+  DecisionRequest,
+  DecisionResponse,
 } from '../types';
 import { parseCard } from '../core/scoring';
 import { Socket } from 'socket.io';
@@ -244,5 +246,15 @@ export class WebSocketAgent implements GameAgent {
         return;
       }
     );
+  }
+
+  // New unified responder: bridge via socket-driven flow; do not auto-respond here.
+  async respondToDecision(
+    _request: DecisionRequest,
+    _game: GameState
+  ): Promise<DecisionResponse | null> {
+    // WebSocket path: the server/client exchange will emit decisionResponse separately.
+    // Returning null tells GameLoop not to auto-submit; it will await the request promise.
+    return null;
   }
 }
