@@ -79,7 +79,27 @@ export class GameLoop extends EventEmitter {
     };
 
     this.cribbageGame.addDecisionRequest(request);
-    // Request will be included in next GameSnapshot
+    // Emit a GameSnapshot immediately so agents can see the new request
+    // This is needed for WebSocketAgent which relies on mostRecentGameSnapshot
+    const currentState = this.cribbageGame.getGameState();
+    const currentEvent = this.cribbageGame.getGameSnapshotHistory().length > 0
+      ? this.cribbageGame.getGameSnapshotHistory()[this.cribbageGame.getGameSnapshotHistory().length - 1].gameEvent
+      : null;
+    const snapshot: GameSnapshot = {
+      gameState: currentState,
+      gameEvent: currentEvent || {
+        gameId: currentState.id,
+        phase: currentState.currentPhase,
+        actionType: ActionType.START_ROUND,
+        playerId: null,
+        cards: null,
+        scoreChange: 0,
+        timestamp: new Date(),
+        snapshotId: currentState.snapshotId,
+      },
+      pendingDecisionRequests: this.cribbageGame.getPendingDecisionRequests(),
+    };
+    this.cribbageGame.emit('gameSnapshot', snapshot);
 
     return request;
   }
@@ -118,6 +138,29 @@ export class GameLoop extends EventEmitter {
 
       case AgentDecisionType.DEAL: {
         if (agent.deal) {
+          // Update WebSocketAgent's snapshot if it's a WebSocketAgent
+          // This ensures the agent can find the pending request
+          if ('updateGameSnapshot' in agent && typeof agent.updateGameSnapshot === 'function') {
+            const currentState = this.cribbageGame.getGameState();
+            const currentEvent = this.cribbageGame.getGameSnapshotHistory().length > 0
+              ? this.cribbageGame.getGameSnapshotHistory()[this.cribbageGame.getGameSnapshotHistory().length - 1].gameEvent
+              : null;
+            const snapshot: GameSnapshot = {
+              gameState: currentState,
+              gameEvent: currentEvent || {
+                gameId: currentState.id,
+                phase: currentState.currentPhase,
+                actionType: ActionType.START_ROUND,
+                playerId: null,
+                cards: null,
+                scoreChange: 0,
+                timestamp: new Date(),
+                snapshotId: currentState.snapshotId,
+              },
+              pendingDecisionRequests: this.cribbageGame.getPendingDecisionRequests(),
+            };
+            (agent as any).updateGameSnapshot(snapshot);
+          }
           await agent.deal(redactedGameState, request.playerId);
         }
         this.cribbageGame.removeDecisionRequest(request.requestId);
@@ -127,6 +170,28 @@ export class GameLoop extends EventEmitter {
 
       case AgentDecisionType.CUT_DECK: {
         if (agent.cutDeck) {
+          // Update WebSocketAgent's snapshot if it's a WebSocketAgent
+          if ('updateGameSnapshot' in agent && typeof agent.updateGameSnapshot === 'function') {
+            const currentState = this.cribbageGame.getGameState();
+            const currentEvent = this.cribbageGame.getGameSnapshotHistory().length > 0
+              ? this.cribbageGame.getGameSnapshotHistory()[this.cribbageGame.getGameSnapshotHistory().length - 1].gameEvent
+              : null;
+            const snapshot: GameSnapshot = {
+              gameState: currentState,
+              gameEvent: currentEvent || {
+                gameId: currentState.id,
+                phase: currentState.currentPhase,
+                actionType: ActionType.START_ROUND,
+                playerId: null,
+                cards: null,
+                scoreChange: 0,
+                timestamp: new Date(),
+                snapshotId: currentState.snapshotId,
+              },
+              pendingDecisionRequests: this.cribbageGame.getPendingDecisionRequests(),
+            };
+            (agent as any).updateGameSnapshot(snapshot);
+          }
           const cutData = request.requestData as CutDeckRequestData;
           const cutIndex = await agent.cutDeck(
             redactedGameState,
