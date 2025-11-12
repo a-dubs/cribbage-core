@@ -222,18 +222,19 @@ export interface GameAgent {
   human: boolean; // Whether the agent represents a human player
   
   // Game action decisions
-  makeMove(game: GameState, playerId: string): Promise<Card | null>;
+  // Note: snapshot contains redacted gameState and gameEvent, plus all pendingDecisionRequests
+  makeMove(snapshot: GameSnapshot, playerId: string): Promise<Card | null>;
   discard(
-    game: GameState,
+    snapshot: GameSnapshot,
     playerId: string,
     numberOfCardsToDiscard: number
   ): Promise<Card[]>;
-  deal?(game: GameState, playerId: string): Promise<void>; // NEW: Explicit deal action
-  cutDeck?(game: GameState, playerId: string, maxIndex: number): Promise<number>; // NEW: Cut deck with index
+  deal?(snapshot: GameSnapshot, playerId: string): Promise<void>; // Explicit deal action
+  cutDeck?(snapshot: GameSnapshot, playerId: string, maxIndex: number): Promise<number>; // Cut deck with index
   
   // Acknowledgment decisions (parallel, blocking)
-  acknowledgeReadyForCounting?(game: GameState, playerId: string): Promise<void>; // NEW
-  acknowledgeReadyForNextRound?(game: GameState, playerId: string): Promise<void>; // NEW
+  acknowledgeReadyForCounting?(snapshot: GameSnapshot, playerId: string): Promise<void>;
+  acknowledgeReadyForNextRound?(snapshot: GameSnapshot, playerId: string): Promise<void>;
   
   // REMOVED: waitForContinue (replaced by specific acknowledgment methods)
 }

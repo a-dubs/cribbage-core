@@ -1,6 +1,26 @@
 import { ExhaustiveSimpleAgent } from '../src/agents/ExhaustiveSimpleAgent';
 import { CribbageGame } from '../src/core/CribbageGame';
-import { GameState, Card } from '../src/types';
+import { GameState, GameSnapshot, Card, ActionType } from '../src/types';
+
+/**
+ * Helper to convert GameState to GameSnapshot for tests
+ */
+function stateToSnapshot(gameState: GameState): GameSnapshot {
+  return {
+    gameState,
+    gameEvent: {
+      gameId: gameState.id,
+      phase: gameState.currentPhase,
+      actionType: ActionType.START_ROUND,
+      playerId: null,
+      cards: null,
+      scoreChange: 0,
+      timestamp: new Date(),
+      snapshotId: gameState.snapshotId,
+    },
+    pendingDecisionRequests: [],
+  };
+}
 
 describe('SimpleAgent Performance Tests', () => {
   let agent: ExhaustiveSimpleAgent;
@@ -42,7 +62,7 @@ describe('SimpleAgent Performance Tests', () => {
       }
 
       const startTime = Date.now();
-      const result = await agent.makeMove(gameState, 'test-player');
+      const result = await agent.makeMove(stateToSnapshot(gameState), 'test-player');
       const duration = Date.now() - startTime;
 
       expect(result).toBeDefined();
@@ -62,7 +82,7 @@ describe('SimpleAgent Performance Tests', () => {
 
       for (let i = 0; i < iterations; i++) {
         const startTime = Date.now();
-        await agent.makeMove(gameState, 'test-player');
+        await agent.makeMove(stateToSnapshot(gameState), 'test-player');
         times.push(Date.now() - startTime);
       }
 
@@ -86,7 +106,7 @@ describe('SimpleAgent Performance Tests', () => {
       // Test with empty stack
       const emptyStackState = { ...gameState, peggingStack: [] };
       const startTime1 = Date.now();
-      await agent.makeMove(emptyStackState, 'test-player');
+      await agent.makeMove(stateToSnapshot(emptyStackState), 'test-player');
       const duration1 = Date.now() - startTime1;
       console.log(`makeMove with empty stack: ${duration1}ms`);
 
@@ -96,7 +116,7 @@ describe('SimpleAgent Performance Tests', () => {
         peggingStack: gameState.peggingStack.slice(0, 3),
       };
       const startTime2 = Date.now();
-      await agent.makeMove(someCardsState, 'test-player');
+      await agent.makeMove(stateToSnapshot(someCardsState), 'test-player');
       const duration2 = Date.now() - startTime2;
       console.log(`makeMove with 3 cards in stack: ${duration2}ms`);
 
@@ -106,7 +126,7 @@ describe('SimpleAgent Performance Tests', () => {
         peggingStack: gameState.peggingStack.slice(0, 8),
       };
       const startTime3 = Date.now();
-      await agent.makeMove(manyCardsState, 'test-player');
+      await agent.makeMove(stateToSnapshot(manyCardsState), 'test-player');
       const duration3 = Date.now() - startTime3;
       console.log(`makeMove with 8 cards in stack: ${duration3}ms`);
 
@@ -128,7 +148,7 @@ describe('SimpleAgent Performance Tests', () => {
       const player = state.players.find(p => p.id === 'test-player')!;
 
       const startTime = Date.now();
-      const result = await agent.discard(state, 'test-player', 2);
+      const result = await agent.discard(stateToSnapshot(state), 'test-player', 2);
       const duration = Date.now() - startTime;
 
       expect(result).toHaveLength(2);
@@ -158,7 +178,7 @@ describe('SimpleAgent Performance Tests', () => {
         const freshState = freshGame.getGameState();
 
         const startTime = Date.now();
-        await agent.discard(freshState, 'test-player', 2);
+        await agent.discard(stateToSnapshot(freshState), 'test-player', 2);
         times.push(Date.now() - startTime);
       }
 

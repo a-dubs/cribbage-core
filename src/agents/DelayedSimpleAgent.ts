@@ -1,4 +1,4 @@
-import { GameState, Card } from '../types';
+import { GameSnapshot, Card } from '../types';
 import { HeuristicSimpleAgent } from './HeuristicSimpleAgent';
 
 /**
@@ -23,47 +23,47 @@ export abstract class DelayedSimpleAgent extends HeuristicSimpleAgent {
     return value;
   }
 
-  async makeMove(game: GameState, playerId: string): Promise<Card | null> {
-    const result = await super.makeMove(game, playerId);
+  async makeMove(snapshot: GameSnapshot, playerId: string): Promise<Card | null> {
+    const result = await super.makeMove(snapshot, playerId);
     return this.delay(result);
   }
 
   async discard(
-    game: GameState,
+    snapshot: GameSnapshot,
     playerId: string,
     numberOfCardsToDiscard: number
   ): Promise<Card[]> {
-    const result = await super.discard(game, playerId, numberOfCardsToDiscard);
+    const result = await super.discard(snapshot, playerId, numberOfCardsToDiscard);
     return this.delay(result);
   }
 
-  async deal(game: GameState, playerId: string): Promise<void> {
-    await super.deal(game, playerId);
+  async deal(snapshot: GameSnapshot, playerId: string): Promise<void> {
+    await super.deal(snapshot, playerId);
     await this.delay(undefined);
   }
 
   async cutDeck(
-    game: GameState,
+    snapshot: GameSnapshot,
     playerId: string,
     maxIndex: number
   ): Promise<number> {
-    const result = await super.cutDeck(game, playerId, maxIndex);
+    const result = await super.cutDeck(snapshot, playerId, maxIndex);
     return this.delay(result);
   }
 
   async acknowledgeReadyForCounting(
-    game: GameState,
+    snapshot: GameSnapshot,
     playerId: string
   ): Promise<void> {
-    await super.acknowledgeReadyForCounting(game, playerId);
+    await super.acknowledgeReadyForCounting(snapshot, playerId);
     await this.delay(undefined);
   }
 
   async acknowledgeReadyForNextRound(
-    game: GameState,
+    snapshot: GameSnapshot,
     playerId: string
   ): Promise<void> {
-    await super.acknowledgeReadyForNextRound(game, playerId);
+    await super.acknowledgeReadyForNextRound(snapshot, playerId);
     await this.delay(undefined);
   }
 }

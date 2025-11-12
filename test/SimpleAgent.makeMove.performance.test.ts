@@ -1,7 +1,27 @@
 import { ExhaustiveSimpleAgent } from '../src/agents/ExhaustiveSimpleAgent';
 import { HeuristicSimpleAgent } from '../src/agents/HeuristicSimpleAgent';
 import { CribbageGame } from '../src/core/CribbageGame';
-import { GameState, Card } from '../src/types';
+import { GameState, GameSnapshot, Card, ActionType } from '../src/types';
+
+/**
+ * Helper to convert GameState to GameSnapshot for tests
+ */
+function stateToSnapshot(gameState: GameState): GameSnapshot {
+  return {
+    gameState,
+    gameEvent: {
+      gameId: gameState.id,
+      phase: gameState.currentPhase,
+      actionType: ActionType.START_ROUND,
+      playerId: null,
+      cards: null,
+      scoreChange: 0,
+      timestamp: new Date(),
+      snapshotId: gameState.snapshotId,
+    },
+    pendingDecisionRequests: [],
+  };
+}
 
 describe('Agent.makeMove Performance Tests', () => {
   let exhaustiveAgent: ExhaustiveSimpleAgent;
@@ -48,7 +68,7 @@ describe('Agent.makeMove Performance Tests', () => {
     baseState: GameState,
     cardsPlayed: number = 0,
     agent: ExhaustiveSimpleAgent | HeuristicSimpleAgent
-  ): GameState {
+  ): GameSnapshot {
     const player = baseState.players.find(p => p.id === 'test-player')!;
     const deck = agent.cribbageGame.generateDeck();
     
@@ -58,11 +78,12 @@ describe('Agent.makeMove Performance Tests', () => {
       card: deck[i] as Card,
     }));
 
-    return {
+    const modifiedState: GameState = {
       ...baseState,
       peggingStack: [], // Empty stack = all cards valid
       playedCards,
     };
+    return stateToSnapshot(modifiedState);
   }
 
   /**
@@ -91,7 +112,7 @@ describe('Agent.makeMove Performance Tests', () => {
         }
 
         const startTime = Date.now();
-        const result = await exhaustiveAgent.makeMove(gameState, 'test-player');
+        const result = await exhaustiveAgent.makeMove(stateToSnapshot(gameState), 'test-player');
         const duration = Date.now() - startTime;
 
         expect(result).toBeDefined();
@@ -111,7 +132,7 @@ describe('Agent.makeMove Performance Tests', () => {
 
         for (let i = 0; i < iterations; i++) {
           const startTime = Date.now();
-          await exhaustiveAgent.makeMove(gameState, 'test-player');
+          await exhaustiveAgent.makeMove(stateToSnapshot(gameState), 'test-player');
           times.push(Date.now() - startTime);
         }
 
@@ -132,13 +153,14 @@ describe('Agent.makeMove Performance Tests', () => {
 
     describe('worst-case scenarios', () => {
       it('[ExhaustiveSimpleAgent] worst-case: early game with 30+ remaining cards', async () => {
-        const player = gameState.players.find(p => p.id === 'test-player')!;
-        if (player.peggingHand.length === 0) {
+        const initialPlayer = gameState.players.find(p => p.id === 'test-player')!;
+        if (initialPlayer.peggingHand.length === 0) {
           return;
         }
 
-        const worstCaseState = createWorstCaseState(gameState, 2, exhaustiveAgent);
-        const possibleRemaining = calculateRemainingCards(worstCaseState, exhaustiveAgent);
+        const worstCaseSnapshot = createWorstCaseState(gameState, 2, exhaustiveAgent);
+        const possibleRemaining = calculateRemainingCards(worstCaseSnapshot.gameState, exhaustiveAgent);
+        const player = worstCaseSnapshot.gameState.players.find(p => p.id === 'test-player')!;
 
         // Calculate actual scorePegging calls
         // For each card: 1 call for scoreEarned + (remainingCards × (remainingCards - 1)) calls for opponent simulation
@@ -147,7 +169,7 @@ describe('Agent.makeMove Performance Tests', () => {
 
         console.log(`\n[ExhaustiveSimpleAgent] === WORST-CASE SCENARIO ===`);
         console.log(`  Cards in hand: ${player.peggingHand.length}`);
-        console.log(`  Cards played: ${worstCaseState.playedCards.length}`);
+        console.log(`  Cards played: ${worstCaseSnapshot.gameState.playedCards.length}`);
         console.log(`  Possible remaining cards: ${possibleRemaining}`);
         console.log(`  Valid cards to play: ${player.peggingHand.length} (empty stack)`);
         console.log(`  Expected iterations: ${player.peggingHand.length} × ${possibleRemaining}² = ${player.peggingHand.length * possibleRemaining * possibleRemaining}`);
@@ -158,7 +180,7 @@ describe('Agent.makeMove Performance Tests', () => {
 
         for (let i = 0; i < iterations; i++) {
           const startTime = Date.now();
-          await exhaustiveAgent.makeMove(worstCaseState, 'test-player');
+          await exhaustiveAgent.makeMove(worstCaseSnapshot, 'test-player');
           times.push(Date.now() - startTime);
         }
 
@@ -180,13 +202,14 @@ describe('Agent.makeMove Performance Tests', () => {
       });
 
       it('[ExhaustiveSimpleAgent] worst-case: maximum remaining cards (0 cards played)', async () => {
-        const player = gameState.players.find(p => p.id === 'test-player')!;
-        if (player.peggingHand.length === 0) {
+        const initialPlayer = gameState.players.find(p => p.id === 'test-player')!;
+        if (initialPlayer.peggingHand.length === 0) {
           return;
         }
 
-        const worstCaseState = createWorstCaseState(gameState, 0, exhaustiveAgent);
-        const possibleRemaining = calculateRemainingCards(worstCaseState, exhaustiveAgent);
+        const worstCaseSnapshot = createWorstCaseState(gameState, 0, exhaustiveAgent);
+        const possibleRemaining = calculateRemainingCards(worstCaseSnapshot.gameState, exhaustiveAgent);
+        const player = worstCaseSnapshot.gameState.players.find(p => p.id === 'test-player')!;
 
         // Calculate actual scorePegging calls
         const scorePeggingCallsPerCard = 1 + possibleRemaining * (possibleRemaining - 1);
@@ -194,14 +217,14 @@ describe('Agent.makeMove Performance Tests', () => {
 
         console.log(`\n[ExhaustiveSimpleAgent] === ABSOLUTE WORST-CASE SCENARIO ===`);
         console.log(`  Cards in hand: ${player.peggingHand.length}`);
-        console.log(`  Cards played: ${worstCaseState.playedCards.length}`);
+        console.log(`  Cards played: ${worstCaseSnapshot.gameState.playedCards.length}`);
         console.log(`  Possible remaining cards: ${possibleRemaining}`);
         console.log(`  Valid cards to play: ${player.peggingHand.length} (empty stack)`);
         console.log(`  Expected iterations: ${player.peggingHand.length} × ${possibleRemaining}² = ${player.peggingHand.length * possibleRemaining * possibleRemaining}`);
         console.log(`  Actual scorePegging calls: ${totalScorePeggingCalls} (${scorePeggingCallsPerCard} per card)`);
 
         const startTime = Date.now();
-        await exhaustiveAgent.makeMove(worstCaseState, 'test-player');
+        await exhaustiveAgent.makeMove(worstCaseSnapshot, 'test-player');
         const duration = Date.now() - startTime;
         const timePerCall = duration / totalScorePeggingCalls;
 
@@ -234,15 +257,15 @@ describe('Agent.makeMove Performance Tests', () => {
         }> = [];
 
         for (const scenario of scenarios) {
-          const state = createWorstCaseState(gameState, scenario.cardsPlayed, exhaustiveAgent);
-          const actualRemaining = calculateRemainingCards(state, exhaustiveAgent);
+          const snapshot = createWorstCaseState(gameState, scenario.cardsPlayed, exhaustiveAgent);
+          const actualRemaining = calculateRemainingCards(snapshot.gameState, exhaustiveAgent);
 
           const times: number[] = [];
           const iterations = scenario.cardsPlayed === 0 ? 1 : 2;
 
           for (let i = 0; i < iterations; i++) {
             const startTime = Date.now();
-            await exhaustiveAgent.makeMove(state, 'test-player');
+            await exhaustiveAgent.makeMove(snapshot, 'test-player');
             times.push(Date.now() - startTime);
           }
 
@@ -290,7 +313,7 @@ describe('Agent.makeMove Performance Tests', () => {
         }
 
         const startTime = Date.now();
-        const result = await heuristicAgent.makeMove(gameState, 'test-player');
+        const result = await heuristicAgent.makeMove(stateToSnapshot(gameState), 'test-player');
         const duration = Date.now() - startTime;
 
         expect(result).toBeDefined();
@@ -310,7 +333,7 @@ describe('Agent.makeMove Performance Tests', () => {
 
         for (let i = 0; i < iterations; i++) {
           const startTime = Date.now();
-          await heuristicAgent.makeMove(gameState, 'test-player');
+          await heuristicAgent.makeMove(stateToSnapshot(gameState), 'test-player');
           times.push(Date.now() - startTime);
         }
 
@@ -342,7 +365,7 @@ describe('Agent.makeMove Performance Tests', () => {
 
         for (let i = 0; i < iterations; i++) {
           const startTime = Date.now();
-          await heuristicAgent.makeMove(emptyStackState, 'test-player');
+          await heuristicAgent.makeMove(stateToSnapshot(emptyStackState), 'test-player');
           times.push(Date.now() - startTime);
         }
 
@@ -366,7 +389,7 @@ describe('Agent.makeMove Performance Tests', () => {
 
         for (let i = 0; i < iterations; i++) {
           const startTime = Date.now();
-          await heuristicAgent.makeMove(smallStackState, 'test-player');
+          await heuristicAgent.makeMove(stateToSnapshot(smallStackState), 'test-player');
           times.push(Date.now() - startTime);
         }
 
@@ -390,7 +413,7 @@ describe('Agent.makeMove Performance Tests', () => {
 
         for (let i = 0; i < iterations; i++) {
           const startTime = Date.now();
-          await heuristicAgent.makeMove(mediumStackState, 'test-player');
+          await heuristicAgent.makeMove(stateToSnapshot(mediumStackState), 'test-player');
           times.push(Date.now() - startTime);
         }
 
@@ -414,7 +437,7 @@ describe('Agent.makeMove Performance Tests', () => {
 
         for (let i = 0; i < iterations; i++) {
           const startTime = Date.now();
-          await heuristicAgent.makeMove(largeStackState, 'test-player');
+          await heuristicAgent.makeMove(stateToSnapshot(largeStackState), 'test-player');
           times.push(Date.now() - startTime);
         }
 
@@ -444,7 +467,7 @@ describe('Agent.makeMove Performance Tests', () => {
 
         for (let i = 0; i < iterations; i++) {
           const startTime = Date.now();
-          await heuristicAgent.makeMove(lateGameState, 'test-player');
+          await heuristicAgent.makeMove(stateToSnapshot(lateGameState), 'test-player');
           times.push(Date.now() - startTime);
         }
 
@@ -469,7 +492,7 @@ describe('Agent.makeMove Performance Tests', () => {
 
         for (let i = 0; i < iterations; i++) {
           const startTime = Date.now();
-          await heuristicAgent.makeMove(earlyGameState, 'test-player');
+          await heuristicAgent.makeMove(stateToSnapshot(earlyGameState), 'test-player');
           times.push(Date.now() - startTime);
         }
 
@@ -495,7 +518,7 @@ describe('Agent.makeMove Performance Tests', () => {
       const exhaustiveIterations = 3;
       for (let i = 0; i < exhaustiveIterations; i++) {
         const startTime = Date.now();
-        await exhaustiveAgent.makeMove(gameState, 'test-player');
+        await exhaustiveAgent.makeMove(stateToSnapshot(gameState), 'test-player');
         exhaustiveTimes.push(Date.now() - startTime);
       }
       const exhaustiveAvg = exhaustiveTimes.reduce((a, b) => a + b, 0) / exhaustiveTimes.length;
@@ -504,7 +527,7 @@ describe('Agent.makeMove Performance Tests', () => {
       const heuristicIterations = 10;
       for (let i = 0; i < heuristicIterations; i++) {
         const startTime = Date.now();
-        await heuristicAgent.makeMove(gameState, 'test-player');
+        await heuristicAgent.makeMove(stateToSnapshot(gameState), 'test-player');
         heuristicTimes.push(Date.now() - startTime);
       }
       const heuristicAvg = heuristicTimes.reduce((a, b) => a + b, 0) / heuristicTimes.length;
@@ -523,18 +546,19 @@ describe('Agent.makeMove Performance Tests', () => {
         return;
       }
 
-      const worstCaseState = {
+      const worstCaseState: GameState = {
         ...gameState,
         peggingStack: [],
         playedCards: [],
       };
+      const worstCaseSnapshot = stateToSnapshot(worstCaseState);
 
       const exhaustiveStartTime = Date.now();
-      await exhaustiveAgent.makeMove(worstCaseState, 'test-player');
+      await exhaustiveAgent.makeMove(worstCaseSnapshot, 'test-player');
       const exhaustiveTime = Date.now() - exhaustiveStartTime;
 
       const heuristicStartTime = Date.now();
-      await heuristicAgent.makeMove(worstCaseState, 'test-player');
+      await heuristicAgent.makeMove(worstCaseSnapshot, 'test-player');
       const heuristicTime = Date.now() - heuristicStartTime;
 
       console.log(`\n[Comparison] Worst-Case Performance (many remaining cards):`);
@@ -570,7 +594,7 @@ describe('Agent.makeMove Performance Tests', () => {
 
         for (let i = 0; i < iterations; i++) {
           const startTime = Date.now();
-          await heuristicAgent.makeMove(state, 'test-player');
+          await heuristicAgent.makeMove(stateToSnapshot(state), 'test-player');
           times.push(Date.now() - startTime);
         }
 

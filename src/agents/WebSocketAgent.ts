@@ -129,64 +129,53 @@ export class WebSocketAgent implements GameAgent {
 
   // --- Updated makeMove ---
 
-  async makeMove(game: GameState, playerId: string): Promise<Card | null> {
+  async makeMove(snapshot: GameSnapshot, playerId: string): Promise<Card | null> {
+    const game = snapshot.gameState;
     const player = game.players.find(p => p.id === playerId);
     if (!player) throw new Error('Player not found.');
     if (playerId !== this.playerId) throw new Error('Invalid playerId.');
 
-    let requestData: EmittedMakeMoveRequest;
-    return this.makeWebsocketRequest<Card | null>(
-      'makeMoveResponse',
-      currentSocket => {
-        requestData = {
-          requestType: AgentDecisionType.PLAY_CARD,
-          playerId: this.playerId,
-          peggingHand: player.peggingHand,
-          peggingStack: game.peggingStack,
-          playedCards: game.playedCards,
-          peggingTotal: game.peggingStack.reduce(
-            (total, card) => total + parseCard(card).runValue,
-            0
-          ),
-        };
-        this.mostRecentRequest = requestData;
-        currentSocket.emit('requestMakeMove', requestData);
-      },
-      (response: EmittedMakeMoveResponse) => {
-        if (response.playerId !== this.playerId) {
-          return new Error(
-            `Received move from wrong player: ${response.playerId}`
-          );
-        }
-        const invalidReason = getInvalidPeggingPlayReason(
-          game,
-          player,
-          response.selectedCard
-        );
-        if (invalidReason === null) {
-          this.mostRecentRequest = null;
-          return response.selectedCard;
-        } else {
-          // Notify server and reissue the request.
-          this.socket.emit('makeMoveInvalid', {
-            playerId: this.playerId,
-            reason: invalidReason,
-            makeMoveRequest: requestData,
-          } as EmittedMakeMoveInvalid);
-          return 'retry';
-        }
-      }
+    // Find the pending request from snapshot
+    const request = snapshot.pendingDecisionRequests.find(
+      r => r.playerId === playerId && r.decisionType === AgentDecisionType.PLAY_CARD
     );
+    if (!request) throw new Error('No pending PLAY_CARD request');
+
+    return this.waitForDecisionResponse(request, (response) => {
+      if (response.decisionType !== AgentDecisionType.PLAY_CARD) {
+        return new Error('Invalid response type');
+      }
+      const playResponse = response as PlayCardResponse;
+      const invalidReason = getInvalidPeggingPlayReason(
+        game,
+        player,
+        playResponse.selectedCard
+      );
+      if (invalidReason === null) {
+        return playResponse.selectedCard;
+      } else {
+        // Notify server and reissue the request.
+        this.socket.emit('makeMoveInvalid', {
+          playerId: this.playerId,
+          reason: invalidReason,
+          makeMoveRequest: request.requestData,
+        } as EmittedMakeMoveInvalid);
+        return new Error(invalidReason);
+      }
+    });
   }
 
   // --- Updated discard ---
 
   async discard(
-    game: GameState,
+    snapshot: GameSnapshot,
     playerId: string,
     numberOfCardsToDiscard: number
   ): Promise<Card[]> {
-    const request = this.findPendingRequest(AgentDecisionType.DISCARD);
+    const game = snapshot.gameState;
+    const request = snapshot.pendingDecisionRequests.find(
+      r => r.playerId === playerId && r.decisionType === AgentDecisionType.DISCARD
+    );
     if (!request) throw new Error('No pending DISCARD request');
 
     return this.waitForDecisionResponse(request, (response) => {
@@ -210,23 +199,7 @@ export class WebSocketAgent implements GameAgent {
     });
   }
 
-  /**
-   * Find a pending decision request for this player
-   * @param decisionType - The decision type to find
-   * @returns The pending request or null if not found
-   */
-  private findPendingRequest(
-    decisionType: AgentDecisionType
-  ): DecisionRequest | null {
-    if (!this.mostRecentGameSnapshot) {
-      return null;
-    }
-    return (
-      this.mostRecentGameSnapshot.pendingDecisionRequests.find(
-        req => req.playerId === this.playerId && req.decisionType === decisionType
-      ) || null
-    );
-  }
+  // REMOVED: findPendingRequest() - no longer needed, requests come from snapshot parameter
 
   /**
    * Unified decision response handler
@@ -263,8 +236,10 @@ export class WebSocketAgent implements GameAgent {
 
   // --- New agent methods ---
 
-  async deal(game: GameState, playerId: string): Promise<void> {
-    const request = this.findPendingRequest(AgentDecisionType.DEAL);
+  async deal(snapshot: GameSnapshot, playerId: string): Promise<void> {
+    const request = snapshot.pendingDecisionRequests.find(
+      r => r.playerId === playerId && r.decisionType === AgentDecisionType.DEAL
+    );
     if (!request) throw new Error('No pending DEAL request');
 
     await this.waitForDecisionResponse(request, (response) => {
@@ -276,11 +251,13 @@ export class WebSocketAgent implements GameAgent {
   }
 
   async cutDeck(
-    game: GameState,
+    snapshot: GameSnapshot,
     playerId: string,
     maxIndex: number
   ): Promise<number> {
-    const request = this.findPendingRequest(AgentDecisionType.CUT_DECK);
+    const request = snapshot.pendingDecisionRequests.find(
+      r => r.playerId === playerId && r.decisionType === AgentDecisionType.CUT_DECK
+    );
     if (!request) throw new Error('No pending CUT_DECK request');
 
     return this.waitForDecisionResponse(request, (response) => {
@@ -296,14 +273,13 @@ export class WebSocketAgent implements GameAgent {
   }
 
   async acknowledgeReadyForCounting(
-    game: GameState,
+    snapshot: GameSnapshot,
     playerId: string
   ): Promise<void> {
-    const request = this.findPendingRequest(
-      AgentDecisionType.READY_FOR_COUNTING
+    const request = snapshot.pendingDecisionRequests.find(
+      r => r.playerId === playerId && r.decisionType === AgentDecisionType.READY_FOR_COUNTING
     );
-    if (!request)
-      throw new Error('No pending READY_FOR_COUNTING request');
+    if (!request) throw new Error('No pending READY_FOR_COUNTING request');
 
     await this.waitForDecisionResponse(request, (response) => {
       if (response.decisionType !== AgentDecisionType.READY_FOR_COUNTING) {
@@ -314,14 +290,13 @@ export class WebSocketAgent implements GameAgent {
   }
 
   async acknowledgeReadyForNextRound(
-    game: GameState,
+    snapshot: GameSnapshot,
     playerId: string
   ): Promise<void> {
-    const request = this.findPendingRequest(
-      AgentDecisionType.READY_FOR_NEXT_ROUND
+    const request = snapshot.pendingDecisionRequests.find(
+      r => r.playerId === playerId && r.decisionType === AgentDecisionType.READY_FOR_NEXT_ROUND
     );
-    if (!request)
-      throw new Error('No pending READY_FOR_NEXT_ROUND request');
+    if (!request) throw new Error('No pending READY_FOR_NEXT_ROUND request');
 
     await this.waitForDecisionResponse(request, (response) => {
       if (response.decisionType !== AgentDecisionType.READY_FOR_NEXT_ROUND) {

@@ -675,6 +675,56 @@ export class CribbageGame extends EventEmitter {
     return gameEvent;
   }
 
+  /**
+   * Get a redacted version of a game snapshot for a specific player
+   * Combines getRedactedGameState() and getRedactedGameEvent()
+   * @param forPlayerId - ID of the player requesting the snapshot
+   * @returns Redacted game snapshot where opponents' cards are hidden
+   */
+  public getRedactedGameSnapshot(forPlayerId: string): GameSnapshot {
+    // Get the most recent snapshot (or create one if none exists)
+    const latestSnapshot = this.gameSnapshotHistory.length > 0
+      ? this.gameSnapshotHistory[this.gameSnapshotHistory.length - 1]
+      : {
+          gameState: this.gameState,
+          gameEvent: {
+            gameId: this.gameState.id,
+            phase: this.gameState.currentPhase,
+            actionType: ActionType.START_ROUND,
+            playerId: null,
+            cards: null,
+            scoreChange: 0,
+            timestamp: new Date(),
+            snapshotId: this.gameState.snapshotId,
+          },
+          pendingDecisionRequests: this.pendingDecisionRequests,
+        };
+
+    // Redact game state and game event
+    const redactedGameState = this.getRedactedGameState(forPlayerId);
+    const redactedGameEvent = latestSnapshot.gameEvent
+      ? this.getRedactedGameEvent(latestSnapshot.gameEvent, forPlayerId)
+      : {
+          gameId: this.gameState.id,
+          phase: this.gameState.currentPhase,
+          actionType: ActionType.START_ROUND,
+          playerId: null,
+          cards: null,
+          scoreChange: 0,
+          timestamp: new Date(),
+          snapshotId: this.gameState.snapshotId,
+        };
+
+    // Return redacted snapshot
+    // Note: pendingDecisionRequests are not redacted - all players see all requests
+    // This is intentional for parallel decisions (e.g., DISCARD)
+    return {
+      gameState: redactedGameState,
+      gameEvent: redactedGameEvent,
+      pendingDecisionRequests: [...this.pendingDecisionRequests],
+    };
+  }
+
   public getGameState(): GameState {
     return this.gameState;
   }
