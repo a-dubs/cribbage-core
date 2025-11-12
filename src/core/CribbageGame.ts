@@ -580,10 +580,9 @@ export class CribbageGame extends EventEmitter {
     });
 
     // Determine if crib should be visible
-    // Crib is only visible during counting phase, and only to the dealer
+    // Crib is visible to all players during counting phase (when scoring happens)
     // (Note: isCountingPhase already declared above)
-    const isDealer = requestingPlayer.isDealer;
-    const cribVisible = isCountingPhase && isDealer;
+    const cribVisible = isCountingPhase;
 
     // Redact crib if not visible
     const redactedCrib = cribVisible
@@ -657,9 +656,9 @@ export class CribbageGame extends EventEmitter {
         break;
 
       case ActionType.SCORE_CRIB:
-        // Crib is only visible to dealer during counting phase
-        // During counting, dealer sees crib; outside counting, crib is redacted
-        shouldRedact = !(isDealer && isCountingPhase);
+        // Crib is visible to all players during counting phase (when scoring happens)
+        // Outside counting phase, crib is redacted
+        shouldRedact = !isCountingPhase;
         break;
 
       case ActionType.TURN_CARD:
