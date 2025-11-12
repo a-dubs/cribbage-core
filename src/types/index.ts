@@ -33,6 +33,7 @@ export enum ActionType {
   START_ROUND = 'START_ROUND', // Start a new round of the game
   SELECT_DEALER_CARD = 'SELECT_DEALER_CARD', // Player selects a card to determine dealer
   WIN = 'WIN', // Player wins the game
+  READY_FOR_GAME_START = 'READY_FOR_GAME_START', // Player acknowledges ready to start game (after dealer selection)
   READY_FOR_COUNTING = 'READY_FOR_COUNTING', // Player acknowledges ready for counting phase
   READY_FOR_NEXT_ROUND = 'READY_FOR_NEXT_ROUND', // Player acknowledges ready for next round
 }
@@ -242,6 +243,7 @@ export interface GameAgent {
   selectDealerCard?(snapshot: GameSnapshot, playerId: string, maxIndex: number): Promise<number>; // Select dealer card with index
   
   // Acknowledgment decisions (parallel, blocking)
+  acknowledgeReadyForGameStart?(snapshot: GameSnapshot, playerId: string): Promise<void>;
   acknowledgeReadyForCounting?(snapshot: GameSnapshot, playerId: string): Promise<void>;
   acknowledgeReadyForNextRound?(snapshot: GameSnapshot, playerId: string): Promise<void>;
   
@@ -326,6 +328,7 @@ export enum AgentDecisionType {
   SELECT_DEALER_CARD = 'SELECT_DEALER_CARD', // Player selects a card to determine dealer (parallel)
   
   // Acknowledgment decisions (pacing/blocking)
+  READY_FOR_GAME_START = 'READY_FOR_GAME_START', // Acknowledge ready to start game (after dealer selection)
   READY_FOR_COUNTING = 'READY_FOR_COUNTING', // Acknowledge ready for counting
   READY_FOR_NEXT_ROUND = 'READY_FOR_NEXT_ROUND', // Acknowledge ready for next round
   // REMOVED: CONTINUE (replaced by specific acknowledgment types)
@@ -384,7 +387,7 @@ export interface SelectDealerCardResponse {
 export interface AcknowledgeResponse {
   requestId: string;
   playerId: string;
-  decisionType: AgentDecisionType.READY_FOR_COUNTING | AgentDecisionType.READY_FOR_NEXT_ROUND;
+  decisionType: AgentDecisionType.READY_FOR_GAME_START | AgentDecisionType.READY_FOR_COUNTING | AgentDecisionType.READY_FOR_NEXT_ROUND;
   // No data needed - just acknowledgment
 }
 

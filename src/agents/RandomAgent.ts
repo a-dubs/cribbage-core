@@ -90,6 +90,18 @@ export class RandomAgent implements GameAgent {
     return Promise.resolve(Math.floor(Math.random() * (maxIndex + 1)));
   }
 
+  async acknowledgeReadyForGameStart(
+    snapshot: GameSnapshot,
+    playerId: string
+  ): Promise<void> {
+    const startTime = Date.now();
+    console.log(`[TIMING] RandomAgent.acknowledgeReadyForGameStart START for player ${playerId} at ${startTime}ms`);
+    // Bots automatically acknowledge - no need to wait
+    const endTime = Date.now();
+    console.log(`[TIMING] RandomAgent.acknowledgeReadyForGameStart END for player ${playerId} at ${endTime}ms (took ${endTime - startTime}ms)`);
+    return Promise.resolve();
+  }
+
   async acknowledgeReadyForCounting(
     snapshot: GameSnapshot,
     playerId: string

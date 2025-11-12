@@ -257,6 +257,35 @@ export class GameLoop extends EventEmitter {
         return;
       }
 
+      case AgentDecisionType.READY_FOR_GAME_START: {
+        const ackStartTime = Date.now();
+        console.log(`[TIMING] READY_FOR_GAME_START: Calling agent.acknowledgeReadyForGameStart for player ${request.playerId} at ${ackStartTime}ms`);
+        
+        if (agent.acknowledgeReadyForGameStart) {
+          const beforeAgentCall = Date.now();
+          await agent.acknowledgeReadyForGameStart(
+            redactedSnapshot,
+            request.playerId
+          );
+          const afterAgentCall = Date.now();
+          console.log(`[TIMING] READY_FOR_GAME_START: agent.acknowledgeReadyForGameStart returned for player ${request.playerId} at ${afterAgentCall}ms (took ${afterAgentCall - beforeAgentCall}ms)`);
+        } else {
+          console.log(`[TIMING] READY_FOR_GAME_START: agent.acknowledgeReadyForGameStart not available for player ${request.playerId}`);
+        }
+        
+        const removeStartTime = Date.now();
+        this.cribbageGame.removeDecisionRequest(request.requestId);
+        const removeEndTime = Date.now();
+        console.log(`[TIMING] READY_FOR_GAME_START: Removed decision request for player ${request.playerId} at ${removeEndTime}ms (took ${removeEndTime - removeStartTime}ms)`);
+        
+        // Emit GameSnapshot immediately so app sees the acknowledgment
+        const emitStartTime = Date.now();
+        this.emitAcknowledgmentSnapshot();
+        const emitEndTime = Date.now();
+        console.log(`[TIMING] READY_FOR_GAME_START: Emitted acknowledgment snapshot for player ${request.playerId} at ${emitEndTime}ms (took ${emitEndTime - emitStartTime}ms, total from start: ${emitEndTime - ackStartTime}ms)`);
+        return;
+      }
+
       case AgentDecisionType.READY_FOR_NEXT_ROUND: {
         const ackStartTime = Date.now();
         console.log(`[TIMING] READY_FOR_NEXT_ROUND: Calling agent.acknowledgeReadyForNextRound for player ${request.playerId} at ${ackStartTime}ms`);
@@ -453,6 +482,7 @@ export class GameLoop extends EventEmitter {
    */
   private async waitForAllPlayersReady(
     decisionType:
+      | AgentDecisionType.READY_FOR_GAME_START
       | AgentDecisionType.READY_FOR_COUNTING
       | AgentDecisionType.READY_FOR_NEXT_ROUND,
     message: string
@@ -696,6 +726,13 @@ export class GameLoop extends EventEmitter {
       throw new Error('Dealer was not determined after dealer selection phase.');
     }
     console.log(`Dealer selection complete. Dealer: ${dealer.name}`);
+
+    // Request acknowledgment from all players before starting the game
+    // This gives players time to see the dealer selection results
+    await this.waitForAllPlayersReady(
+      AgentDecisionType.READY_FOR_GAME_START,
+      'Ready to start game'
+    );
   }
 
   /**

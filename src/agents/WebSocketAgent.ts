@@ -296,6 +296,23 @@ export class WebSocketAgent implements GameAgent {
     });
   }
 
+  async acknowledgeReadyForGameStart(
+    snapshot: GameSnapshot,
+    playerId: string
+  ): Promise<void> {
+    const request = snapshot.pendingDecisionRequests.find(
+      r => r.playerId === playerId && r.decisionType === AgentDecisionType.READY_FOR_GAME_START
+    );
+    if (!request) throw new Error('No pending READY_FOR_GAME_START request');
+
+    await this.waitForDecisionResponse(request, (response) => {
+      if (response.decisionType !== AgentDecisionType.READY_FOR_GAME_START) {
+        return new Error('Invalid response type');
+      }
+      return;
+    });
+  }
+
   async acknowledgeReadyForCounting(
     snapshot: GameSnapshot,
     playerId: string
