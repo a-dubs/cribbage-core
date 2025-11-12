@@ -57,6 +57,33 @@ export class GameLoop extends EventEmitter {
   }
 
   /**
+   * Emit a GameSnapshot with updated pendingDecisionRequests (for acknowledgments)
+   * This allows the app to see when players acknowledge without waiting for a game event
+   */
+  private emitAcknowledgmentSnapshot(): void {
+    const currentState = this.cribbageGame.getGameState();
+    const latestSnapshots = this.cribbageGame.getGameSnapshotHistory();
+    const latestEvent = latestSnapshots.length > 0
+      ? latestSnapshots[latestSnapshots.length - 1].gameEvent
+      : {
+          gameId: currentState.id,
+          phase: currentState.currentPhase,
+          actionType: ActionType.START_ROUND,
+          playerId: null,
+          cards: null,
+          scoreChange: 0,
+          timestamp: new Date(),
+          snapshotId: currentState.snapshotId,
+        };
+    const snapshot: GameSnapshot = {
+      gameState: currentState,
+      gameEvent: latestEvent,
+      pendingDecisionRequests: this.cribbageGame.getPendingDecisionRequests(),
+    };
+    this.cribbageGame.emit('gameSnapshot', snapshot);
+  }
+
+  /**
    * Request a decision from a player
    * Creates a DecisionRequest and adds it to pending requests
    * @param playerId - ID of the player we're waiting on
@@ -174,6 +201,8 @@ export class GameLoop extends EventEmitter {
           );
         }
         this.cribbageGame.removeDecisionRequest(request.requestId);
+        // Emit GameSnapshot immediately so app sees the acknowledgment
+        this.emitAcknowledgmentSnapshot();
         return;
       }
 
@@ -185,6 +214,8 @@ export class GameLoop extends EventEmitter {
           );
         }
         this.cribbageGame.removeDecisionRequest(request.requestId);
+        // Emit GameSnapshot immediately so app sees the acknowledgment
+        this.emitAcknowledgmentSnapshot();
         return;
       }
     }
