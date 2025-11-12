@@ -535,8 +535,9 @@ export class CribbageGame extends EventEmitter {
   /**
    * Get a redacted version of the game state for a specific player
    * Opponents' hands and pegging hands are redacted to 'UNKNOWN' cards
+   * EXCEPT during COUNTING phase when all cards are revealed
    * @param forPlayerId - ID of the player requesting the state
-   * @returns Redacted game state where opponents' cards are hidden
+   * @returns Redacted game state where opponents' cards are hidden (unless counting)
    */
   public getRedactedGameState(forPlayerId: string): GameState {
     const requestingPlayer = this.gameState.players.find(
@@ -545,6 +546,9 @@ export class CribbageGame extends EventEmitter {
     if (!requestingPlayer) {
       throw new Error(`Player ${forPlayerId} not found`);
     }
+
+    // During COUNTING phase, all cards are revealed (no redaction)
+    const isCountingPhase = this.gameState.currentPhase === Phase.COUNTING;
 
     // Create redacted players array
     const redactedPlayers = this.gameState.players.map(player => {
@@ -556,19 +560,28 @@ export class CribbageGame extends EventEmitter {
           peggingHand: [...player.peggingHand],
         };
       } else {
-        // Opponents' hands are redacted
-        return {
-          ...player,
-          hand: player.hand.map(() => 'UNKNOWN' as Card),
-          peggingHand: player.peggingHand.map(() => 'UNKNOWN' as Card),
-        };
+        // Opponents' hands are redacted UNLESS we're in counting phase
+        if (isCountingPhase) {
+          // During counting, show all cards
+          return {
+            ...player,
+            hand: [...player.hand],
+            peggingHand: [...player.peggingHand],
+          };
+        } else {
+          // Opponents' hands are redacted
+          return {
+            ...player,
+            hand: player.hand.map(() => 'UNKNOWN' as Card),
+            peggingHand: player.peggingHand.map(() => 'UNKNOWN' as Card),
+          };
+        }
       }
     });
 
     // Determine if crib should be visible
     // Crib is only visible during counting phase, and only to the dealer
-    const isCountingPhase =
-      this.gameState.currentPhase === Phase.COUNTING;
+    // (Note: isCountingPhase already declared above)
     const isDealer = requestingPlayer.isDealer;
     const cribVisible = isCountingPhase && isDealer;
 
@@ -638,14 +651,14 @@ export class CribbageGame extends EventEmitter {
         break;
 
       case ActionType.SCORE_HAND:
-        // During counting phase, hands are shown (public)
-        // But we should still redact opponent's hand cards in the event
-        // since the event shows the hand that was scored
-        shouldRedact = isOpponentEvent;
+        // During counting phase, hands are shown (public) - no redaction
+        // Outside counting phase, opponent's hand cards in events are redacted
+        shouldRedact = isOpponentEvent && !isCountingPhase;
         break;
 
       case ActionType.SCORE_CRIB:
         // Crib is only visible to dealer during counting phase
+        // During counting, dealer sees crib; outside counting, crib is redacted
         shouldRedact = !(isDealer && isCountingPhase);
         break;
 
