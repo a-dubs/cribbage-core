@@ -84,14 +84,14 @@ export class GameLoop extends EventEmitter {
   }
 
   /**
-   * Request a decision from a player
-   * Creates a DecisionRequest and adds it to pending requests
+   * Create a decision request without emitting a snapshot
+   * Used for batching multiple requests before emitting
    * @param playerId - ID of the player we're waiting on
    * @param decisionType - Type of decision required
    * @param requestData - Context-specific data for the request
    * @returns The created DecisionRequest
    */
-  private requestDecision(
+  private createDecisionRequest(
     playerId: string,
     decisionType: AgentDecisionType,
     requestData: DecisionRequestData
@@ -106,6 +106,24 @@ export class GameLoop extends EventEmitter {
     };
 
     this.cribbageGame.addDecisionRequest(request);
+    return request;
+  }
+
+  /**
+   * Request a decision from a player
+   * Creates a DecisionRequest and adds it to pending requests
+   * Emits a GameSnapshot immediately so agents can see the new request
+   * @param playerId - ID of the player we're waiting on
+   * @param decisionType - Type of decision required
+   * @param requestData - Context-specific data for the request
+   * @returns The created DecisionRequest
+   */
+  private requestDecision(
+    playerId: string,
+    decisionType: AgentDecisionType,
+    requestData: DecisionRequestData
+  ): DecisionRequest {
+    const request = this.createDecisionRequest(playerId, decisionType, requestData);
     // Emit a GameSnapshot immediately so agents can see the new request
     // This is needed for WebSocketAgent which relies on mostRecentGameSnapshot
     const currentState = this.cribbageGame.getGameState();
@@ -426,17 +444,40 @@ export class GameLoop extends EventEmitter {
     console.log(`[TIMING] waitForAllPlayersReady START at ${startTime}ms for ${decisionType}`);
     
     // Request acknowledgments from ALL players in parallel
+    // Create all requests first without emitting snapshots to avoid showing partial counts
     const acknowledgeRequests: DecisionRequest[] = [];
     const gameState = this.cribbageGame.getGameState();
 
     for (const player of gameState.players) {
       const requestStartTime = Date.now();
-      const request = this.requestDecision(player.id, decisionType, {
+      const request = this.createDecisionRequest(player.id, decisionType, {
         message,
       });
       console.log(`[TIMING] Created request for player ${player.id} at ${requestStartTime}ms (${requestStartTime - startTime}ms after start)`);
       acknowledgeRequests.push(request);
     }
+
+    // Now emit a single snapshot with all requests so UI shows correct count from the start
+    const currentState = this.cribbageGame.getGameState();
+    const currentEvent = this.cribbageGame.getGameSnapshotHistory().length > 0
+      ? this.cribbageGame.getGameSnapshotHistory()[this.cribbageGame.getGameSnapshotHistory().length - 1].gameEvent
+      : null;
+    const snapshot: GameSnapshot = {
+      gameState: currentState,
+      gameEvent: currentEvent || {
+        gameId: currentState.id,
+        phase: currentState.currentPhase,
+        actionType: ActionType.START_ROUND,
+        playerId: null,
+        cards: null,
+        scoreChange: 0,
+        timestamp: new Date(),
+        snapshotId: currentState.snapshotId,
+      },
+      pendingDecisionRequests: this.cribbageGame.getPendingDecisionRequests(),
+    };
+    this.cribbageGame.emit('gameSnapshot', snapshot);
+    console.log(`[TIMING] Emitted snapshot with ${acknowledgeRequests.length} acknowledgment requests`);
 
     // Wait for all acknowledgments in parallel
     // Each player can acknowledge independently
