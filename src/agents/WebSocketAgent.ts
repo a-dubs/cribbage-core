@@ -160,7 +160,8 @@ export class WebSocketAgent implements GameAgent {
           reason: invalidReason,
           makeMoveRequest: request.requestData,
         } as EmittedMakeMoveInvalid);
-        return new Error(invalidReason);
+        // Return 'retry' to allow the request to be reissued
+        return 'retry' as any;
       }
     });
   }

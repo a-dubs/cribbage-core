@@ -114,6 +114,8 @@ export class GameLoop extends EventEmitter {
     const agent = this.agents[request.playerId];
     if (!agent) throw new Error(`No agent for player ${request.playerId}`);
 
+    console.log(`[waitForDecision] Starting for player ${request.playerId}, type ${request.decisionType}, agent is ${agent.human ? 'human' : 'bot'}`);
+
     // Get redacted snapshot for this player
     const redactedSnapshot = this.cribbageGame.getRedactedGameSnapshot(
       request.playerId
@@ -123,16 +125,19 @@ export class GameLoop extends EventEmitter {
       case AgentDecisionType.PLAY_CARD: {
         const card = await agent.makeMove(redactedSnapshot, request.playerId);
         this.cribbageGame.removeDecisionRequest(request.requestId);
+        console.log(`[waitForDecision] PLAY_CARD resolved for player ${request.playerId}`);
         return card;
       }
 
       case AgentDecisionType.DISCARD: {
         const data = request.requestData as DiscardRequestData;
+        console.log(`[waitForDecision] Calling agent.discard() for player ${request.playerId} (${agent.human ? 'human' : 'bot'})`);
         const discards = await agent.discard(
           redactedSnapshot,
           request.playerId,
           data.numberOfCardsToDiscard
         );
+        console.log(`[waitForDecision] DISCARD resolved for player ${request.playerId}, got ${discards.length} cards`);
         this.cribbageGame.removeDecisionRequest(request.requestId);
         return discards;
       }
@@ -326,10 +331,14 @@ export class GameLoop extends EventEmitter {
     }
 
     // Wait for all discards in parallel
-    const discardPromises = discardRequests.map(request =>
-      this.waitForDecision(request)
-    );
+    console.log(`[doCribPhase] Requesting discards from ${discardRequests.length} players in parallel`);
+    const discardPromises = discardRequests.map(request => {
+      console.log(`[doCribPhase] Starting waitForDecision for player ${request.playerId}`);
+      return this.waitForDecision(request);
+    });
+    console.log(`[doCribPhase] All promises created, waiting for Promise.all()...`);
     const allDiscards = await Promise.all(discardPromises);
+    console.log(`[doCribPhase] All discards received:`, allDiscards.map((d, i) => ({ player: discardRequests[i].playerId, count: d.length })));
 
     // Apply all discards
     for (let i = 0; i < gameState.players.length; i++) {
