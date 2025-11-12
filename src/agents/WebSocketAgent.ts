@@ -9,8 +9,14 @@ import {
   EmittedDiscardInvalid,
   EmittedDiscardResponse,
   AgentDecisionType,
-  EmittedContinueResponse,
-  EmittedContinueRequest,
+  DecisionRequest,
+  DecisionResponse,
+  PlayCardResponse,
+  DiscardResponse,
+  DealResponse,
+  CutDeckResponse,
+  AcknowledgeResponse,
+  GameSnapshot,
 } from '../types';
 import { parseCard } from '../core/scoring';
 import { Socket } from 'socket.io';
@@ -22,6 +28,7 @@ export class WebSocketAgent implements GameAgent {
   human = true;
   mostRecentRequest: EmittedMakeMoveRequest | EmittedDiscardRequest | null =
     null;
+  mostRecentGameSnapshot: GameSnapshot | null = null; // Track latest snapshot for finding pending requests
 
   constructor(socket: Socket, playerId: string) {
     this.socket = socket;
@@ -122,127 +129,181 @@ export class WebSocketAgent implements GameAgent {
 
   // --- Updated makeMove ---
 
-  async makeMove(game: GameState, playerId: string): Promise<Card | null> {
+  async makeMove(snapshot: GameSnapshot, playerId: string): Promise<Card | null> {
+    const game = snapshot.gameState;
     const player = game.players.find(p => p.id === playerId);
     if (!player) throw new Error('Player not found.');
     if (playerId !== this.playerId) throw new Error('Invalid playerId.');
 
-    let requestData: EmittedMakeMoveRequest;
-    return this.makeWebsocketRequest<Card | null>(
-      'makeMoveResponse',
-      currentSocket => {
-        requestData = {
-          requestType: AgentDecisionType.PLAY_CARD,
-          playerId: this.playerId,
-          peggingHand: player.peggingHand,
-          peggingStack: game.peggingStack,
-          playedCards: game.playedCards,
-          peggingTotal: game.peggingStack.reduce(
-            (total, card) => total + parseCard(card).runValue,
-            0
-          ),
-        };
-        this.mostRecentRequest = requestData;
-        currentSocket.emit('requestMakeMove', requestData);
-      },
-      (response: EmittedMakeMoveResponse) => {
-        if (response.playerId !== this.playerId) {
-          return new Error(
-            `Received move from wrong player: ${response.playerId}`
-          );
-        }
-        const invalidReason = getInvalidPeggingPlayReason(
-          game,
-          player,
-          response.selectedCard
-        );
-        if (invalidReason === null) {
-          this.mostRecentRequest = null;
-          return response.selectedCard;
-        } else {
-          // Notify server and reissue the request.
-          this.socket.emit('makeMoveInvalid', {
-            playerId: this.playerId,
-            reason: invalidReason,
-            makeMoveRequest: requestData,
-          } as EmittedMakeMoveInvalid);
-          return 'retry';
-        }
-      }
+    // Find the pending request from snapshot
+    const request = snapshot.pendingDecisionRequests.find(
+      r => r.playerId === playerId && r.decisionType === AgentDecisionType.PLAY_CARD
     );
+    if (!request) throw new Error('No pending PLAY_CARD request');
+
+    return this.waitForDecisionResponse(request, (response) => {
+      if (response.decisionType !== AgentDecisionType.PLAY_CARD) {
+        return new Error('Invalid response type');
+      }
+      const playResponse = response as PlayCardResponse;
+      const invalidReason = getInvalidPeggingPlayReason(
+        game,
+        player,
+        playResponse.selectedCard
+      );
+      if (invalidReason === null) {
+        return playResponse.selectedCard;
+      } else {
+        // Notify server and reissue the request.
+        this.socket.emit('makeMoveInvalid', {
+          playerId: this.playerId,
+          reason: invalidReason,
+          makeMoveRequest: request.requestData,
+        } as EmittedMakeMoveInvalid);
+        // Return 'retry' to allow the request to be reissued
+        return 'retry' as any;
+      }
+    });
   }
 
   // --- Updated discard ---
 
   async discard(
-    game: GameState,
+    snapshot: GameSnapshot,
     playerId: string,
     numberOfCardsToDiscard: number
   ): Promise<Card[]> {
-    const player = game.players.find(p => p.id === playerId);
-    if (!player) throw new Error('Player not found.');
-    if (playerId !== this.playerId) throw new Error('Invalid playerId.');
+    const game = snapshot.gameState;
+    const request = snapshot.pendingDecisionRequests.find(
+      r => r.playerId === playerId && r.decisionType === AgentDecisionType.DISCARD
+    );
+    if (!request) throw new Error('No pending DISCARD request');
 
-    let requestData: EmittedDiscardRequest;
-    return this.makeWebsocketRequest<Card[]>(
-      'discardResponse',
-      currentSocket => {
-        requestData = {
-          requestType: AgentDecisionType.DISCARD,
+    return this.waitForDecisionResponse(request, (response) => {
+      if (response.decisionType !== AgentDecisionType.DISCARD) {
+        return new Error('Invalid response type');
+      }
+      const discardResponse = response as DiscardResponse;
+      const player = game.players.find(p => p.id === playerId);
+      if (!player) throw new Error('Player not found.');
+      if (isValidDiscard(game, player, discardResponse.selectedCards)) {
+        return discardResponse.selectedCards;
+      } else {
+        // Notify server and reissue the request.
+        this.socket.emit('discardInvalid', {
           playerId: this.playerId,
-          hand: player.hand,
-          numberOfCardsToDiscard,
-        };
-        this.mostRecentRequest = requestData;
-        currentSocket.emit('discardRequest', requestData);
+          reason: 'Invalid discard',
+          discardRequest: request.requestData,
+        } as EmittedDiscardInvalid);
+        return new Error('Invalid discard');
+      }
+    });
+  }
+
+  // REMOVED: findPendingRequest() - no longer needed, requests come from snapshot parameter
+
+  /**
+   * Unified decision response handler
+   * Waits for client to send decisionResponse event
+   */
+  private async waitForDecisionResponse<T>(
+    request: DecisionRequest,
+    responseHandler: (response: DecisionResponse) => T | Error
+  ): Promise<T> {
+    return this.makeWebsocketRequest<T>(
+      'decisionResponse',
+      currentSocket => {
+        // Request is already in GameSnapshot.pendingDecisionRequests
+        // Client will respond with decisionResponse event
       },
-      (response: EmittedDiscardResponse) => {
+      (response: DecisionResponse) => {
+        if (response.requestId !== request.requestId) {
+          return new Error(`Response requestId mismatch`);
+        }
         if (response.playerId !== this.playerId) {
-          return new Error(
-            `Received discard from wrong player: ${response.playerId}`
-          );
+          return new Error(`Response from wrong player`);
         }
-        if (isValidDiscard(game, player, response.selectedCards)) {
-          this.mostRecentRequest = null;
-          return response.selectedCards;
-        } else {
-          // Notify server and reissue the request.
-          this.socket.emit('discardInvalid', {
-            playerId: this.playerId,
-            reason: 'Invalid discard',
-            discardRequest: requestData,
-          } as EmittedDiscardInvalid);
-          return 'retry';
-        }
+        return responseHandler(response);
       }
     );
   }
 
-  // --- Updated continue ---
-  async waitForContinue(
-    game: GameState,
-    playerId: string,
-    continueDescription: string
-  ): Promise<void> {
-    // send request to player and once a response is received, return
-    return this.makeWebsocketRequest<void>(
-      'continueResponse',
-      currentSocket => {
-        const requestData: EmittedContinueRequest = {
-          requestType: AgentDecisionType.CONTINUE,
-          playerId: this.playerId,
-          description: continueDescription,
-        };
-        currentSocket.emit('continueRequest', requestData);
-      },
-      (response: EmittedContinueResponse) => {
-        if (response.playerId !== this.playerId) {
-          return new Error(
-            `Received continue from wrong player: ${response.playerId}`
-          );
-        }
-        return;
-      }
+  /**
+   * Update the most recent game snapshot (called by server when receiving gameSnapshot events)
+   */
+  public updateGameSnapshot(snapshot: GameSnapshot): void {
+    this.mostRecentGameSnapshot = snapshot;
+  }
+
+  // --- New agent methods ---
+
+  async deal(snapshot: GameSnapshot, playerId: string): Promise<void> {
+    const request = snapshot.pendingDecisionRequests.find(
+      r => r.playerId === playerId && r.decisionType === AgentDecisionType.DEAL
     );
+    if (!request) throw new Error('No pending DEAL request');
+
+    await this.waitForDecisionResponse(request, (response) => {
+      if (response.decisionType !== AgentDecisionType.DEAL) {
+        return new Error('Invalid response type');
+      }
+      return;
+    });
+  }
+
+  async cutDeck(
+    snapshot: GameSnapshot,
+    playerId: string,
+    maxIndex: number
+  ): Promise<number> {
+    const request = snapshot.pendingDecisionRequests.find(
+      r => r.playerId === playerId && r.decisionType === AgentDecisionType.CUT_DECK
+    );
+    if (!request) throw new Error('No pending CUT_DECK request');
+
+    return this.waitForDecisionResponse(request, (response) => {
+      if (response.decisionType !== AgentDecisionType.CUT_DECK) {
+        return new Error('Invalid response type');
+      }
+      const cutResponse = response as CutDeckResponse;
+      if (cutResponse.cutIndex < 0 || cutResponse.cutIndex > maxIndex) {
+        return new Error(`Invalid cut index: ${cutResponse.cutIndex}`);
+      }
+      return cutResponse.cutIndex;
+    });
+  }
+
+  async acknowledgeReadyForCounting(
+    snapshot: GameSnapshot,
+    playerId: string
+  ): Promise<void> {
+    const request = snapshot.pendingDecisionRequests.find(
+      r => r.playerId === playerId && r.decisionType === AgentDecisionType.READY_FOR_COUNTING
+    );
+    if (!request) throw new Error('No pending READY_FOR_COUNTING request');
+
+    await this.waitForDecisionResponse(request, (response) => {
+      if (response.decisionType !== AgentDecisionType.READY_FOR_COUNTING) {
+        return new Error('Invalid response type');
+      }
+      return;
+    });
+  }
+
+  async acknowledgeReadyForNextRound(
+    snapshot: GameSnapshot,
+    playerId: string
+  ): Promise<void> {
+    const request = snapshot.pendingDecisionRequests.find(
+      r => r.playerId === playerId && r.decisionType === AgentDecisionType.READY_FOR_NEXT_ROUND
+    );
+    if (!request) throw new Error('No pending READY_FOR_NEXT_ROUND request');
+
+    await this.waitForDecisionResponse(request, (response) => {
+      if (response.decisionType !== AgentDecisionType.READY_FOR_NEXT_ROUND) {
+        return new Error('Invalid response type');
+      }
+      return;
+    });
   }
 }

@@ -9,6 +9,13 @@ import {
   AgentDecisionType,
   GameSnapshot,
   ActionType,
+  DecisionRequest,
+  DecisionRequestData,
+  PlayCardRequestData,
+  DiscardRequestData,
+  DealRequestData,
+  CutDeckRequestData,
+  AcknowledgeRequestData,
 } from '../types';
 import { displayCard, parseCard, suitToEmoji } from '../core/scoring';
 import EventEmitter from 'eventemitter3';
@@ -43,41 +50,174 @@ export class GameLoop extends EventEmitter {
   }
 
   /**
-   * Request a decision from a player and update GameState
-   * This helper method integrates decision requests into the canonical game state
-   * Sets waiting state in GameState (no event is recorded, as waiting state is already in GameState)
+   * Generate a unique request ID
+   */
+  private generateRequestId(): string {
+    return `request-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  }
+
+  /**
+   * Emit a GameSnapshot with updated pendingDecisionRequests (for acknowledgments)
+   * This allows the app to see when players acknowledge without waiting for a game event
+   */
+  private emitAcknowledgmentSnapshot(): void {
+    const currentState = this.cribbageGame.getGameState();
+    const latestSnapshots = this.cribbageGame.getGameSnapshotHistory();
+    const latestEvent = latestSnapshots.length > 0
+      ? latestSnapshots[latestSnapshots.length - 1].gameEvent
+      : {
+          gameId: currentState.id,
+          phase: currentState.currentPhase,
+          actionType: ActionType.START_ROUND,
+          playerId: null,
+          cards: null,
+          scoreChange: 0,
+          timestamp: new Date(),
+          snapshotId: currentState.snapshotId,
+        };
+    const snapshot: GameSnapshot = {
+      gameState: currentState,
+      gameEvent: latestEvent,
+      pendingDecisionRequests: this.cribbageGame.getPendingDecisionRequests(),
+    };
+    this.cribbageGame.emit('gameSnapshot', snapshot);
+  }
+
+  /**
+   * Request a decision from a player
+   * Creates a DecisionRequest and adds it to pending requests
    * @param playerId - ID of the player we're waiting on
-   * @param decisionType - Type of decision being requested
+   * @param decisionType - Type of decision required
+   * @param requestData - Context-specific data for the request
+   * @returns The created DecisionRequest
    */
   private requestDecision(
     playerId: string,
-    decisionType: AgentDecisionType
-  ): void {
-    // Add to waiting list in GameState (no event needed - waiting state is in GameState.waitingForPlayers)
-    this.cribbageGame.addWaitingForPlayer(playerId, decisionType);
+    decisionType: AgentDecisionType,
+    requestData: DecisionRequestData
+  ): DecisionRequest {
+    const request: DecisionRequest = {
+      requestId: this.generateRequestId(),
+      playerId,
+      decisionType,
+      requestData,
+      required: true, // All decisions block flow
+      timestamp: new Date(),
+    };
+
+    this.cribbageGame.addDecisionRequest(request);
+    // Emit a GameSnapshot immediately so agents can see the new request
+    // This is needed for WebSocketAgent which relies on mostRecentGameSnapshot
+    const currentState = this.cribbageGame.getGameState();
+    const currentEvent = this.cribbageGame.getGameSnapshotHistory().length > 0
+      ? this.cribbageGame.getGameSnapshotHistory()[this.cribbageGame.getGameSnapshotHistory().length - 1].gameEvent
+      : null;
+    const snapshot: GameSnapshot = {
+      gameState: currentState,
+      gameEvent: currentEvent || {
+        gameId: currentState.id,
+        phase: currentState.currentPhase,
+        actionType: ActionType.START_ROUND,
+        playerId: null,
+        cards: null,
+        scoreChange: 0,
+        timestamp: new Date(),
+        snapshotId: currentState.snapshotId,
+      },
+      pendingDecisionRequests: this.cribbageGame.getPendingDecisionRequests(),
+    };
+    this.cribbageGame.emit('gameSnapshot', snapshot);
+
+    return request;
   }
 
-  private async sendContinue(
-    playerID: string,
-    continueDescription: string,
-    sendWaitingForPlayer = true
-  ): Promise<void> {
-    const agent = this.agents[playerID];
-    if (agent.waitForContinue) {
-      if (sendWaitingForPlayer) {
-        // Request decision and record in GameState/GameEvent
-        this.requestDecision(playerID, AgentDecisionType.CONTINUE);
+  /**
+   * Wait for a decision response
+   * Calls appropriate agent method based on decision type
+   * @param request - The decision request to wait for
+   * @returns The response from the agent
+   */
+  private async waitForDecision(request: DecisionRequest): Promise<any> {
+    const agent = this.agents[request.playerId];
+    if (!agent) throw new Error(`No agent for player ${request.playerId}`);
+
+    console.log(`[waitForDecision] Starting for player ${request.playerId}, type ${request.decisionType}, agent is ${agent.human ? 'human' : 'bot'}`);
+
+    // Get redacted snapshot for this player
+    const redactedSnapshot = this.cribbageGame.getRedactedGameSnapshot(
+      request.playerId
+    );
+
+    switch (request.decisionType) {
+      case AgentDecisionType.PLAY_CARD: {
+        const card = await agent.makeMove(redactedSnapshot, request.playerId);
+        this.cribbageGame.removeDecisionRequest(request.requestId);
+        console.log(`[waitForDecision] PLAY_CARD resolved for player ${request.playerId}`);
+        return card;
       }
-      // Pass redacted game state so agent can't see opponents' cards
-      const redactedGameState = this.cribbageGame.getRedactedGameState(
-        playerID
-      );
-      await agent.waitForContinue(
-        redactedGameState,
-        playerID,
-        continueDescription
-      );
-      console.log(`Player ${playerID} is ready to continue`);
+
+      case AgentDecisionType.DISCARD: {
+        const data = request.requestData as DiscardRequestData;
+        console.log(`[waitForDecision] Calling agent.discard() for player ${request.playerId} (${agent.human ? 'human' : 'bot'})`);
+        const discards = await agent.discard(
+          redactedSnapshot,
+          request.playerId,
+          data.numberOfCardsToDiscard
+        );
+        console.log(`[waitForDecision] DISCARD resolved for player ${request.playerId}, got ${discards.length} cards`);
+        this.cribbageGame.removeDecisionRequest(request.requestId);
+        return discards;
+      }
+
+      case AgentDecisionType.DEAL: {
+        if (agent.deal) {
+          await agent.deal(redactedSnapshot, request.playerId);
+        }
+        this.cribbageGame.removeDecisionRequest(request.requestId);
+        this.cribbageGame.deal(); // Trigger the actual deal action
+        return;
+      }
+
+      case AgentDecisionType.CUT_DECK: {
+        if (agent.cutDeck) {
+          const cutData = request.requestData as CutDeckRequestData;
+          const cutIndex = await agent.cutDeck(
+            redactedSnapshot,
+            request.playerId,
+            cutData.maxIndex
+          );
+          this.cribbageGame.removeDecisionRequest(request.requestId);
+          this.cribbageGame.cutDeck(request.playerId, cutIndex);
+          return cutIndex;
+        }
+        break;
+      }
+
+      case AgentDecisionType.READY_FOR_COUNTING: {
+        if (agent.acknowledgeReadyForCounting) {
+          await agent.acknowledgeReadyForCounting(
+            redactedSnapshot,
+            request.playerId
+          );
+        }
+        this.cribbageGame.removeDecisionRequest(request.requestId);
+        // Emit GameSnapshot immediately so app sees the acknowledgment
+        this.emitAcknowledgmentSnapshot();
+        return;
+      }
+
+      case AgentDecisionType.READY_FOR_NEXT_ROUND: {
+        if (agent.acknowledgeReadyForNextRound) {
+          await agent.acknowledgeReadyForNextRound(
+            redactedSnapshot,
+            request.playerId
+          );
+        }
+        this.cribbageGame.removeDecisionRequest(request.requestId);
+        // Emit GameSnapshot immediately so app sees the acknowledgment
+        this.emitAcknowledgmentSnapshot();
+        return;
+      }
     }
   }
 
@@ -128,16 +268,25 @@ export class GameLoop extends EventEmitter {
       const agent = this.agents[currentPlayerId];
       if (!agent) throw new Error(`No agent for player ${currentPlayerId}`);
 
-      // Request decision and record in GameState/GameEvent
-      this.requestDecision(currentPlayerId, AgentDecisionType.PLAY_CARD);
+      // Request decision
+      const gameState = this.cribbageGame.getGameState();
+      const player = gameState.players.find(p => p.id === currentPlayerId);
+      if (!player) throw new Error(`Player ${currentPlayerId} not found`);
 
-      // get the card the agent wants to play
-      // Pass redacted game state so agent can't see opponents' cards
-      console.log(`Calling makeMove for player ${currentPlayerId}`);
-      const redactedGameState = this.cribbageGame.getRedactedGameState(
-        currentPlayerId
+      const playCardRequest = this.requestDecision(
+        currentPlayerId,
+        AgentDecisionType.PLAY_CARD,
+        {
+          peggingHand: player.peggingHand,
+          peggingStack: gameState.peggingStack,
+          playedCards: gameState.playedCards,
+          peggingTotal: gameState.peggingTotal,
+        }
       );
-      const card = await agent.makeMove(redactedGameState, currentPlayerId);
+
+      // Wait for decision
+      console.log(`Calling makeMove for player ${currentPlayerId}`);
+      const card = await this.waitForDecision(playCardRequest);
       roundOverLastPlayer = this.cribbageGame.playCard(currentPlayerId, card);
       const parsedStack = this.cribbageGame
         .getGameState()
@@ -190,39 +339,98 @@ export class GameLoop extends EventEmitter {
     return Promise.resolve(null);
   }
 
+  /**
+   * Parallel discarding phase - all players discard simultaneously
+   */
+  private async doCribPhase(): Promise<void> {
+    // Request discards from ALL players in parallel
+    const discardRequests: DecisionRequest[] = [];
+    const gameState = this.cribbageGame.getGameState();
+    const numberOfCardsToDiscard =
+      gameState.players.length === 2 ? 2 : 1;
+
+    for (const player of gameState.players) {
+      const request = this.requestDecision(
+        player.id,
+        AgentDecisionType.DISCARD,
+        {
+          hand: player.hand,
+          numberOfCardsToDiscard,
+        }
+      );
+      discardRequests.push(request);
+    }
+
+    // Wait for all discards in parallel, but apply each discard immediately when it resolves
+    console.log(`[doCribPhase] Requesting discards from ${discardRequests.length} players in parallel`);
+    const discardPromises = discardRequests.map(async (request, index) => {
+      console.log(`[doCribPhase] Starting waitForDecision for player ${request.playerId}`);
+      const discards = await this.waitForDecision(request);
+      // Apply discard immediately when it resolves (don't wait for all)
+      const player = gameState.players[index];
+      console.log(`[doCribPhase] Applying discard immediately for player ${player.id}, got ${discards.length} cards`);
+      this.cribbageGame.discardToCrib(player.id, discards);
+      return discards;
+    });
+    console.log(`[doCribPhase] All promises created, waiting for Promise.all()...`);
+    const allDiscards = await Promise.all(discardPromises);
+    console.log(`[doCribPhase] All discards received:`, allDiscards.map((d, i) => ({ player: discardRequests[i].playerId, count: d.length })));
+
+    this.cribbageGame.completeCribPhase();
+  }
+
+  /**
+   * Wait for all players to acknowledge (parallel, blocking)
+   * @param decisionType - The acknowledgment type
+   * @param message - User-friendly message
+   */
+  private async waitForAllPlayersReady(
+    decisionType:
+      | AgentDecisionType.READY_FOR_COUNTING
+      | AgentDecisionType.READY_FOR_NEXT_ROUND,
+    message: string
+  ): Promise<void> {
+    // Request acknowledgments from ALL players in parallel
+    const acknowledgeRequests: DecisionRequest[] = [];
+    const gameState = this.cribbageGame.getGameState();
+
+    for (const player of gameState.players) {
+      const request = this.requestDecision(player.id, decisionType, {
+        message,
+      });
+      acknowledgeRequests.push(request);
+    }
+
+    // Wait for all acknowledgments in parallel
+    // Each player can acknowledge independently
+    const acknowledgePromises = acknowledgeRequests.map(request =>
+      this.waitForDecision(request)
+    );
+
+    // Wait for all to complete (blocking)
+    await Promise.all(acknowledgePromises);
+
+    // All players have acknowledged - proceed
+  }
+
   private async doRound(): Promise<string | null> {
     // start the round (cleanup and reset state and rotate dealer)
     this.cribbageGame.startRound();
 
-    // Prompt the dealer to deal
+    // DEAL: Explicit decision request (not continue)
     const dealer = this.cribbageGame.getPlayer(this.cribbageGame.getDealerId());
-    // Request decision and record in GameState/GameEvent
-    this.requestDecision(dealer.id, AgentDecisionType.DEAL);
-    await this.sendContinue(dealer.id, 'Deal the cards');
-    // await this.sendContinue(dealer.id, 'Shuffle the cards');
-    this.cribbageGame.deal();
+    const dealRequest = this.requestDecision(
+      dealer.id,
+      AgentDecisionType.DEAL,
+      { canShuffle: true } // Future: allow shuffling
+    );
+    await this.waitForDecision(dealRequest);
+    // deal() is called inside waitForDecision after agent responds
 
-    // Crib phase: Agents discard to crib
-    for (const player of this.cribbageGame.getGameState().players) {
-      const agent = this.agents[player.id];
-      if (!agent) throw new Error(`No agent for player ${player.id}`);
-      // Request decision and record in GameState/GameEvent
-      this.requestDecision(player.id, AgentDecisionType.DISCARD);
-      // Pass redacted game state so agent can't see opponents' cards
-      const redactedGameState = this.cribbageGame.getRedactedGameState(
-        player.id
-      );
-      const discards = await agent.discard(
-        redactedGameState,
-        player.id,
-        this.cribbageGame.getGameState().players.length === 2 ? 2 : 1
-      );
-      this.cribbageGame.discardToCrib(player.id, discards);
-    }
+    // DISCARD: Parallel (all players at once)
+    await this.doCribPhase();
 
-    this.cribbageGame.completeCribPhase();
-
-    // Cutting phase: Agents cut the deck
+    // CUT_DECK: Explicit decision request (not continue)
     const dealerIndex = this.cribbageGame
       .getGameState()
       .players.findIndex(player => player.isDealer);
@@ -231,12 +439,17 @@ export class GameLoop extends EventEmitter {
       this.cribbageGame.getGameState().players.length;
     const behindDealer =
       this.cribbageGame.getGameState().players[behindDealerIndex];
-    // prompt user to continue to initiate cutting the deck
-    await this.sendContinue(behindDealer.id, 'Cut the deck');
-    this.cribbageGame.cutDeck(
+    const gameState = this.cribbageGame.getGameState();
+    const cutRequest = this.requestDecision(
       behindDealer.id,
-      randomInt(0, this.cribbageGame.getGameState().deck.length)
+      AgentDecisionType.CUT_DECK,
+      {
+        maxIndex: gameState.deck.length - 1,
+        deckSize: gameState.deck.length,
+      }
     );
+    await this.waitForDecision(cutRequest);
+    // cutDeck() is called inside waitForDecision with returned index
 
     const turnCard = this.cribbageGame.getGameState().turnCard;
     if (!turnCard) throw new Error('No turn card after cutting deck');
@@ -251,13 +464,11 @@ export class GameLoop extends EventEmitter {
       return peggingWinner;
     }
 
-    // send continue to all players before continuing to counting phase
-    const continueToScoringPromises = this.cribbageGame
-      .getGameState()
-      .players.map(player =>
-        this.sendContinue(player.id, 'Ready for counting', true)
-      );
-    await Promise.all(continueToScoringPromises);
+    // READY_FOR_COUNTING: Parallel acknowledgment (all players)
+    await this.waitForAllPlayersReady(
+      AgentDecisionType.READY_FOR_COUNTING,
+      'Ready for counting'
+    );
 
     // SCORING PHASE
     // Loop through each player and score their hand, starting with player after dealer and ending with dealer
@@ -300,13 +511,11 @@ export class GameLoop extends EventEmitter {
     // record end_phase event for the scoring phase
     this.cribbageGame.endScoring();
 
-    // Send wait request to all players in parallel and once all are done, continue
-    const continueToNextRoundPromises = this.cribbageGame
-      .getGameState()
-      .players.map(player =>
-        this.sendContinue(player.id, 'Ready for next round', true)
-      );
-    await Promise.all(continueToNextRoundPromises);
+    // READY_FOR_NEXT_ROUND: Parallel acknowledgment (all players)
+    await this.waitForAllPlayersReady(
+      AgentDecisionType.READY_FOR_NEXT_ROUND,
+      'Ready for next round'
+    );
 
     console.log('All players ready for next round');
 

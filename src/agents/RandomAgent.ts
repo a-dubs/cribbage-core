@@ -1,5 +1,5 @@
 import { parseCard } from '../core/scoring';
-import { GameState, GameAgent, Card } from '../types';
+import { GameSnapshot, GameAgent, Card } from '../types';
 
 const AGENT_ID = 'random-bot-v1.0';
 
@@ -7,7 +7,8 @@ export class RandomAgent implements GameAgent {
   playerId: string = AGENT_ID;
   human = false;
 
-  makeMove(game: GameState, playerId: string): Promise<Card | null> {
+  makeMove(snapshot: GameSnapshot, playerId: string): Promise<Card | null> {
+    const game = snapshot.gameState;
     const player = game.players.find(p => p.id === playerId);
     if (!player) {
       throw new Error('Player not found.');
@@ -45,10 +46,11 @@ export class RandomAgent implements GameAgent {
   }
 
   discard(
-    game: GameState,
+    snapshot: GameSnapshot,
     playerId: string,
     numberOfCardsToDiscard: number
   ): Promise<Card[]> {
+    const game = snapshot.gameState;
     const player = game.players.find(p => p.id === playerId);
     if (!player) throw new Error('Player not found');
 
@@ -65,13 +67,33 @@ export class RandomAgent implements GameAgent {
     );
   }
 
-  async waitForContinue(
-    game: GameState,
+  async deal(snapshot: GameSnapshot, playerId: string): Promise<void> {
+    // Bots automatically deal - no need to wait
+    return Promise.resolve();
+  }
+
+  async cutDeck(
+    snapshot: GameSnapshot,
     playerId: string,
-    continueDescription: string
+    maxIndex: number
+  ): Promise<number> {
+    // Bots randomly cut the deck
+    return Promise.resolve(Math.floor(Math.random() * (maxIndex + 1)));
+  }
+
+  async acknowledgeReadyForCounting(
+    snapshot: GameSnapshot,
+    playerId: string
   ): Promise<void> {
-    // Bots automatically continue - no need to wait
-    // This simulates the continue request flow for testing
+    // Bots automatically acknowledge - no need to wait
+    return Promise.resolve();
+  }
+
+  async acknowledgeReadyForNextRound(
+    snapshot: GameSnapshot,
+    playerId: string
+  ): Promise<void> {
+    // Bots automatically acknowledge - no need to wait
     return Promise.resolve();
   }
 }

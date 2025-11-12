@@ -1,6 +1,6 @@
 import { CribbageGame } from '../core/CribbageGame';
 import { parseCard, scoreHand, scorePegging } from '../core/scoring';
-import { GameState, Card } from '../types';
+import { GameSnapshot, Card } from '../types';
 import { ExhaustiveSimpleAgent } from './ExhaustiveSimpleAgent';
 
 const AGENT_ID = 'heuristic-simple-bot-v1.0';
@@ -20,7 +20,8 @@ const DEBUG_TIMING = process.env.DEBUG_SIMPLE_AGENT_TIMING === 'true';
 export class HeuristicSimpleAgent extends ExhaustiveSimpleAgent {
   playerId: string = AGENT_ID;
 
-  makeMove(game: GameState, playerId: string): Promise<Card | null> {
+  makeMove(snapshot: GameSnapshot, playerId: string): Promise<Card | null> {
+    const game = snapshot.gameState;
     const startTime = DEBUG_TIMING ? Date.now() : 0;
     const player = game.players.find(p => p.id === playerId);
     if (!player) {

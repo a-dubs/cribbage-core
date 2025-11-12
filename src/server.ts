@@ -365,6 +365,13 @@ async function handleStartGame(): Promise<void> {
       currentRoundGameEvents = [];
     }
 
+    // Update WebSocketAgents with the latest snapshot
+    connectedPlayers.forEach(playerInfo => {
+      if (playerInfo.agent instanceof WebSocketAgent) {
+        playerInfo.agent.updateGameSnapshot(newSnapshot);
+      }
+    });
+
     // Send redacted GameSnapshot to each player
     // Each player only sees their own cards, opponents' cards are 'UNKNOWN'
     connectedPlayers.forEach(playerInfo => {
@@ -380,6 +387,7 @@ async function handleStartGame(): Promise<void> {
         const redactedSnapshot: GameSnapshot = {
           gameState: redactedGameState,
           gameEvent: redactedGameEvent,
+          pendingDecisionRequests: newSnapshot.pendingDecisionRequests, // Include pending requests
         };
         io.to(socketId).emit('gameSnapshot', redactedSnapshot);
 
@@ -454,6 +462,12 @@ function sendMostRecentGameData(socket: Socket): void {
 
   // Send redacted GameSnapshot for this specific player
   if (mostRecentGameSnapshot && gameLoop) {
+    // Update WebSocketAgent with the latest snapshot
+    const playerInfo = connectedPlayers.get(playerId);
+    if (playerInfo && playerInfo.agent instanceof WebSocketAgent) {
+      playerInfo.agent.updateGameSnapshot(mostRecentGameSnapshot);
+    }
+
     const redactedGameState = gameLoop.cribbageGame.getRedactedGameState(
       playerId
     );
@@ -464,6 +478,7 @@ function sendMostRecentGameData(socket: Socket): void {
     const redactedSnapshot: GameSnapshot = {
       gameState: redactedGameState,
       gameEvent: redactedGameEvent,
+      pendingDecisionRequests: mostRecentGameSnapshot.pendingDecisionRequests, // Include pending requests
     };
     socket.emit('gameSnapshot', redactedSnapshot);
   } else {
