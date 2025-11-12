@@ -662,7 +662,7 @@ export class GameLoop extends EventEmitter {
 
   /**
    * Handle dealer selection phase (only for first round)
-   * All players select cards from the deck, highest card becomes dealer
+   * All players select cards from the deck, lowest card becomes dealer
    */
   private async doDealerSelection(): Promise<void> {
     const gameState = this.cribbageGame.getGameState();

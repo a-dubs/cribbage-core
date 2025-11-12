@@ -333,8 +333,8 @@ export class CribbageGame extends EventEmitter {
   }
 
   /**
-   * Determine dealer based on selected cards (highest card wins)
-   * Uses runValue for ranking, suit breaks ties (Spades > Hearts > Diamonds > Clubs)
+   * Determine dealer based on selected cards (lowest card wins)
+   * Uses runValue for ranking, suit breaks ties (Clubs < Diamonds < Hearts < Spades)
    */
   private determineDealer(): void {
     const suitOrder: Record<string, number> = {
@@ -354,12 +354,12 @@ export class CribbageGame extends EventEmitter {
       throw new Error('Could not determine dealer - no cards selected.');
     }
 
-    // Find highest card
-    const highestSelection = selections.reduce((highest, [playerId, selection]) => {
+    // Find lowest card
+    const lowestSelection = selections.reduce((lowest, [playerId, selection]) => {
       const parsed = parseCard(selection.card);
       const suitOrderValue = suitOrder[parsed.suit] || 0;
 
-      if (!highest) {
+      if (!lowest) {
         return {
           playerId,
           card: selection.card,
@@ -368,10 +368,10 @@ export class CribbageGame extends EventEmitter {
         };
       }
 
-      // Compare: first by runValue, then by suit
+      // Compare: first by runValue (lower wins), then by suit (lower wins)
       if (
-        parsed.runValue > highest.runValue ||
-        (parsed.runValue === highest.runValue && suitOrderValue > highest.suitOrder)
+        parsed.runValue < lowest.runValue ||
+        (parsed.runValue === lowest.runValue && suitOrderValue < lowest.suitOrder)
       ) {
         return {
           playerId,
@@ -381,21 +381,21 @@ export class CribbageGame extends EventEmitter {
         };
       }
 
-      return highest;
+      return lowest;
     }, null as { playerId: string; card: Card; runValue: number; suitOrder: number } | null);
 
-    if (!highestSelection) {
+    if (!lowestSelection) {
       throw new Error('Could not determine dealer - no cards selected.');
     }
 
     // Set dealer
-    const dealerId = highestSelection.playerId;
-    const dealerCard = highestSelection.card;
+    const dealerId = lowestSelection.playerId;
+    const dealerCard = lowestSelection.card;
     this.gameState.players.forEach(player => {
       player.isDealer = player.id === dealerId;
     });
 
-    console.log(`Dealer determined: Player ${dealerId} selected ${dealerCard} (highest card)`);
+    console.log(`Dealer determined: Player ${dealerId} selected ${dealerCard} (lowest card)`);
 
     // Transition to DEALING phase
     // NOTE: Do NOT clear dealerSelectionCards here - they need to remain visible
