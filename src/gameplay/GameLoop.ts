@@ -194,28 +194,60 @@ export class GameLoop extends EventEmitter {
       }
 
       case AgentDecisionType.READY_FOR_COUNTING: {
+        const ackStartTime = Date.now();
+        console.log(`[TIMING] READY_FOR_COUNTING: Calling agent.acknowledgeReadyForCounting for player ${request.playerId} at ${ackStartTime}ms`);
+        
         if (agent.acknowledgeReadyForCounting) {
+          const beforeAgentCall = Date.now();
           await agent.acknowledgeReadyForCounting(
             redactedSnapshot,
             request.playerId
           );
+          const afterAgentCall = Date.now();
+          console.log(`[TIMING] READY_FOR_COUNTING: agent.acknowledgeReadyForCounting returned for player ${request.playerId} at ${afterAgentCall}ms (took ${afterAgentCall - beforeAgentCall}ms)`);
+        } else {
+          console.log(`[TIMING] READY_FOR_COUNTING: agent.acknowledgeReadyForCounting not available for player ${request.playerId}`);
         }
+        
+        const removeStartTime = Date.now();
         this.cribbageGame.removeDecisionRequest(request.requestId);
+        const removeEndTime = Date.now();
+        console.log(`[TIMING] READY_FOR_COUNTING: Removed decision request for player ${request.playerId} at ${removeEndTime}ms (took ${removeEndTime - removeStartTime}ms)`);
+        
         // Emit GameSnapshot immediately so app sees the acknowledgment
+        const emitStartTime = Date.now();
         this.emitAcknowledgmentSnapshot();
+        const emitEndTime = Date.now();
+        console.log(`[TIMING] READY_FOR_COUNTING: Emitted acknowledgment snapshot for player ${request.playerId} at ${emitEndTime}ms (took ${emitEndTime - emitStartTime}ms, total from start: ${emitEndTime - ackStartTime}ms)`);
         return;
       }
 
       case AgentDecisionType.READY_FOR_NEXT_ROUND: {
+        const ackStartTime = Date.now();
+        console.log(`[TIMING] READY_FOR_NEXT_ROUND: Calling agent.acknowledgeReadyForNextRound for player ${request.playerId} at ${ackStartTime}ms`);
+        
         if (agent.acknowledgeReadyForNextRound) {
+          const beforeAgentCall = Date.now();
           await agent.acknowledgeReadyForNextRound(
             redactedSnapshot,
             request.playerId
           );
+          const afterAgentCall = Date.now();
+          console.log(`[TIMING] READY_FOR_NEXT_ROUND: agent.acknowledgeReadyForNextRound returned for player ${request.playerId} at ${afterAgentCall}ms (took ${afterAgentCall - beforeAgentCall}ms)`);
+        } else {
+          console.log(`[TIMING] READY_FOR_NEXT_ROUND: agent.acknowledgeReadyForNextRound not available for player ${request.playerId}`);
         }
+        
+        const removeStartTime = Date.now();
         this.cribbageGame.removeDecisionRequest(request.requestId);
+        const removeEndTime = Date.now();
+        console.log(`[TIMING] READY_FOR_NEXT_ROUND: Removed decision request for player ${request.playerId} at ${removeEndTime}ms (took ${removeEndTime - removeStartTime}ms)`);
+        
         // Emit GameSnapshot immediately so app sees the acknowledgment
+        const emitStartTime = Date.now();
         this.emitAcknowledgmentSnapshot();
+        const emitEndTime = Date.now();
+        console.log(`[TIMING] READY_FOR_NEXT_ROUND: Emitted acknowledgment snapshot for player ${request.playerId} at ${emitEndTime}ms (took ${emitEndTime - emitStartTime}ms, total from start: ${emitEndTime - ackStartTime}ms)`);
         return;
       }
     }
@@ -390,26 +422,39 @@ export class GameLoop extends EventEmitter {
       | AgentDecisionType.READY_FOR_NEXT_ROUND,
     message: string
   ): Promise<void> {
+    const startTime = Date.now();
+    console.log(`[TIMING] waitForAllPlayersReady START at ${startTime}ms for ${decisionType}`);
+    
     // Request acknowledgments from ALL players in parallel
     const acknowledgeRequests: DecisionRequest[] = [];
     const gameState = this.cribbageGame.getGameState();
 
     for (const player of gameState.players) {
+      const requestStartTime = Date.now();
       const request = this.requestDecision(player.id, decisionType, {
         message,
       });
+      console.log(`[TIMING] Created request for player ${player.id} at ${requestStartTime}ms (${requestStartTime - startTime}ms after start)`);
       acknowledgeRequests.push(request);
     }
 
     // Wait for all acknowledgments in parallel
     // Each player can acknowledge independently
-    const acknowledgePromises = acknowledgeRequests.map(request =>
-      this.waitForDecision(request)
-    );
+    const acknowledgePromises = acknowledgeRequests.map(request => {
+      const promiseStartTime = Date.now();
+      console.log(`[TIMING] Starting waitForDecision promise for player ${request.playerId} at ${promiseStartTime}ms (${promiseStartTime - startTime}ms after start)`);
+      return this.waitForDecision(request).then(result => {
+        const promiseEndTime = Date.now();
+        console.log(`[TIMING] waitForDecision promise resolved for player ${request.playerId} at ${promiseEndTime}ms (took ${promiseEndTime - promiseStartTime}ms)`);
+        return result;
+      });
+    });
 
     // Wait for all to complete (blocking)
     await Promise.all(acknowledgePromises);
 
+    const endTime = Date.now();
+    console.log(`[TIMING] waitForAllPlayersReady COMPLETE at ${endTime}ms (total: ${endTime - startTime}ms)`);
     // All players have acknowledged - proceed
   }
 

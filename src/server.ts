@@ -357,6 +357,15 @@ async function handleStartGame(): Promise<void> {
 
   // Emit game state changes with redaction per player
   gameLoop.on('gameSnapshot', (newSnapshot: GameSnapshot) => {
+    const snapshotReceivedTime = Date.now();
+    const actionType = newSnapshot.gameEvent.actionType;
+    const pendingRequests = newSnapshot.pendingDecisionRequests || [];
+    const readyForCountingRequests = pendingRequests.filter(r => r.decisionType === 'READY_FOR_COUNTING' || r.decisionType === 'READY_FOR_NEXT_ROUND');
+    
+    if (readyForCountingRequests.length > 0) {
+      console.log(`[TIMING] Server received gameSnapshot event at ${snapshotReceivedTime}ms with ${readyForCountingRequests.length} acknowledgment requests`);
+    }
+    
     // Store the full snapshot for internal use (agents, database, etc.)
     mostRecentGameSnapshot = newSnapshot;
     sendGameEventToDB(newSnapshot.gameEvent);
@@ -377,6 +386,7 @@ async function handleStartGame(): Promise<void> {
     connectedPlayers.forEach(playerInfo => {
       const socketId = playerIdToSocketId.get(playerInfo.id);
       if (socketId) {
+        const redactStartTime = Date.now();
         const redactedGameState = gameLoop!.cribbageGame.getRedactedGameState(
           playerInfo.id
         );
@@ -384,12 +394,25 @@ async function handleStartGame(): Promise<void> {
           newSnapshot.gameEvent,
           playerInfo.id
         );
+        const redactEndTime = Date.now();
+        
+        if (readyForCountingRequests.length > 0) {
+          console.log(`[TIMING] Server redacted snapshot for player ${playerInfo.id} at ${redactEndTime}ms (redaction took ${redactEndTime - redactStartTime}ms)`);
+        }
+        
         const redactedSnapshot: GameSnapshot = {
           gameState: redactedGameState,
           gameEvent: redactedGameEvent,
           pendingDecisionRequests: newSnapshot.pendingDecisionRequests, // Include pending requests
         };
+        
+        const emitStartTime = Date.now();
         io.to(socketId).emit('gameSnapshot', redactedSnapshot);
+        const emitEndTime = Date.now();
+        
+        if (readyForCountingRequests.length > 0) {
+          console.log(`[TIMING] Server emitted gameSnapshot to player ${playerInfo.id} at ${emitEndTime}ms (emit took ${emitEndTime - emitStartTime}ms, total from receive: ${emitEndTime - snapshotReceivedTime}ms)`);
+        }
 
         // Also send redacted current round game events to this player
         const redactedRoundEvents = currentRoundGameEvents.map(event =>
