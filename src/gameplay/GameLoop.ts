@@ -330,22 +330,20 @@ export class GameLoop extends EventEmitter {
       discardRequests.push(request);
     }
 
-    // Wait for all discards in parallel
+    // Wait for all discards in parallel, but apply each discard immediately when it resolves
     console.log(`[doCribPhase] Requesting discards from ${discardRequests.length} players in parallel`);
-    const discardPromises = discardRequests.map(request => {
+    const discardPromises = discardRequests.map(async (request, index) => {
       console.log(`[doCribPhase] Starting waitForDecision for player ${request.playerId}`);
-      return this.waitForDecision(request);
+      const discards = await this.waitForDecision(request);
+      // Apply discard immediately when it resolves (don't wait for all)
+      const player = gameState.players[index];
+      console.log(`[doCribPhase] Applying discard immediately for player ${player.id}, got ${discards.length} cards`);
+      this.cribbageGame.discardToCrib(player.id, discards);
+      return discards;
     });
     console.log(`[doCribPhase] All promises created, waiting for Promise.all()...`);
     const allDiscards = await Promise.all(discardPromises);
     console.log(`[doCribPhase] All discards received:`, allDiscards.map((d, i) => ({ player: discardRequests[i].playerId, count: d.length })));
-
-    // Apply all discards
-    for (let i = 0; i < gameState.players.length; i++) {
-      const player = gameState.players[i];
-      const discards = allDiscards[i];
-      this.cribbageGame.discardToCrib(player.id, discards);
-    }
 
     this.cribbageGame.completeCribPhase();
   }
