@@ -65,13 +65,33 @@ export class RandomAgent implements GameAgent {
     );
   }
 
-  async waitForContinue(
+  async deal(game: GameState, playerId: string): Promise<void> {
+    // Bots automatically deal - no need to wait
+    return Promise.resolve();
+  }
+
+  async cutDeck(
     game: GameState,
     playerId: string,
-    continueDescription: string
+    maxIndex: number
+  ): Promise<number> {
+    // Bots randomly cut the deck
+    return Promise.resolve(Math.floor(Math.random() * (maxIndex + 1)));
+  }
+
+  async acknowledgeReadyForCounting(
+    game: GameState,
+    playerId: string
   ): Promise<void> {
-    // Bots automatically continue - no need to wait
-    // This simulates the continue request flow for testing
+    // Bots automatically acknowledge - no need to wait
+    return Promise.resolve();
+  }
+
+  async acknowledgeReadyForNextRound(
+    game: GameState,
+    playerId: string
+  ): Promise<void> {
+    // Bots automatically acknowledge - no need to wait
     return Promise.resolve();
   }
 }

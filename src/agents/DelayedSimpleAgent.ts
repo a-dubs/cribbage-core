@@ -37,12 +37,33 @@ export abstract class DelayedSimpleAgent extends HeuristicSimpleAgent {
     return this.delay(result);
   }
 
-  async waitForContinue(
+  async deal(game: GameState, playerId: string): Promise<void> {
+    await super.deal(game, playerId);
+    await this.delay(undefined);
+  }
+
+  async cutDeck(
     game: GameState,
     playerId: string,
-    continueDescription: string
+    maxIndex: number
+  ): Promise<number> {
+    const result = await super.cutDeck(game, playerId, maxIndex);
+    return this.delay(result);
+  }
+
+  async acknowledgeReadyForCounting(
+    game: GameState,
+    playerId: string
   ): Promise<void> {
-    await super.waitForContinue(game, playerId, continueDescription);
+    await super.acknowledgeReadyForCounting(game, playerId);
+    await this.delay(undefined);
+  }
+
+  async acknowledgeReadyForNextRound(
+    game: GameState,
+    playerId: string
+  ): Promise<void> {
+    await super.acknowledgeReadyForNextRound(game, playerId);
     await this.delay(undefined);
   }
 }
