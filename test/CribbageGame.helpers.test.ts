@@ -1,5 +1,5 @@
 import { CribbageGame } from '../src/core/CribbageGame';
-import { AgentDecisionType } from '../src/types';
+import { AgentDecisionType, DecisionRequest } from '../src/types';
 
 describe('CribbageGame Helper Methods', () => {
   let game: CribbageGame;
@@ -11,103 +11,247 @@ describe('CribbageGame Helper Methods', () => {
     ]);
   });
 
-  describe('addWaitingForPlayer', () => {
-    it('should add a player to the waiting list', () => {
-      const gameState = game.getGameState();
-      expect(gameState.waitingForPlayers.length).toBe(0);
+  describe('addDecisionRequest', () => {
+    it('should add a decision request', () => {
+      const pendingRequests = game.getPendingDecisionRequests();
+      expect(pendingRequests.length).toBe(0);
 
-      game.addWaitingForPlayer('player-1', AgentDecisionType.DISCARD);
+      const request: DecisionRequest = {
+        requestId: 'req-1',
+        playerId: 'player-1',
+        decisionType: AgentDecisionType.DISCARD,
+        requestData: {
+          hand: [],
+          numberOfCardsToDiscard: 2,
+        },
+        required: true,
+        timestamp: new Date(),
+      };
 
-      const updatedState = game.getGameState();
-      expect(updatedState.waitingForPlayers.length).toBe(1);
-      expect(updatedState.waitingForPlayers[0].playerId).toBe('player-1');
-      expect(updatedState.waitingForPlayers[0].decisionType).toBe(
-        AgentDecisionType.DISCARD
-      );
-      expect(updatedState.waitingForPlayers[0].requestTimestamp).toBeInstanceOf(
-        Date
-      );
+      game.addDecisionRequest(request);
+
+      const updatedRequests = game.getPendingDecisionRequests();
+      expect(updatedRequests.length).toBe(1);
+      expect(updatedRequests[0].playerId).toBe('player-1');
+      expect(updatedRequests[0].decisionType).toBe(AgentDecisionType.DISCARD);
+      expect(updatedRequests[0].requestId).toBe('req-1');
     });
 
-    it('should not add duplicate players to waiting list', () => {
-      game.addWaitingForPlayer('player-1', AgentDecisionType.DISCARD);
-      game.addWaitingForPlayer('player-1', AgentDecisionType.PLAY_CARD);
+    it('should not add duplicate requests (same requestId)', () => {
+      const request: DecisionRequest = {
+        requestId: 'req-1',
+        playerId: 'player-1',
+        decisionType: AgentDecisionType.DISCARD,
+        requestData: {
+          hand: [],
+          numberOfCardsToDiscard: 2,
+        },
+        required: true,
+        timestamp: new Date(),
+      };
 
-      const gameState = game.getGameState();
-      expect(gameState.waitingForPlayers.length).toBe(1);
-      expect(gameState.waitingForPlayers[0].decisionType).toBe(
-        AgentDecisionType.DISCARD
-      );
+      game.addDecisionRequest(request);
+      game.addDecisionRequest(request); // Duplicate
+
+      const pendingRequests = game.getPendingDecisionRequests();
+      expect(pendingRequests.length).toBe(1);
     });
 
     it('should support multiple different players waiting simultaneously', () => {
-      game.addWaitingForPlayer('player-1', AgentDecisionType.DISCARD);
-      game.addWaitingForPlayer('player-2', AgentDecisionType.DISCARD);
+      const request1: DecisionRequest = {
+        requestId: 'req-1',
+        playerId: 'player-1',
+        decisionType: AgentDecisionType.DISCARD,
+        requestData: {
+          hand: [],
+          numberOfCardsToDiscard: 2,
+        },
+        required: true,
+        timestamp: new Date(),
+      };
 
-      const gameState = game.getGameState();
-      expect(gameState.waitingForPlayers.length).toBe(2);
-      expect(gameState.waitingForPlayers.map(w => w.playerId)).toEqual([
+      const request2: DecisionRequest = {
+        requestId: 'req-2',
+        playerId: 'player-2',
+        decisionType: AgentDecisionType.DISCARD,
+        requestData: {
+          hand: [],
+          numberOfCardsToDiscard: 2,
+        },
+        required: true,
+        timestamp: new Date(),
+      };
+
+      game.addDecisionRequest(request1);
+      game.addDecisionRequest(request2);
+
+      const pendingRequests = game.getPendingDecisionRequests();
+      expect(pendingRequests.length).toBe(2);
+      expect(pendingRequests.map(r => r.playerId)).toEqual([
         'player-1',
         'player-2',
       ]);
     });
   });
 
-  describe('removeWaitingForPlayer', () => {
-    it('should remove a player from the waiting list', () => {
-      game.addWaitingForPlayer('player-1', AgentDecisionType.DISCARD);
-      game.addWaitingForPlayer('player-2', AgentDecisionType.DISCARD);
+  describe('removeDecisionRequest', () => {
+    it('should remove a decision request', () => {
+      const request: DecisionRequest = {
+        requestId: 'req-1',
+        playerId: 'player-1',
+        decisionType: AgentDecisionType.DISCARD,
+        requestData: {
+          hand: [],
+          numberOfCardsToDiscard: 2,
+        },
+        required: true,
+        timestamp: new Date(),
+      };
 
-      expect(game.getGameState().waitingForPlayers.length).toBe(2);
+      game.addDecisionRequest(request);
 
-      game.removeWaitingForPlayer('player-1');
+      const request2: DecisionRequest = {
+        requestId: 'req-2',
+        playerId: 'player-2',
+        decisionType: AgentDecisionType.DISCARD,
+        requestData: {
+          hand: [],
+          numberOfCardsToDiscard: 2,
+        },
+        required: true,
+        timestamp: new Date(),
+      };
 
-      const gameState = game.getGameState();
-      expect(gameState.waitingForPlayers.length).toBe(1);
-      expect(gameState.waitingForPlayers[0].playerId).toBe('player-2');
+      game.addDecisionRequest(request2);
+
+      expect(game.getPendingDecisionRequests().length).toBe(2);
+
+      game.removeDecisionRequest('req-1');
+
+      const pendingRequests = game.getPendingDecisionRequests();
+      expect(pendingRequests.length).toBe(1);
+      expect(pendingRequests[0].playerId).toBe('player-2');
     });
 
-    it('should handle removing non-existent player gracefully', () => {
-      game.addWaitingForPlayer('player-1', AgentDecisionType.DISCARD);
+    it('should handle removing non-existent request gracefully', () => {
+      const request: DecisionRequest = {
+        requestId: 'req-1',
+        playerId: 'player-1',
+        decisionType: AgentDecisionType.DISCARD,
+        requestData: {
+          hand: [],
+          numberOfCardsToDiscard: 2,
+        },
+        required: true,
+        timestamp: new Date(),
+      };
+
+      game.addDecisionRequest(request);
 
       expect(() => {
-        game.removeWaitingForPlayer('player-999');
+        game.removeDecisionRequest('req-999');
       }).not.toThrow();
 
-      const gameState = game.getGameState();
-      expect(gameState.waitingForPlayers.length).toBe(1);
+      const pendingRequests = game.getPendingDecisionRequests();
+      expect(pendingRequests.length).toBe(1);
     });
 
-    it('should handle removing from empty waiting list', () => {
+    it('should handle removing from empty list', () => {
       expect(() => {
-        game.removeWaitingForPlayer('player-1');
+        game.removeDecisionRequest('req-1');
       }).not.toThrow();
 
-      const gameState = game.getGameState();
-      expect(gameState.waitingForPlayers.length).toBe(0);
+      const pendingRequests = game.getPendingDecisionRequests();
+      expect(pendingRequests.length).toBe(0);
     });
   });
 
-  describe('clearAllWaiting', () => {
-    it('should clear all waiting players', () => {
-      game.addWaitingForPlayer('player-1', AgentDecisionType.DISCARD);
-      game.addWaitingForPlayer('player-2', AgentDecisionType.PLAY_CARD);
+  describe('clearAllDecisionRequests', () => {
+    it('should clear all decision requests', () => {
+      const request1: DecisionRequest = {
+        requestId: 'req-1',
+        playerId: 'player-1',
+        decisionType: AgentDecisionType.DISCARD,
+        requestData: {
+          hand: [],
+          numberOfCardsToDiscard: 2,
+        },
+        required: true,
+        timestamp: new Date(),
+      };
 
-      expect(game.getGameState().waitingForPlayers.length).toBe(2);
+      const request2: DecisionRequest = {
+        requestId: 'req-2',
+        playerId: 'player-2',
+        decisionType: AgentDecisionType.PLAY_CARD,
+        requestData: {
+          peggingHand: [],
+          peggingStack: [],
+          playedCards: [],
+          peggingTotal: 0,
+        },
+        required: true,
+        timestamp: new Date(),
+      };
 
-      game.clearAllWaiting();
+      game.addDecisionRequest(request1);
+      game.addDecisionRequest(request2);
 
-      const gameState = game.getGameState();
-      expect(gameState.waitingForPlayers.length).toBe(0);
+      expect(game.getPendingDecisionRequests().length).toBe(2);
+
+      game.clearAllDecisionRequests();
+
+      const pendingRequests = game.getPendingDecisionRequests();
+      expect(pendingRequests.length).toBe(0);
     });
 
-    it('should handle clearing empty waiting list', () => {
+    it('should handle clearing empty list', () => {
       expect(() => {
-        game.clearAllWaiting();
+        game.clearAllDecisionRequests();
       }).not.toThrow();
 
-      const gameState = game.getGameState();
-      expect(gameState.waitingForPlayers.length).toBe(0);
+      const pendingRequests = game.getPendingDecisionRequests();
+      expect(pendingRequests.length).toBe(0);
+    });
+  });
+
+  describe('allPlayersAcknowledged', () => {
+    it('should return true when no pending requests of given type', () => {
+      expect(game.allPlayersAcknowledged(AgentDecisionType.READY_FOR_COUNTING)).toBe(true);
+    });
+
+    it('should return false when requests of given type exist', () => {
+      const request: DecisionRequest = {
+        requestId: 'req-1',
+        playerId: 'player-1',
+        decisionType: AgentDecisionType.READY_FOR_COUNTING,
+        requestData: {
+          message: 'Ready for counting',
+        },
+        required: true,
+        timestamp: new Date(),
+      };
+
+      game.addDecisionRequest(request);
+      expect(game.allPlayersAcknowledged(AgentDecisionType.READY_FOR_COUNTING)).toBe(false);
+    });
+
+    it('should only check requests of the specified type', () => {
+      const request1: DecisionRequest = {
+        requestId: 'req-1',
+        playerId: 'player-1',
+        decisionType: AgentDecisionType.DISCARD,
+        requestData: {
+          hand: [],
+          numberOfCardsToDiscard: 2,
+        },
+        required: true,
+        timestamp: new Date(),
+      };
+
+      game.addDecisionRequest(request1);
+      expect(game.allPlayersAcknowledged(AgentDecisionType.READY_FOR_COUNTING)).toBe(true);
+      expect(game.allPlayersAcknowledged(AgentDecisionType.DISCARD)).toBe(false);
     });
   });
 

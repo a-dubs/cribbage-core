@@ -3,61 +3,74 @@ import { GameLoop } from '../src/gameplay/GameLoop';
 import { RandomAgent } from '../src/agents/RandomAgent';
 import { ExhaustiveSimpleAgent } from '../src/agents/ExhaustiveSimpleAgent';
 import {
-  ActionType,
   AgentDecisionType,
+  DecisionRequest,
 } from '../src/types';
 
 describe('Decision Requests Integration', () => {
-  describe('recordWaitingEvent', () => {
-    it('should add player to waiting list without recording event', () => {
+  describe('addDecisionRequest', () => {
+    it('should add decision request to pending requests', () => {
       const game = new CribbageGame([
         { id: 'player-1', name: 'Player 1' },
         { id: 'player-2', name: 'Player 2' },
       ]);
 
-      const initialHistoryLength = game.getGameSnapshotHistory().length;
-      const gameState = game.getGameState();
-      expect(gameState.waitingForPlayers.length).toBe(0);
+      const initialPendingRequests = game.getPendingDecisionRequests();
+      expect(initialPendingRequests.length).toBe(0);
 
-      // recordWaitingEvent is deprecated but kept for backwards compatibility
-      // It should add to waiting list but NOT record an event
-      game.recordWaitingEvent(
-        ActionType.DISCARD, // actionType is now unused
-        'player-1',
+      const request: DecisionRequest = {
+        requestId: 'req-1',
+        playerId: 'player-1',
+        decisionType: AgentDecisionType.DISCARD,
+        requestData: {
+          hand: [],
+          numberOfCardsToDiscard: 2,
+        },
+        required: true,
+        timestamp: new Date(),
+      };
+
+      game.addDecisionRequest(request);
+
+      const updatedPendingRequests = game.getPendingDecisionRequests();
+      expect(updatedPendingRequests.length).toBe(1);
+      expect(updatedPendingRequests[0].playerId).toBe('player-1');
+      expect(updatedPendingRequests[0].decisionType).toBe(
         AgentDecisionType.DISCARD
       );
-
-      const updatedState = game.getGameState();
-      expect(updatedState.waitingForPlayers.length).toBe(1);
-      expect(updatedState.waitingForPlayers[0].playerId).toBe('player-1');
-      expect(updatedState.waitingForPlayers[0].decisionType).toBe(
-        AgentDecisionType.DISCARD
-      );
-
-      // No event should be recorded - waiting state is in GameState.waitingForPlayers
-      const history = game.getGameSnapshotHistory();
-      expect(history.length).toBe(initialHistoryLength);
     });
   });
 
-  describe('CribbageGame methods clear waiting state', () => {
-    it('should clear waiting state before deal()', () => {
+  describe('CribbageGame methods clear decision requests', () => {
+    it('should clear decision requests when deal() is called', () => {
       const game = new CribbageGame([
         { id: 'player-1', name: 'Player 1' },
         { id: 'player-2', name: 'Player 2' },
       ]);
 
       const dealer = game.getDealerId();
-      game.addWaitingForPlayer(dealer, AgentDecisionType.DEAL);
+      const request: DecisionRequest = {
+        requestId: 'req-1',
+        playerId: dealer,
+        decisionType: AgentDecisionType.DEAL,
+        requestData: {
+          canShuffle: true,
+        },
+        required: true,
+        timestamp: new Date(),
+      };
 
-      expect(game.getGameState().waitingForPlayers.length).toBe(1);
+      game.addDecisionRequest(request);
+      expect(game.getPendingDecisionRequests().length).toBe(1);
 
       game.deal();
 
-      expect(game.getGameState().waitingForPlayers.length).toBe(0);
+      // deal() should clear decision requests (via startRound or internally)
+      // Note: startRound() clears all requests
+      expect(game.getPendingDecisionRequests().length).toBe(0);
     });
 
-    it('should clear waiting state before discardToCrib()', () => {
+    it('should remove decision request when discardToCrib() is called', () => {
       const game = new CribbageGame([
         { id: 'player-1', name: 'Player 1' },
         { id: 'player-2', name: 'Player 2' },
@@ -66,16 +79,29 @@ describe('Decision Requests Integration', () => {
       game.deal();
       const player = game.getGameState().players[0];
 
-      game.addWaitingForPlayer(player.id, AgentDecisionType.DISCARD);
-      expect(game.getGameState().waitingForPlayers.length).toBe(1);
+      const request: DecisionRequest = {
+        requestId: 'req-1',
+        playerId: player.id,
+        decisionType: AgentDecisionType.DISCARD,
+        requestData: {
+          hand: player.hand,
+          numberOfCardsToDiscard: 2,
+        },
+        required: true,
+        timestamp: new Date(),
+      };
+
+      game.addDecisionRequest(request);
+      expect(game.getPendingDecisionRequests().length).toBe(1);
 
       const cardsToDiscard = player.hand.slice(0, 2);
       game.discardToCrib(player.id, cardsToDiscard);
 
-      expect(game.getGameState().waitingForPlayers.length).toBe(0);
+      // discardToCrib() should remove the decision request
+      expect(game.getPendingDecisionRequests().length).toBe(0);
     });
 
-    it('should clear waiting state before playCard()', () => {
+    it('should remove decision request when playCard() is called', () => {
       const game = new CribbageGame([
         { id: 'player-1', name: 'Player 1' },
         { id: 'player-2', name: 'Player 2' },
@@ -94,16 +120,32 @@ describe('Decision Requests Integration', () => {
       const player = game.getGameState().players.find(
         p => p.id !== game.getDealerId()
       )!;
-      game.addWaitingForPlayer(player.id, AgentDecisionType.PLAY_CARD);
-      expect(game.getGameState().waitingForPlayers.length).toBe(1);
+
+      const request: DecisionRequest = {
+        requestId: 'req-1',
+        playerId: player.id,
+        decisionType: AgentDecisionType.PLAY_CARD,
+        requestData: {
+          peggingHand: player.peggingHand,
+          peggingStack: [],
+          playedCards: [],
+          peggingTotal: 0,
+        },
+        required: true,
+        timestamp: new Date(),
+      };
+
+      game.addDecisionRequest(request);
+      expect(game.getPendingDecisionRequests().length).toBe(1);
 
       const card = player.peggingHand[0];
       game.playCard(player.id, card);
 
-      expect(game.getGameState().waitingForPlayers.length).toBe(0);
+      // playCard() should remove the decision request
+      expect(game.getPendingDecisionRequests().length).toBe(0);
     });
 
-    it('should clear waiting state before cutDeck()', () => {
+    it('should remove decision request when cutDeck() is called', () => {
       const game = new CribbageGame([
         { id: 'player-1', name: 'Player 1' },
         { id: 'player-2', name: 'Player 2' },
@@ -119,17 +161,30 @@ describe('Decision Requests Integration', () => {
       game.completeCribPhase();
 
       const player = game.getGameState().players[1];
-      game.addWaitingForPlayer(player.id, AgentDecisionType.CONTINUE);
-      expect(game.getGameState().waitingForPlayers.length).toBe(1);
+      const request: DecisionRequest = {
+        requestId: 'req-1',
+        playerId: player.id,
+        decisionType: AgentDecisionType.CUT_DECK,
+        requestData: {
+          maxIndex: game.getGameState().deck.length - 1,
+          deckSize: game.getGameState().deck.length,
+        },
+        required: true,
+        timestamp: new Date(),
+      };
+
+      game.addDecisionRequest(request);
+      expect(game.getPendingDecisionRequests().length).toBe(1);
 
       game.cutDeck(player.id, 0);
 
-      expect(game.getGameState().waitingForPlayers.length).toBe(0);
+      // cutDeck() should remove the decision request
+      expect(game.getPendingDecisionRequests().length).toBe(0);
     });
   });
 
   describe('GameLoop requestDecision integration', () => {
-    it('should record waiting events during game play', async () => {
+    it('should create decision requests during game play', async () => {
       const gameLoop = new GameLoop([
         { id: 'bot-1', name: 'Random Bot' },
         { id: 'bot-2', name: 'Simple Bot' },
@@ -148,19 +203,28 @@ describe('Decision Requests Integration', () => {
 
       // Request a decision (simulating what happens in doRound)
       const requestDecision = (gameLoop as any).requestDecision.bind(gameLoop);
-      requestDecision('bot-1', AgentDecisionType.DEAL);
+      const request = requestDecision('bot-1', AgentDecisionType.DEAL, {
+        canShuffle: true,
+      });
 
-      const gameState = gameLoop.cribbageGame.getGameState();
-      expect(gameState.waitingForPlayers.length).toBe(1);
-      expect(gameState.waitingForPlayers[0].playerId).toBe('bot-1');
-      expect(gameState.waitingForPlayers[0].decisionType).toBe(
-        AgentDecisionType.DEAL
-      );
+      const pendingRequests = gameLoop.cribbageGame.getPendingDecisionRequests();
+      expect(pendingRequests.length).toBe(1);
+      expect(pendingRequests[0].playerId).toBe('bot-1');
+      expect(pendingRequests[0].decisionType).toBe(AgentDecisionType.DEAL);
+      expect(pendingRequests[0].requestId).toBe(request.requestId);
 
-      // No events should be recorded - waiting state is in GameState.waitingForPlayers
+      // Decision requests are included in GameSnapshot, not as separate events
       const history = gameLoop.cribbageGame.getGameSnapshotHistory();
-      // requestDecision no longer records events, so history should be unchanged
-      // (assuming this is called at the start of a game)
+      // The request should be in the latest snapshot's pendingDecisionRequests
+      if (history.length > 0) {
+        const latestSnapshot = history[history.length - 1];
+        expect(latestSnapshot.pendingDecisionRequests).toContainEqual(
+          expect.objectContaining({
+            playerId: 'bot-1',
+            decisionType: AgentDecisionType.DEAL,
+          })
+        );
+      }
     });
   });
 });
