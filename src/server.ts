@@ -8,6 +8,7 @@ import {
   PlayerIdAndName,
   GameInfo,
   GameSnapshot,
+  Phase,
 } from './types';
 import { WebSocketAgent } from './agents/WebSocketAgent';
 import { ExhaustiveSimpleAgent } from './agents/ExhaustiveSimpleAgent';
@@ -310,9 +311,18 @@ function emitConnectedPlayers(): void {
 }
 
 async function handleStartGame(): Promise<void> {
+  // If gameLoop exists, check if game is over (Phase.END)
+  // If game is over, clear it to allow starting a new game
   if (gameLoop) {
-    console.error('Game loop already running. Cannot start a new game.');
-    throw new Error('Game loop already running. Cannot start a new game.');
+    const gameState = gameLoop.cribbageGame.getGameState();
+    if (gameState.currentPhase === Phase.END) {
+      console.log('Game is over. Clearing game loop to start a new game.');
+      gameLoop.removeAllListeners();
+      gameLoop = null;
+    } else {
+      console.error('Game loop already running. Cannot start a new game.');
+      throw new Error('Game loop already running. Cannot start a new game.');
+    }
   }
   console.log('Starting game...');
   // If only one player is connected, add a bot
@@ -530,6 +540,11 @@ async function startGame(): Promise<void> {
   console.log('Starting game loop...');
   const winner = await gameLoop.playGame();
   endGameInDB(gameLoop.cribbageGame.getGameState().id, winner);
+
+  // Clear gameLoop after game ends so a new game can be started
+  console.log('Game ended. Clearing game loop to allow new game.');
+  gameLoop.removeAllListeners();
+  gameLoop = null;
 
   // Reset play again votes and automatically add bots
   playAgainVotes.clear();
