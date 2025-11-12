@@ -205,6 +205,7 @@ export interface GameState {
   peggingTotal: number; // Total value of the cards played in the current pegging stack
   snapshotId: number;
   roundNumber: number;
+  dealerSelectionCards?: Record<string, Card | 'UNKNOWN'>; // Cards selected by each player for dealer selection (hidden until all selected)
   // waitingForPlayers removed - decision requests now in GameSnapshot.pendingDecisionRequests
 }
 

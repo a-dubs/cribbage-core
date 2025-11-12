@@ -741,14 +741,49 @@ export class CribbageGame extends EventEmitter {
     // Redact deck contents (keep count visible via length)
     const redactedDeck = this.gameState.deck.map(() => 'UNKNOWN' as Card);
 
+    // Add dealer selection cards (hidden until all players have selected)
+    const dealerSelectionCards: Record<string, Card | 'UNKNOWN'> = {};
+    if (this.gameState.currentPhase === Phase.DEALER_SELECTION || 
+        (this.gameState.currentPhase === Phase.DEALING && this.dealerSelectionCards.size > 0)) {
+      for (const player of this.gameState.players) {
+        dealerSelectionCards[player.id] = this.getDealerSelectionCard(player.id, forPlayerId);
+      }
+    }
+
     // Return redacted game state
     return {
       ...this.gameState,
       players: redactedPlayers,
       crib: redactedCrib,
       deck: redactedDeck,
+      dealerSelectionCards: Object.keys(dealerSelectionCards).length > 0 ? dealerSelectionCards : undefined,
       // All other fields remain visible (scores, pegging stack, turn card, etc.)
     };
+  }
+
+  /**
+   * Get dealer selection card for a player
+   * Returns 'UNKNOWN' if not all players have selected yet
+   * @param playerId - ID of the player whose selection to get
+   * @param forPlayerId - ID of the player requesting (for redaction)
+   * @returns The selected card, or 'UNKNOWN' if not all have selected
+   */
+  public getDealerSelectionCard(playerId: string, forPlayerId: string): Card | 'UNKNOWN' {
+    // Check if all players have selected
+    const allPlayersSelected = this.dealerSelectionCards.size === this.gameState.players.length;
+    
+    if (!allPlayersSelected) {
+      // Not all players have selected - hide all cards
+      return 'UNKNOWN';
+    }
+    
+    // All players have selected - reveal the card
+    const selection = this.dealerSelectionCards.get(playerId);
+    if (!selection) {
+      return 'UNKNOWN';
+    }
+    
+    return selection.card;
   }
 
   /**
@@ -796,6 +831,12 @@ export class CribbageGame extends EventEmitter {
       case ActionType.PLAY_CARD:
         // Played cards are public (everyone sees what was played)
         shouldRedact = false;
+        break;
+
+      case ActionType.SELECT_DEALER_CARD:
+        // Dealer selection cards are hidden until all players have selected
+        const allPlayersSelected = this.dealerSelectionCards.size === this.gameState.players.length;
+        shouldRedact = !allPlayersSelected;
         break;
 
       case ActionType.SCORE_HAND:
