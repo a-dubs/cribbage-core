@@ -186,43 +186,28 @@ export class WebSocketAgent implements GameAgent {
     playerId: string,
     numberOfCardsToDiscard: number
   ): Promise<Card[]> {
-    const player = game.players.find(p => p.id === playerId);
-    if (!player) throw new Error('Player not found.');
-    if (playerId !== this.playerId) throw new Error('Invalid playerId.');
+    const request = this.findPendingRequest(AgentDecisionType.DISCARD);
+    if (!request) throw new Error('No pending DISCARD request');
 
-    let requestData: EmittedDiscardRequest;
-    return this.makeWebsocketRequest<Card[]>(
-      'discardResponse',
-      currentSocket => {
-        requestData = {
-          requestType: AgentDecisionType.DISCARD,
-          playerId: this.playerId,
-          hand: player.hand,
-          numberOfCardsToDiscard,
-        };
-        this.mostRecentRequest = requestData;
-        currentSocket.emit('discardRequest', requestData);
-      },
-      (response: EmittedDiscardResponse) => {
-        if (response.playerId !== this.playerId) {
-          return new Error(
-            `Received discard from wrong player: ${response.playerId}`
-          );
-        }
-        if (isValidDiscard(game, player, response.selectedCards)) {
-          this.mostRecentRequest = null;
-          return response.selectedCards;
-        } else {
-          // Notify server and reissue the request.
-          this.socket.emit('discardInvalid', {
-            playerId: this.playerId,
-            reason: 'Invalid discard',
-            discardRequest: requestData,
-          } as EmittedDiscardInvalid);
-          return 'retry';
-        }
+    return this.waitForDecisionResponse(request, (response) => {
+      if (response.decisionType !== AgentDecisionType.DISCARD) {
+        return new Error('Invalid response type');
       }
-    );
+      const discardResponse = response as DiscardResponse;
+      const player = game.players.find(p => p.id === playerId);
+      if (!player) throw new Error('Player not found.');
+      if (isValidDiscard(game, player, discardResponse.selectedCards)) {
+        return discardResponse.selectedCards;
+      } else {
+        // Notify server and reissue the request.
+        this.socket.emit('discardInvalid', {
+          playerId: this.playerId,
+          reason: 'Invalid discard',
+          discardRequest: request.requestData,
+        } as EmittedDiscardInvalid);
+        return new Error('Invalid discard');
+      }
+    });
   }
 
   /**

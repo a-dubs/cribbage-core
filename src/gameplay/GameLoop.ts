@@ -126,6 +126,29 @@ export class GameLoop extends EventEmitter {
       }
 
       case AgentDecisionType.DISCARD: {
+        // Update WebSocketAgent's snapshot if it's a WebSocketAgent
+        // This ensures the agent can find the pending request
+        if ('updateGameSnapshot' in agent && typeof agent.updateGameSnapshot === 'function') {
+          const currentState = this.cribbageGame.getGameState();
+          const currentEvent = this.cribbageGame.getGameSnapshotHistory().length > 0
+            ? this.cribbageGame.getGameSnapshotHistory()[this.cribbageGame.getGameSnapshotHistory().length - 1].gameEvent
+            : null;
+          const snapshot: GameSnapshot = {
+            gameState: currentState,
+            gameEvent: currentEvent || {
+              gameId: currentState.id,
+              phase: currentState.currentPhase,
+              actionType: ActionType.START_ROUND,
+              playerId: null,
+              cards: null,
+              scoreChange: 0,
+              timestamp: new Date(),
+              snapshotId: currentState.snapshotId,
+            },
+            pendingDecisionRequests: this.cribbageGame.getPendingDecisionRequests(),
+          };
+          (agent as any).updateGameSnapshot(snapshot);
+        }
         const data = request.requestData as DiscardRequestData;
         const discards = await agent.discard(
           redactedGameState,
