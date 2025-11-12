@@ -733,6 +733,9 @@ export class GameLoop extends EventEmitter {
       AgentDecisionType.READY_FOR_GAME_START,
       'Ready to start game'
     );
+
+    // Clear dealer selection cards now that acknowledgment is complete
+    this.cribbageGame.clearDealerSelectionCards();
   }
 
   /**

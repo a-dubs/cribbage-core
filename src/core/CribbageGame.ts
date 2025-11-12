@@ -397,12 +397,20 @@ export class CribbageGame extends EventEmitter {
 
     console.log(`Dealer determined: Player ${dealerId} selected ${dealerCard} (highest card)`);
 
-    // Clear dealer selection cards
-    this.dealerSelectionCards.clear();
-
     // Transition to DEALING phase
+    // NOTE: Do NOT clear dealerSelectionCards here - they need to remain visible
+    // during the READY_FOR_GAME_START acknowledgment phase
+    // They will be cleared after acknowledgment completes
     this.gameState.currentPhase = Phase.DEALING;
     this.recordGameEvent(ActionType.BEGIN_PHASE, null, null, 0);
+  }
+
+  /**
+   * Clear dealer selection cards after acknowledgment phase
+   * Called after all players have acknowledged ready for game start
+   */
+  public clearDealerSelectionCards(): void {
+    this.dealerSelectionCards.clear();
   }
 
   public getFollowingPlayerId(playerId: string): string {
