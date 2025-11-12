@@ -16,7 +16,7 @@ export enum Phase {
 export enum ActionType {
   BEGIN_PHASE = 'BEGIN_PHASE', // Used to indicate phase has changed w/o a specific action being taken by a player
   END_PHASE = 'END_PHASE', // Used to indicate phase has ended w/o a specific action being taken by a player
-  DEAL = 'DEAL',
+  DEAL = 'DEAL', // When dealer deals cards
   SHUFFLE_DECK = 'SHUFFLE_DECK',
   DISCARD = 'DISCARD',
   PLAY_CARD = 'PLAY_CARD', // player plays a card during pegging phase
@@ -26,10 +26,13 @@ export enum ActionType {
   SCORE_CRIB = 'SCORE_CRIB',
   TURN_CARD = 'TURN_CARD',
   CUT = 'CUT',
+  CUT_DECK = 'CUT_DECK', // When player cuts the deck (new explicit action type)
   SCORE_HEELS = 'SCORE_HEELS', // Special case for dealer scoring 2 points for a jack as the turn card ("his heels")
   START_PEGGING_ROUND = 'START_PEGGING_ROUND', // Start a new round of pegging
   START_ROUND = 'START_ROUND', // Start a new round of the game
   WIN = 'WIN', // Player wins the game
+  READY_FOR_COUNTING = 'READY_FOR_COUNTING', // Player acknowledges ready for counting phase
+  READY_FOR_NEXT_ROUND = 'READY_FOR_NEXT_ROUND', // Player acknowledges ready for next round
 }
 
 /**
@@ -126,12 +129,54 @@ export interface GameEvent {
 }
 
 /**
- * Interface for tracking a player decision request
+ * Context-specific data for each decision type
  */
-export interface WaitingForPlayer {
-  playerId: string; // ID of the player we're waiting on
-  decisionType: AgentDecisionType; // Type of decision being requested
-  requestTimestamp: Date; // When the request was made
+export type DecisionRequestData =
+  | PlayCardRequestData
+  | DiscardRequestData
+  | DealRequestData
+  | CutDeckRequestData
+  | AcknowledgeRequestData;
+
+export interface PlayCardRequestData {
+  peggingHand: Card[];
+  peggingStack: Card[];
+  playedCards: PlayedCard[];
+  peggingTotal: number;
+}
+
+export interface DiscardRequestData {
+  hand: Card[];
+  numberOfCardsToDiscard: number;
+}
+
+export interface DealRequestData {
+  // Future: could include shuffle options, etc.
+  canShuffle?: boolean; // Whether player can shuffle before dealing
+}
+
+export interface CutDeckRequestData {
+  maxIndex: number; // Maximum valid cut index (deck.length - 1)
+  deckSize: number; // Total deck size for context
+}
+
+export interface AcknowledgeRequestData {
+  message: string; // User-friendly message (e.g., "Ready for counting")
+  // No additional data needed - just acknowledgment
+}
+
+/**
+ * Unified interface for all decision requests
+ * All active requests are stored in GameSnapshot.pendingDecisionRequests
+ */
+export interface DecisionRequest {
+  requestId: string; // Unique ID for this request (UUID)
+  playerId: string; // Player who must respond
+  decisionType: AgentDecisionType; // Type of decision required
+  requestData: DecisionRequestData; // Context-specific data for the request
+  required: boolean; // Whether this blocks game flow (true for all)
+  timestamp: Date; // When request was made
+  expiresAt?: Date; // Optional expiration (for future timeout handling)
 }
 
 /**
@@ -151,12 +196,13 @@ export interface GameState {
   peggingTotal: number; // Total value of the cards played in the current pegging stack
   snapshotId: number;
   roundNumber: number;
-  waitingForPlayers: WaitingForPlayer[]; // List of players we're currently waiting on for decisions (supports parallel decisions)
+  // waitingForPlayers removed - decision requests now in GameSnapshot.pendingDecisionRequests
 }
 
 export interface GameSnapshot {
   gameState: GameState; // Current state of the game
   gameEvent: GameEvent; // Last event that occurred in the game
+  pendingDecisionRequests: DecisionRequest[]; // Active decision requests (new third field)
 }
 
 /**
@@ -174,17 +220,22 @@ export interface PlayedCard {
 export interface GameAgent {
   playerId: string; // Unique identifier for the agent
   human: boolean; // Whether the agent represents a human player
+  
+  // Game action decisions
   makeMove(game: GameState, playerId: string): Promise<Card | null>;
   discard(
     game: GameState,
     playerId: string,
     numberOfCardsToDiscard: number
   ): Promise<Card[]>;
-  waitForContinue?(
-    game: GameState,
-    playerId: string,
-    continueDescription: string
-  ): Promise<void>;
+  deal?(game: GameState, playerId: string): Promise<void>; // NEW: Explicit deal action
+  cutDeck?(game: GameState, playerId: string, maxIndex: number): Promise<number>; // NEW: Cut deck with index
+  
+  // Acknowledgment decisions (parallel, blocking)
+  acknowledgeReadyForCounting?(game: GameState, playerId: string): Promise<void>; // NEW
+  acknowledgeReadyForNextRound?(game: GameState, playerId: string): Promise<void>; // NEW
+  
+  // REMOVED: waitForContinue (replaced by specific acknowledgment methods)
 }
 
 export type ScoreType =
@@ -253,28 +304,69 @@ export interface EmittedDiscardInvalid extends EmittedData {
   discardRequest: EmittedDiscardRequest;
 }
 
-export interface EmittedContinueRequest extends EmittedRequest {
-  description: string;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-empty-interface
-export interface EmittedContinueResponse extends EmittedData {}
+// REMOVED: EmittedContinueRequest and EmittedContinueResponse
+// Replaced by unified DecisionRequest/DecisionResponse system
 
 export enum AgentDecisionType {
-  PLAY_CARD = 'PLAY_CARD',
-  DISCARD = 'DISCARD',
-  CONTINUE = 'CONTINUE',
-  DEAL = 'DEAL',
+  // Game action decisions (require specific responses)
+  PLAY_CARD = 'PLAY_CARD', // Player must play a card
+  DISCARD = 'DISCARD', // Player must discard cards (parallel)
+  DEAL = 'DEAL', // Dealer must deal cards (explicit action)
+  CUT_DECK = 'CUT_DECK', // Player must cut deck (explicit action with index)
+  
+  // Acknowledgment decisions (pacing/blocking)
+  READY_FOR_COUNTING = 'READY_FOR_COUNTING', // Acknowledge ready for counting
+  READY_FOR_NEXT_ROUND = 'READY_FOR_NEXT_ROUND', // Acknowledge ready for next round
+  // REMOVED: CONTINUE (replaced by specific acknowledgment types)
 }
 
-// map AgentDecisionType to the corresponding EmittedData type
-export type EmittedDecisionRequest =
-  | EmittedMakeMoveRequest
-  | EmittedDiscardRequest
-  | EmittedContinueRequest;
+// REMOVED: EmittedDecisionRequest (replaced by DecisionRequest)
+// REMOVED: EmittedWaitingForPlayer (replaced by DecisionRequest in GameSnapshot)
 
-export interface EmittedWaitingForPlayer extends EmittedData {
-  waitingFor: AgentDecisionType;
+/**
+ * Decision response types for WebSocket communication
+ * Client sends these in response to DecisionRequests
+ */
+export type DecisionResponse =
+  | PlayCardResponse
+  | DiscardResponse
+  | DealResponse
+  | CutDeckResponse
+  | AcknowledgeResponse;
+
+export interface PlayCardResponse {
+  requestId: string;
+  playerId: string;
+  decisionType: AgentDecisionType.PLAY_CARD;
+  selectedCard: Card | null;
+}
+
+export interface DiscardResponse {
+  requestId: string;
+  playerId: string;
+  decisionType: AgentDecisionType.DISCARD;
+  selectedCards: Card[];
+}
+
+export interface DealResponse {
+  requestId: string;
+  playerId: string;
+  decisionType: AgentDecisionType.DEAL;
+  // No data needed - just acknowledgment
+}
+
+export interface CutDeckResponse {
+  requestId: string;
+  playerId: string;
+  decisionType: AgentDecisionType.CUT_DECK;
+  cutIndex: number;
+}
+
+export interface AcknowledgeResponse {
+  requestId: string;
+  playerId: string;
+  decisionType: AgentDecisionType.READY_FOR_COUNTING | AgentDecisionType.READY_FOR_NEXT_ROUND;
+  // No data needed - just acknowledgment
 }
 
 // create type for declaring a specific game that is played
