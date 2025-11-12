@@ -2,6 +2,7 @@
  * Enum for the phases of the game
  */
 export enum Phase {
+  DEALER_SELECTION = 'DEALER_SELECTION', // Initial phase: players select cards to determine dealer
   DEALING = 'DEALING',
   DISCARDING = 'DISCARDING',
   CUTTING = 'CUTTING',
@@ -30,6 +31,7 @@ export enum ActionType {
   SCORE_HEELS = 'SCORE_HEELS', // Special case for dealer scoring 2 points for a jack as the turn card ("his heels")
   START_PEGGING_ROUND = 'START_PEGGING_ROUND', // Start a new round of pegging
   START_ROUND = 'START_ROUND', // Start a new round of the game
+  SELECT_DEALER_CARD = 'SELECT_DEALER_CARD', // Player selects a card to determine dealer
   WIN = 'WIN', // Player wins the game
   READY_FOR_COUNTING = 'READY_FOR_COUNTING', // Player acknowledges ready for counting phase
   READY_FOR_NEXT_ROUND = 'READY_FOR_NEXT_ROUND', // Player acknowledges ready for next round
@@ -136,6 +138,7 @@ export type DecisionRequestData =
   | DiscardRequestData
   | DealRequestData
   | CutDeckRequestData
+  | SelectDealerCardRequestData
   | AcknowledgeRequestData;
 
 export interface PlayCardRequestData {
@@ -157,6 +160,11 @@ export interface DealRequestData {
 
 export interface CutDeckRequestData {
   maxIndex: number; // Maximum valid cut index (deck.length - 1)
+  deckSize: number; // Total deck size for context
+}
+
+export interface SelectDealerCardRequestData {
+  maxIndex: number; // Maximum valid card index (deck.length - 1)
   deckSize: number; // Total deck size for context
 }
 
@@ -231,6 +239,7 @@ export interface GameAgent {
   ): Promise<Card[]>;
   deal?(snapshot: GameSnapshot, playerId: string): Promise<void>; // Explicit deal action
   cutDeck?(snapshot: GameSnapshot, playerId: string, maxIndex: number): Promise<number>; // Cut deck with index
+  selectDealerCard?(snapshot: GameSnapshot, playerId: string, maxIndex: number): Promise<number>; // Select dealer card with index
   
   // Acknowledgment decisions (parallel, blocking)
   acknowledgeReadyForCounting?(snapshot: GameSnapshot, playerId: string): Promise<void>;
@@ -314,6 +323,7 @@ export enum AgentDecisionType {
   DISCARD = 'DISCARD', // Player must discard cards (parallel)
   DEAL = 'DEAL', // Dealer must deal cards (explicit action)
   CUT_DECK = 'CUT_DECK', // Player must cut deck (explicit action with index)
+  SELECT_DEALER_CARD = 'SELECT_DEALER_CARD', // Player selects a card to determine dealer (parallel)
   
   // Acknowledgment decisions (pacing/blocking)
   READY_FOR_COUNTING = 'READY_FOR_COUNTING', // Acknowledge ready for counting
@@ -333,6 +343,7 @@ export type DecisionResponse =
   | DiscardResponse
   | DealResponse
   | CutDeckResponse
+  | SelectDealerCardResponse
   | AcknowledgeResponse;
 
 export interface PlayCardResponse {
@@ -361,6 +372,13 @@ export interface CutDeckResponse {
   playerId: string;
   decisionType: AgentDecisionType.CUT_DECK;
   cutIndex: number;
+}
+
+export interface SelectDealerCardResponse {
+  requestId: string;
+  playerId: string;
+  decisionType: AgentDecisionType.SELECT_DEALER_CARD;
+  cardIndex: number; // Index of the card selected from the deck
 }
 
 export interface AcknowledgeResponse {

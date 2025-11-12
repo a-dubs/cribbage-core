@@ -24,25 +24,27 @@ export class CribbageGame extends EventEmitter {
   // private gameEventRecords: GameEvent[]; // Log of all game actions
   private gameSnapshotHistory: GameSnapshot[]; // Log of all game state and events
   private pendingDecisionRequests: DecisionRequest[] = []; // Active decision requests
+  private dealerSelectionCards: Map<string, { cardIndex: number; card: Card; timestamp: number }> = new Map(); // Track dealer selection cards
 
   constructor(playersInfo: PlayerIdAndName[], startingScore = 0) {
     super();
     const deck = this.generateDeck();
-    const players = playersInfo.map((info, index) => ({
+    // Initially, no dealer is set - dealer will be determined by card selection
+    const players = playersInfo.map((info) => ({
       id: info.id,
       name: info.name,
       hand: [],
       peggingHand: [],
       playedCards: [],
       score: startingScore,
-      isDealer: index === 0,
+      isDealer: false, // Dealer will be determined by card selection
     })) as Player[];
     const id = `game-${Date.now()}-${playersInfo.map(p => p.id).join('-')}`;
     this.gameState = {
       id: id,
       players,
       deck,
-      currentPhase: Phase.DEALING,
+      currentPhase: Phase.DEALER_SELECTION, // Start with dealer selection phase
       crib: [],
       turnCard: null,
       peggingStack: [],
@@ -254,6 +256,153 @@ export class CribbageGame extends EventEmitter {
     const dealer = this.gameState.players.find(p => p.isDealer);
     if (!dealer) throw new Error('Dealer not found.');
     return dealer.id;
+  }
+
+  /**
+   * Handle dealer card selection with conflict resolution
+   * If two players select the same index, first request gets that index,
+   * second gets next available (or previous if at end)
+   */
+  public selectDealerCard(playerId: string, requestedIndex: number): void {
+    if (this.gameState.currentPhase !== Phase.DEALER_SELECTION) {
+      throw new Error('Cannot select dealer card outside of dealer selection phase.');
+    }
+
+    const player = this.gameState.players.find(p => p.id === playerId);
+    if (!player) throw new Error('Player not found.');
+
+    // Check if player already selected
+    if (this.dealerSelectionCards.has(playerId)) {
+      throw new Error('Player has already selected a dealer card.');
+    }
+
+    // Check if requested index is already taken
+    const takenIndices = Array.from(this.dealerSelectionCards.values()).map(v => v.cardIndex);
+    let finalIndex = requestedIndex;
+
+    if (takenIndices.includes(requestedIndex)) {
+      // Conflict: find next available index
+      const maxIndex = this.gameState.deck.length - 1;
+      let nextIndex = requestedIndex + 1;
+      
+      // Try next indices first
+      while (nextIndex <= maxIndex && takenIndices.includes(nextIndex)) {
+        nextIndex++;
+      }
+      
+      if (nextIndex <= maxIndex) {
+        finalIndex = nextIndex;
+      } else {
+        // Try previous indices if next doesn't work
+        let prevIndex = requestedIndex - 1;
+        while (prevIndex >= 0 && takenIndices.includes(prevIndex)) {
+          prevIndex--;
+        }
+        if (prevIndex >= 0) {
+          finalIndex = prevIndex;
+        } else {
+          throw new Error('No available card indices for dealer selection.');
+        }
+      }
+    }
+
+    // Validate index
+    if (finalIndex < 0 || finalIndex >= this.gameState.deck.length) {
+      throw new Error(`Invalid card index: ${finalIndex}`);
+    }
+
+    const selectedCard = this.gameState.deck[finalIndex];
+    if (!selectedCard) {
+      throw new Error('No card found at selected index.');
+    }
+
+    // Store selection
+    this.dealerSelectionCards.set(playerId, {
+      cardIndex: finalIndex,
+      card: selectedCard,
+      timestamp: Date.now(),
+    });
+
+    // Record event
+    this.recordGameEvent(ActionType.SELECT_DEALER_CARD, playerId, [selectedCard], 0);
+
+    // Check if all players have selected
+    if (this.dealerSelectionCards.size === this.gameState.players.length) {
+      this.determineDealer();
+    }
+  }
+
+  /**
+   * Determine dealer based on selected cards (highest card wins)
+   * Uses runValue for ranking, suit breaks ties (Spades > Hearts > Diamonds > Clubs)
+   */
+  private determineDealer(): void {
+    const suitOrder: Record<string, number> = {
+      'SPADES': 4,
+      'HEARTS': 3,
+      'DIAMONDS': 2,
+      'CLUBS': 1,
+    };
+
+    if (this.dealerSelectionCards.size === 0) {
+      throw new Error('Could not determine dealer - no cards selected.');
+    }
+
+    // Convert to array for easier processing
+    const selections = Array.from(this.dealerSelectionCards.entries());
+    if (selections.length === 0) {
+      throw new Error('Could not determine dealer - no cards selected.');
+    }
+
+    // Find highest card
+    const highestSelection = selections.reduce((highest, [playerId, selection]) => {
+      const parsed = parseCard(selection.card);
+      const suitOrderValue = suitOrder[parsed.suit] || 0;
+
+      if (!highest) {
+        return {
+          playerId,
+          card: selection.card,
+          runValue: parsed.runValue,
+          suitOrder: suitOrderValue,
+        };
+      }
+
+      // Compare: first by runValue, then by suit
+      if (
+        parsed.runValue > highest.runValue ||
+        (parsed.runValue === highest.runValue && suitOrderValue > highest.suitOrder)
+      ) {
+        return {
+          playerId,
+          card: selection.card,
+          runValue: parsed.runValue,
+          suitOrder: suitOrderValue,
+        };
+      }
+
+      return highest;
+    }, null as { playerId: string; card: Card; runValue: number; suitOrder: number } | null);
+
+    if (!highestSelection) {
+      throw new Error('Could not determine dealer - no cards selected.');
+    }
+
+    // Set dealer
+    const dealerId = highestSelection.playerId;
+    const dealerCard = highestSelection.card;
+    this.gameState.players.forEach(player => {
+      player.isDealer = player.id === dealerId;
+    });
+
+    console.log(`Dealer determined: Player ${dealerId} selected ${dealerCard} (highest card)`);
+
+    // Clear dealer selection cards
+    this.dealerSelectionCards.clear();
+
+    // Transition to DEALING phase
+    this.gameState.currentPhase = Phase.DEALING;
+    this.recordGameEvent(ActionType.BEGIN_PHASE, null, null, 0);
   }
 
   public getFollowingPlayerId(playerId: string): string {

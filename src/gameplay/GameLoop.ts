@@ -9,12 +9,14 @@ import {
   AgentDecisionType,
   GameSnapshot,
   ActionType,
+  Phase,
   DecisionRequest,
   DecisionRequestData,
   PlayCardRequestData,
   DiscardRequestData,
   DealRequestData,
   CutDeckRequestData,
+  SelectDealerCardRequestData,
   AcknowledgeRequestData,
 } from '../types';
 import { displayCard, parseCard, suitToEmoji } from '../core/scoring';
@@ -207,6 +209,21 @@ export class GameLoop extends EventEmitter {
           this.cribbageGame.removeDecisionRequest(request.requestId);
           this.cribbageGame.cutDeck(request.playerId, cutIndex);
           return cutIndex;
+        }
+        break;
+      }
+
+      case AgentDecisionType.SELECT_DEALER_CARD: {
+        if (agent.selectDealerCard) {
+          const selectData = request.requestData as SelectDealerCardRequestData;
+          const cardIndex = await agent.selectDealerCard(
+            redactedSnapshot,
+            request.playerId,
+            selectData.maxIndex
+          );
+          this.cribbageGame.removeDecisionRequest(request.requestId);
+          this.cribbageGame.selectDealerCard(request.playerId, cardIndex);
+          return cardIndex;
         }
         break;
       }
@@ -614,10 +631,81 @@ export class GameLoop extends EventEmitter {
   }
 
   /**
+   * Handle dealer selection phase (only for first round)
+   * All players select cards from the deck, highest card becomes dealer
+   */
+  private async doDealerSelection(): Promise<void> {
+    const gameState = this.cribbageGame.getGameState();
+    
+    if (gameState.currentPhase !== Phase.DEALER_SELECTION) {
+      // Already determined dealer, skip
+      return;
+    }
+
+    console.log('Starting dealer selection phase...');
+
+    // Request dealer card selection from ALL players in parallel
+    const selectionRequests: DecisionRequest[] = [];
+    const deckSize = gameState.deck.length;
+
+    // Create all requests first without emitting snapshots
+    for (const player of gameState.players) {
+      const request = this.createDecisionRequest(
+        player.id,
+        AgentDecisionType.SELECT_DEALER_CARD,
+        {
+          maxIndex: deckSize - 1,
+          deckSize,
+        }
+      );
+      selectionRequests.push(request);
+    }
+
+    // Emit a single snapshot with all requests
+    const currentState = this.cribbageGame.getGameState();
+    const currentEvent = this.cribbageGame.getGameSnapshotHistory().length > 0
+      ? this.cribbageGame.getGameSnapshotHistory()[this.cribbageGame.getGameSnapshotHistory().length - 1].gameEvent
+      : null;
+    const snapshot: GameSnapshot = {
+      gameState: currentState,
+      gameEvent: currentEvent || {
+        gameId: currentState.id,
+        phase: currentState.currentPhase,
+        actionType: ActionType.START_ROUND,
+        playerId: null,
+        cards: null,
+        scoreChange: 0,
+        timestamp: new Date(),
+        snapshotId: currentState.snapshotId,
+      },
+      pendingDecisionRequests: this.cribbageGame.getPendingDecisionRequests(),
+    };
+    this.cribbageGame.emit('gameSnapshot', snapshot);
+    console.log(`Emitted snapshot with ${selectionRequests.length} dealer selection requests`);
+
+    // Wait for all selections in parallel
+    const selectionPromises = selectionRequests.map(request =>
+      this.waitForDecision(request)
+    );
+
+    await Promise.all(selectionPromises);
+
+    // Dealer should now be determined (handled in selectDealerCard)
+    const dealer = this.cribbageGame.getGameState().players.find(p => p.isDealer);
+    if (!dealer) {
+      throw new Error('Dealer was not determined after dealer selection phase.');
+    }
+    console.log(`Dealer selection complete. Dealer: ${dealer.name}`);
+  }
+
+  /**
    * Runs the entire game loop until a player wins
    * @returns the ID of the winning player
    */
   public async playGame(): Promise<string> {
+    // Handle dealer selection before first round
+    await this.doDealerSelection();
+
     let winner: string | null = null;
 
     while (!winner) {

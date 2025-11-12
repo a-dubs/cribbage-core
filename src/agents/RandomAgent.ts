@@ -81,6 +81,15 @@ export class RandomAgent implements GameAgent {
     return Promise.resolve(Math.floor(Math.random() * (maxIndex + 1)));
   }
 
+  async selectDealerCard(
+    snapshot: GameSnapshot,
+    playerId: string,
+    maxIndex: number
+  ): Promise<number> {
+    // Bots randomly select a card for dealer selection
+    return Promise.resolve(Math.floor(Math.random() * (maxIndex + 1)));
+  }
+
   async acknowledgeReadyForCounting(
     snapshot: GameSnapshot,
     playerId: string

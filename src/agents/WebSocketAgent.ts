@@ -15,6 +15,7 @@ import {
   DiscardResponse,
   DealResponse,
   CutDeckResponse,
+  SelectDealerCardResponse,
   AcknowledgeResponse,
   GameSnapshot,
 } from '../types';
@@ -270,6 +271,28 @@ export class WebSocketAgent implements GameAgent {
         return new Error(`Invalid cut index: ${cutResponse.cutIndex}`);
       }
       return cutResponse.cutIndex;
+    });
+  }
+
+  async selectDealerCard(
+    snapshot: GameSnapshot,
+    playerId: string,
+    maxIndex: number
+  ): Promise<number> {
+    const request = snapshot.pendingDecisionRequests.find(
+      r => r.playerId === playerId && r.decisionType === AgentDecisionType.SELECT_DEALER_CARD
+    );
+    if (!request) throw new Error('No pending SELECT_DEALER_CARD request');
+
+    return this.waitForDecisionResponse(request, (response) => {
+      if (response.decisionType !== AgentDecisionType.SELECT_DEALER_CARD) {
+        return new Error('Invalid response type');
+      }
+      const selectResponse = response as SelectDealerCardResponse;
+      if (selectResponse.cardIndex < 0 || selectResponse.cardIndex > maxIndex) {
+        return new Error(`Invalid card index: ${selectResponse.cardIndex}`);
+      }
+      return selectResponse.cardIndex;
     });
   }
 
