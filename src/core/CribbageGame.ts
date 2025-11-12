@@ -8,6 +8,7 @@ import {
   PlayerIdAndName,
   GameSnapshot,
   AgentDecisionType,
+  DecisionRequest,
 } from '../types';
 import {
   parseCard,
@@ -22,6 +23,7 @@ export class CribbageGame extends EventEmitter {
   private gameState: GameState;
   // private gameEventRecords: GameEvent[]; // Log of all game actions
   private gameSnapshotHistory: GameSnapshot[]; // Log of all game state and events
+  private pendingDecisionRequests: DecisionRequest[] = []; // Active decision requests
 
   constructor(playersInfo: PlayerIdAndName[], startingScore = 0) {
     super();
@@ -50,7 +52,6 @@ export class CribbageGame extends EventEmitter {
       peggingTotal: 0,
       roundNumber: 0,
       snapshotId: 0,
-      waitingForPlayers: [],
     };
 
     // this.gameEventRecords = [];
@@ -94,10 +95,11 @@ export class CribbageGame extends EventEmitter {
       timestamp: new Date(),
       snapshotId: this.gameState.snapshotId,
     };
-    const newGameSnapshot = {
+    const newGameSnapshot: GameSnapshot = {
       gameEvent,
       gameState: this.gameState,
-    } as GameSnapshot;
+      pendingDecisionRequests: [...this.pendingDecisionRequests], // Include current pending requests
+    };
     this.gameSnapshotHistory.push(newGameSnapshot);
     this.emit('gameSnapshot', newGameSnapshot);
   }
@@ -129,7 +131,8 @@ export class CribbageGame extends EventEmitter {
     this.gameState.peggingGoPlayers = [];
     this.gameState.peggingLastCardPlayer = null;
     this.gameState.peggingTotal = 0;
-    this.gameState.waitingForPlayers = [];
+    // Clear pending decision requests when starting new round
+    this.pendingDecisionRequests = [];
     // reset all players' hands
     this.gameState.players.forEach(player => {
       player.hand = [];
@@ -171,12 +174,6 @@ export class CribbageGame extends EventEmitter {
       throw new Error('Cannot deal cards outside of the dealing phase.');
     }
 
-    // Clear waiting state before action
-    const dealer = this.gameState.players.find(p => p.isDealer);
-    if (dealer) {
-      this.removeWaitingForPlayer(dealer.id);
-    }
-
     this.shuffleDeck();
 
     this.gameState.players.forEach((player: Player) => {
@@ -198,8 +195,6 @@ export class CribbageGame extends EventEmitter {
       // console.log(`Player ${playerId} hand: ${player.hand.join(', ')}`);
       // console.log(`Player ${playerId} discards: ${cards.join(', ')}`);
     }
-    // Clear waiting state before action
-    this.removeWaitingForPlayer(playerId);
     // Remove cards from player's hand and add to the crib
     player.hand = player.hand.filter((card: Card) => !cards.includes(card));
     this.gameState.crib.push(...cards);
@@ -224,10 +219,7 @@ export class CribbageGame extends EventEmitter {
       throw new Error('Cannot cut deck outside of the cutting phase.');
     }
 
-    // Clear waiting state before action
-    this.removeWaitingForPlayer(playerId);
-
-    this.recordGameEvent(ActionType.CUT, playerId, null, 0);
+    this.recordGameEvent(ActionType.CUT_DECK, playerId, null, 0);
 
     const player = this.gameState.players.find(p => p.id === playerId);
     if (!player) throw new Error('Player not found.');
@@ -302,9 +294,6 @@ export class CribbageGame extends EventEmitter {
     // if (!isValidPeggingPlay(this.game, player, card)) {
     //   throw new Error('Invalid card play.');
     // }
-
-    // Clear waiting state before action
-    this.removeWaitingForPlayer(playerId);
 
     if (card) {
       player.playedCards.push(card);
@@ -490,59 +479,57 @@ export class CribbageGame extends EventEmitter {
   }
 
   /**
-   * Add a player to the waiting list for a decision request
-   * @param playerId - ID of the player we're waiting on
-   * @param decisionType - Type of decision being requested
+   * Add a decision request to the pending requests
+   * Called by GameLoop when requesting a decision
+   * @param request - The decision request to add
    */
-  public addWaitingForPlayer(
-    playerId: string,
-    decisionType: AgentDecisionType
-  ): void {
-    // Check if player already exists in waiting list
-    if (
-      !this.gameState.waitingForPlayers.find(w => w.playerId === playerId)
-    ) {
-      this.gameState.waitingForPlayers.push({
-        playerId,
-        decisionType,
-        requestTimestamp: new Date(),
-      });
+  public addDecisionRequest(request: DecisionRequest): void {
+    // Check if request already exists (by requestId)
+    if (!this.pendingDecisionRequests.find(r => r.requestId === request.requestId)) {
+      this.pendingDecisionRequests.push(request);
     }
   }
 
   /**
-   * Add a player to the waiting list (deprecated - use addWaitingForPlayer directly)
-   * This method is kept for backwards compatibility but just calls addWaitingForPlayer
-   * @param actionType - Unused (kept for backwards compatibility)
-   * @param playerId - ID of the player we're waiting on
-   * @param decisionType - Type of decision being requested
-   * @deprecated Use addWaitingForPlayer directly instead
+   * Remove a decision request (when player responds)
+   * @param requestId - ID of the request to remove
    */
-  public recordWaitingEvent(
-    actionType: ActionType,
-    playerId: string,
-    decisionType: AgentDecisionType
-  ): void {
-    // Just add to waiting list - no event is recorded
-    // Waiting state is already in GameState.waitingForPlayers, no need for separate events
-    this.addWaitingForPlayer(playerId, decisionType);
-  }
-
-  /**
-   * Remove a player from the waiting list
-   * @param playerId - ID of the player to remove from waiting list
-   */
-  public removeWaitingForPlayer(playerId: string): void {
-    this.gameState.waitingForPlayers = this.gameState.waitingForPlayers.filter(
-      w => w.playerId !== playerId
+  public removeDecisionRequest(requestId: string): void {
+    this.pendingDecisionRequests = this.pendingDecisionRequests.filter(
+      r => r.requestId !== requestId
     );
   }
 
   /**
-   * Clear all waiting players from the waiting list
+   * Get all pending decision requests
+   * @returns Array of pending decision requests
    */
-  public clearAllWaiting(): void {
-    this.gameState.waitingForPlayers = [];
+  public getPendingDecisionRequests(): DecisionRequest[] {
+    return [...this.pendingDecisionRequests];
+  }
+
+  /**
+   * Check if all required players have responded to a blocking request
+   * Used for acknowledgment requests that require all players
+   * @param decisionType - The decision type to check
+   * @returns True if all players have responded
+   */
+  public allPlayersAcknowledged(decisionType: AgentDecisionType): boolean {
+    // Find all pending requests of this type
+    const pendingRequests = this.pendingDecisionRequests.filter(
+      r => r.decisionType === decisionType
+    );
+    
+    // If no pending requests, all have acknowledged
+    return pendingRequests.length === 0;
+  }
+
+  /**
+   * Clear all pending decision requests
+   * Used during phase transitions
+   */
+  public clearAllDecisionRequests(): void {
+    this.pendingDecisionRequests = [];
   }
 
   /**
@@ -700,3 +687,4 @@ export class CribbageGame extends EventEmitter {
     return this.gameSnapshotHistory;
   }
 }
+
