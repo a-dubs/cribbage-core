@@ -283,6 +283,17 @@ io.on('connection', socket => {
     handleLogin(socket, data);
   });
 
+  socket.on('getConnectedPlayers', () => {
+    console.log('Received getConnectedPlayers request from socket:', socket.id);
+    // Send current connected players to this specific client
+    const playersIdAndName: PlayerIdAndName[] = [];
+    connectedPlayers.forEach(playerInfo => {
+      playersIdAndName.push({ id: playerInfo.id, name: playerInfo.name });
+    });
+    console.log('Sending connected players to requesting client:', playersIdAndName);
+    socket.emit('connectedPlayers', playersIdAndName);
+  });
+
   socket.on('startGame', () => {
     console.log('Received startGame event from socket:', socket.id);
     handleStartGame().catch(error => {
