@@ -647,6 +647,22 @@ function sendMostRecentGameData(socket: Socket): void {
 
   // Send redacted GameSnapshot for this specific player
   if (mostRecentGameSnapshot && gameLoop) {
+    // Check if player exists in the game before trying to get redacted state
+    const currentGameState = gameLoop.cribbageGame.getGameState();
+    const playerExistsInGame = currentGameState.players.some(
+      p => p.id === playerId
+    );
+    
+    if (!playerExistsInGame) {
+      console.log(
+        `Player ${playerId} not found in game. Skipping game state send.`
+      );
+      // Still send empty arrays for consistency
+      socket.emit('currentRoundGameEvents', []);
+      socket.emit('playAgainVotes', []);
+      return;
+    }
+
     // Update WebSocketAgent with the latest snapshot
     const playerInfo = connectedPlayers.get(playerId);
     if (playerInfo && playerInfo.agent instanceof WebSocketAgent) {
@@ -672,10 +688,20 @@ function sendMostRecentGameData(socket: Socket): void {
   
   // Send redacted current round game events
   if (gameLoop && mostRecentGameSnapshot) {
-    const redactedRoundEvents = currentRoundGameEvents.map(event =>
-      gameLoop!.cribbageGame.getRedactedGameEvent(event, playerId)
+    // Check if player exists in game before redacting events
+    const currentGameState = gameLoop.cribbageGame.getGameState();
+    const playerExistsInGame = currentGameState.players.some(
+      p => p.id === playerId
     );
-    socket.emit('currentRoundGameEvents', redactedRoundEvents);
+    
+    if (playerExistsInGame) {
+      const redactedRoundEvents = currentRoundGameEvents.map(event =>
+        gameLoop!.cribbageGame.getRedactedGameEvent(event, playerId)
+      );
+      socket.emit('currentRoundGameEvents', redactedRoundEvents);
+    } else {
+      socket.emit('currentRoundGameEvents', []);
+    }
   } else {
     socket.emit('currentRoundGameEvents', currentRoundGameEvents);
   }
