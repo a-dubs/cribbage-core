@@ -59,12 +59,49 @@ const server = http.createServer((req, res) => {
   res.end('Not found');
 });
 
+// Support multiple origins or wildcard for development
+const getAllowedOrigins = (): string | string[] | ((origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => void) => {
+  if (!WEB_APP_ORIGIN) {
+    // If no origin specified, allow all (development only)
+    console.warn('WEB_APP_ORIGIN not set - allowing all origins (development only)');
+    // Return a function that always allows
+    return (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      callback(null, true);
+    };
+  }
+  
+  // Support comma-separated origins
+  const origins = WEB_APP_ORIGIN.split(',').map(o => o.trim());
+  
+  if (origins.length === 1) {
+    return origins[0];
+  }
+  
+  // Multiple origins - use function to check dynamically
+  return (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    if (!origin) {
+      callback(null, true); // Allow requests with no origin (e.g., mobile apps, Postman)
+      return;
+    }
+    const isAllowed = origins.some(allowedOrigin => {
+      // Support wildcard subdomains
+      if (allowedOrigin.startsWith('*.')) {
+        const domain = allowedOrigin.slice(2);
+        return origin.endsWith(domain);
+      }
+      return origin === allowedOrigin;
+    });
+    callback(null, isAllowed);
+  };
+};
+
 const io = new Server(server, {
   cors: {
-    origin: WEB_APP_ORIGIN,
+    origin: getAllowedOrigins(),
     methods: ['GET', 'POST'],
     credentials: true,
   },
+  allowEIO3: true, // Allow Socket.IO v3 clients
 });
 
 interface PlayerInfo {
@@ -164,19 +201,29 @@ const endGameInDB = (gameId: string, winnerId: string): void => {
 
 const connectedPlayers: Map<string, PlayerInfo> = new Map();
 const playerIdToSocketId: Map<string, string> = new Map();
+const socketIdToPlayerId: Map<string, string> = new Map(); // Track socket -> player ID mapping for reconnection
 const playAgainVotes: Set<string> = new Set();
 let gameLoop: GameLoop | null = null;
 let mostRecentGameSnapshot: GameSnapshot | null = null;
 let currentRoundGameEvents: GameEvent[] = [];
 
+// Generate unique user ID based on socket ID and timestamp
+function generateUniqueUserId(socketId: string): string {
+  return `user_${socketId}_${Date.now()}`;
+}
+
 io.on('connection', socket => {
   const token = socket.handshake.auth.token;
+  const origin = socket.handshake.headers.origin;
+  console.log(`[Connection] New socket connection attempt: ${socket.id}, origin: ${origin}, token present: ${!!token}`);
+  
   if (token !== WEBSOCKET_AUTH_TOKEN) {
-    console.log('Incorrect socket token for socket:', socket.id);
+    console.error(`[Connection] Incorrect socket token for socket: ${socket.id}. Expected: ${WEBSOCKET_AUTH_TOKEN ? '***' : 'NOT SET'}, Got: ${token ? '***' : 'NOT PROVIDED'}`);
+    socket.emit('error', { message: 'Authentication failed: Invalid token' });
     socket.disconnect();
     return;
   }
-  console.log('New socket connection:', socket.id);
+  console.log(`[Connection] Authenticated socket connection: ${socket.id} from origin: ${origin}`);
 
   // send the connected players to the clients even before login
   // so they can see who is already connected
@@ -202,9 +249,7 @@ io.on('connection', socket => {
   });
 
   socket.on('playAgain', () => {
-    const playerId = [...playerIdToSocketId.entries()].find(
-      ([, id]) => id === socket.id
-    )?.[0];
+    const playerId = socketIdToPlayerId.get(socket.id);
     if (!playerId) {
       console.error('Player ID not found for socket:', socket.id);
       return;
@@ -227,12 +272,13 @@ io.on('connection', socket => {
     console.log('A socket disconnected:', socket.id);
     // only remove the player if the game loop is not running
     if (!gameLoop) {
-      playerIdToSocketId.forEach((socketId, playerId) => {
-        if (socketId === socket.id) {
-          connectedPlayers.delete(playerId);
-          playerIdToSocketId.delete(playerId);
-        }
-      });
+      const playerId = socketIdToPlayerId.get(socket.id);
+      if (playerId) {
+        connectedPlayers.delete(playerId);
+        playerIdToSocketId.delete(playerId);
+        socketIdToPlayerId.delete(socket.id);
+        console.log(`Removed player ${playerId} (socket ${socket.id})`);
+      }
       // send updated connected players to all clients
       emitConnectedPlayers();
     } else {
@@ -248,45 +294,67 @@ io.on('connection', socket => {
 function handleLogin(socket: Socket, data: LoginData): void {
   const { username, name } = data;
   let agent: WebSocketAgent;
-  console.log('Handling login for user:', username);
+  let playerId: string;
 
-  // Replace old socket if player reconnects
-  const oldPlayerInfo = connectedPlayers.get(username);
+  console.log('Handling login for user:', username, 'socket:', socket.id);
 
-  if (oldPlayerInfo && oldPlayerInfo.agent instanceof WebSocketAgent) {
-    console.log(
-      `Player ${username} reconnected. Updating socket for their WebSocketAgent.`
-    );
-    agent = oldPlayerInfo.agent;
-    console.log(
-      `Old socket ID: ${oldPlayerInfo.agent.socket.id}, New socket ID: ${socket.id}`
-    );
-    // compare the socket ids and if they are different, replace the socket
-    if (oldPlayerInfo.agent.socket.id !== socket.id) {
+  // Check if this socket already has a player ID (reconnection scenario)
+  const existingPlayerId = socketIdToPlayerId.get(socket.id);
+  
+  if (existingPlayerId) {
+    // This socket already has a player ID - this is a reconnection
+    const oldPlayerInfo = connectedPlayers.get(existingPlayerId);
+    if (oldPlayerInfo && oldPlayerInfo.agent instanceof WebSocketAgent) {
       console.log(
-        `Replacing old socket ${oldPlayerInfo.agent.socket.id} with new socket ${socket.id}`
+        `Player ${existingPlayerId} (${username}) reconnected. Updating socket for their WebSocketAgent.`
       );
-      oldPlayerInfo.agent.socket.disconnect(true); // Disconnect old socket if applicable
-      agent.updateSocket(socket);
+      agent = oldPlayerInfo.agent;
+      playerId = existingPlayerId;
+      
+      // Update socket if different
+      if (oldPlayerInfo.agent.socket.id !== socket.id) {
+        console.log(
+          `Replacing old socket ${oldPlayerInfo.agent.socket.id} with new socket ${socket.id}`
+        );
+        oldPlayerInfo.agent.socket.disconnect(true);
+        agent.updateSocket(socket);
+      }
+      
+      // Update player name if it changed
+      if (oldPlayerInfo.name !== name) {
+        console.log(`Updating player name from "${oldPlayerInfo.name}" to "${name}"`);
+        oldPlayerInfo.name = name;
+      }
+    } else {
+      // Player ID exists but no player info - create new
+      playerId = existingPlayerId;
+      agent = new WebSocketAgent(socket, playerId);
+      console.log(`Creating new WebSocketAgent for existing player ID: ${playerId}`);
     }
   } else {
+    // New login - generate unique player ID
+    playerId = generateUniqueUserId(socket.id);
+    agent = new WebSocketAgent(socket, playerId);
     console.log(
-      `Player ${username} logged in for the first time. Creating new WebSocketAgent.`
+      `New player login: ${username} assigned unique ID: ${playerId}`
     );
-    agent = new WebSocketAgent(socket, username);
   }
-  const playerInfo: PlayerInfo = { id: username, name, agent };
 
-  playerIdToSocketId.set(username, socket.id);
+  const playerInfo: PlayerInfo = { id: playerId, name, agent };
 
-  connectedPlayers.set(username, playerInfo);
-  console.log('emitting loggedIn event to client:', username);
+  // Update mappings
+  playerIdToSocketId.set(playerId, socket.id);
+  socketIdToPlayerId.set(socket.id, playerId);
+  connectedPlayers.set(playerId, playerInfo);
+
+  console.log('emitting loggedIn event to client:', playerId);
   const loggedInData: PlayerIdAndName = {
-    id: username,
+    id: playerId,
     name,
   };
   socket.emit('loggedIn', loggedInData);
   emitConnectedPlayers();
+  
   // if the game loop is running, send the most recent game data to the client
   if (gameLoop) {
     sendMostRecentGameData(socket);
@@ -484,9 +552,7 @@ function sendMostRecentGameData(socket: Socket): void {
   console.log('Sending most recent game data to client');
   
   // Find which player this socket belongs to
-  const playerId = [...playerIdToSocketId.entries()].find(
-    ([, id]) => id === socket.id
-  )?.[0];
+  const playerId = socketIdToPlayerId.get(socket.id);
 
   if (!playerId) {
     console.error('Could not find player ID for socket:', socket.id);
