@@ -207,9 +207,17 @@ let gameLoop: GameLoop | null = null;
 let mostRecentGameSnapshot: GameSnapshot | null = null;
 let currentRoundGameEvents: GameEvent[] = [];
 
-// Generate unique user ID based on socket ID and timestamp
-function generateUniqueUserId(socketId: string): string {
-  return `user_${socketId}_${Date.now()}`;
+// Generate unique player ID from username, handling conflicts
+function getUniquePlayerId(username: string, socketId: string): string {
+  // First, try using the username directly
+  if (!connectedPlayers.has(username)) {
+    return username;
+  }
+  
+  // If username is taken, append socket ID to make it unique
+  // This allows multiple users with the same username
+  const uniqueId = `${username}_${socketId}`;
+  return uniqueId;
 }
 
 io.on('connection', socket => {
@@ -332,11 +340,11 @@ function handleLogin(socket: Socket, data: LoginData): void {
       console.log(`Creating new WebSocketAgent for existing player ID: ${playerId}`);
     }
   } else {
-    // New login - generate unique player ID
-    playerId = generateUniqueUserId(socket.id);
+    // New login - use username as player ID, with conflict resolution
+    playerId = getUniquePlayerId(username, socket.id);
     agent = new WebSocketAgent(socket, playerId);
     console.log(
-      `New player login: ${username} assigned unique ID: ${playerId}`
+      `New player login: ${username} assigned player ID: ${playerId}`
     );
   }
 
