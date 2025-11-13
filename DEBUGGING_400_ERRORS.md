@@ -137,3 +137,4 @@ The server now:
 4. Try connecting from the same machine first to rule out network issues
 5. Check if the server is behind a proxy/load balancer that might be blocking WebSocket connections
 
+

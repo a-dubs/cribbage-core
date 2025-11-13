@@ -127,12 +127,20 @@ const io = new Server(server, {
     credentials: true,
   },
   allowEIO3: true, // Allow Socket.IO v3 clients
-  // Log handshake attempts for debugging
+  // Configuration for reverse proxy support
+  transports: ['websocket', 'polling'], // Try WebSocket first, fallback to polling
+  pingTimeout: 60000, // Increase timeout for slow connections/proxies
+  pingInterval: 25000,
+  upgradeTimeout: 10000,
+  maxHttpBufferSize: 1e6,
+  // Allow all requests through - we check auth in the connection handler
   allowRequest: (req, callback) => {
     const origin = req.headers.origin;
-    console.log(`[Handshake] Request from origin: ${origin}, path: ${req.url}`);
-    // Allow the handshake - we'll check auth in the connection handler
-    // This prevents CORS from blocking the request before we can see the auth token
+    const path = req.url;
+    console.log(`[Handshake] Request from origin: ${origin}, path: ${path}`);
+    
+    // Always allow the request to proceed - auth is checked in connection handler
+    // This prevents CORS/proxy issues from blocking before we can authenticate
     callback(null, true);
   },
 });
