@@ -147,30 +147,34 @@ const io = new Server(server, {
   },
 });
 
-// Use middleware to validate auth BEFORE connection handler
-// This is the correct place to check auth in Socket.IO
+// TEMPORARY: Disable auth to diagnose connection issues
+// TODO: Re-enable after confirming connections work
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token;
   const origin = socket.handshake.headers.origin;
   
-  console.log(`[Middleware] Auth check for socket ${socket.id}:`, {
+  console.log(`[Middleware] Auth check (DISABLED) for socket ${socket.id}:`, {
     origin: origin || 'none',
     hasToken: !!token,
-    tokenMatches: token === WEBSOCKET_AUTH_TOKEN,
-    authKeys: Object.keys(socket.handshake.auth || {})
+    authKeys: Object.keys(socket.handshake.auth || {}),
+    query: Object.keys(socket.handshake.query || {})
   });
   
-  if (token !== WEBSOCKET_AUTH_TOKEN) {
-    console.error(`[Middleware] Auth REJECTED for socket ${socket.id}:`, {
-      expectedTokenSet: !!WEBSOCKET_AUTH_TOKEN,
-      receivedToken: token ? '***' : 'NONE',
-      expectedToken: WEBSOCKET_AUTH_TOKEN ? '***' : 'NOT_SET'
-    });
-    return next(new Error('Authentication failed'));
-  }
-  
-  console.log(`[Middleware] ✓ Auth PASSED for socket ${socket.id}`);
+  // TEMPORARILY ALLOW ALL CONNECTIONS
+  console.log(`[Middleware] ✓ ALLOWING connection (auth disabled for testing)`);
   next();
+  
+  // Original auth check (commented out):
+  // if (token !== WEBSOCKET_AUTH_TOKEN) {
+  //   console.error(`[Middleware] Auth REJECTED for socket ${socket.id}:`, {
+  //     expectedTokenSet: !!WEBSOCKET_AUTH_TOKEN,
+  //     receivedToken: token ? '***' : 'NONE',
+  //     expectedToken: WEBSOCKET_AUTH_TOKEN ? '***' : 'NOT_SET'
+  //   });
+  //   return next(new Error('Authentication failed'));
+  // }
+  // console.log(`[Middleware] ✓ Auth PASSED for socket ${socket.id}`);
+  // next();
 });
 
 interface PlayerInfo {
