@@ -354,8 +354,8 @@ io.on('connection', socket => {
     }
   });
 
-  socket.on('disconnect', () => {
-    console.log('A socket disconnected:', socket.id);
+  socket.on('disconnect', (reason) => {
+    console.log(`A socket disconnected: ${socket.id}, Reason: ${reason}`);
     // only remove the player if the game loop is not running
     if (!gameLoop) {
       const playerId = socketIdToPlayerId.get(socket.id);
