@@ -128,7 +128,7 @@ const io = new Server(server, {
   },
   allowEIO3: true, // Allow Socket.IO v3 clients
   // Configuration for reverse proxy support
-  transports: ['websocket'], // TEMPORARY: WebSocket only, disable polling to test
+  transports: ['websocket', 'polling'], // Support both WebSocket and polling
   pingTimeout: 60000, // Increase timeout for slow connections/proxies
   pingInterval: 25000,
   upgradeTimeout: 10000,
