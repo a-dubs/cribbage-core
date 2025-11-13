@@ -60,6 +60,7 @@ const server = http.createServer((req, res) => {
 });
 
 // Support multiple origins or wildcard for development
+// Also automatically supports both HTTP and HTTPS versions of origins
 const getAllowedOrigins = (): string | string[] | ((origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => void) => {
   if (!WEB_APP_ORIGIN) {
     // If no origin specified, allow all (development only)
@@ -73,8 +74,25 @@ const getAllowedOrigins = (): string | string[] | ((origin: string | undefined, 
   // Support comma-separated origins
   const origins = WEB_APP_ORIGIN.split(',').map(o => o.trim());
   
-  if (origins.length === 1) {
-    return origins[0];
+  // Expand origins to include both HTTP and HTTPS versions
+  const expandedOrigins: string[] = [];
+  origins.forEach(origin => {
+    expandedOrigins.push(origin);
+    // If origin is HTTP, also add HTTPS version
+    if (origin.startsWith('http://')) {
+      expandedOrigins.push(origin.replace('http://', 'https://'));
+    }
+    // If origin is HTTPS, also add HTTP version
+    if (origin.startsWith('https://')) {
+      expandedOrigins.push(origin.replace('https://', 'http://'));
+    }
+  });
+  
+  // Remove duplicates
+  const uniqueOrigins = [...new Set(expandedOrigins)];
+  
+  if (uniqueOrigins.length === 1) {
+    return uniqueOrigins[0];
   }
   
   // Multiple origins - use function to check dynamically
@@ -83,13 +101,20 @@ const getAllowedOrigins = (): string | string[] | ((origin: string | undefined, 
       callback(null, true); // Allow requests with no origin (e.g., mobile apps, Postman)
       return;
     }
-    const isAllowed = origins.some(allowedOrigin => {
+    const isAllowed = uniqueOrigins.some(allowedOrigin => {
       // Support wildcard subdomains
       if (allowedOrigin.startsWith('*.')) {
         const domain = allowedOrigin.slice(2);
         return origin.endsWith(domain);
       }
-      return origin === allowedOrigin;
+      // Exact match
+      if (origin === allowedOrigin) {
+        return true;
+      }
+      // Also check protocol-agnostic match (http vs https)
+      const originWithoutProtocol = origin.replace(/^https?:\/\//, '');
+      const allowedWithoutProtocol = allowedOrigin.replace(/^https?:\/\//, '');
+      return originWithoutProtocol === allowedWithoutProtocol;
     });
     callback(null, isAllowed);
   };
@@ -102,6 +127,14 @@ const io = new Server(server, {
     credentials: true,
   },
   allowEIO3: true, // Allow Socket.IO v3 clients
+  // Log handshake attempts for debugging
+  allowRequest: (req, callback) => {
+    const origin = req.headers.origin;
+    console.log(`[Handshake] Request from origin: ${origin}, path: ${req.url}`);
+    // Allow the handshake - we'll check auth in the connection handler
+    // This prevents CORS from blocking the request before we can see the auth token
+    callback(null, true);
+  },
 });
 
 interface PlayerInfo {
