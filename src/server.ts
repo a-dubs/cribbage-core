@@ -137,10 +137,13 @@ const io = new Server(server, {
   allowRequest: (req, callback) => {
     const origin = req.headers.origin;
     const path = req.url;
-    console.log(`[Handshake] Request from origin: ${origin}, path: ${path}`);
+    const forwardedFor = req.headers['x-forwarded-for'];
+    const realIp = req.headers['x-real-ip'];
     
-    // Always allow the request to proceed - auth is checked in connection handler
-    // This prevents CORS/proxy issues from blocking before we can authenticate
+    console.log(`[Handshake] Origin: ${origin || 'none'}, Path: ${path}, X-Forwarded-For: ${forwardedFor || 'none'}, X-Real-IP: ${realIp || 'none'}`);
+    
+    // Always allow the request to proceed
+    // Auth is checked in the connection handler after Socket.IO establishes the connection
     callback(null, true);
   },
 });
@@ -262,17 +265,32 @@ function getUniquePlayerId(username: string, socketId: string): string {
 }
 
 io.on('connection', socket => {
-  const token = socket.handshake.auth.token;
+  const token = socket.handshake.auth?.token;
+  const query = socket.handshake.query;
   const origin = socket.handshake.headers.origin;
-  console.log(`[Connection] New socket connection attempt: ${socket.id}, origin: ${origin}, token present: ${!!token}`);
+  const address = socket.handshake.address;
+  
+  console.log(`[Connection] New socket connection attempt:`, {
+    id: socket.id,
+    origin: origin || 'none',
+    address,
+    tokenPresent: !!token,
+    query: Object.keys(query || {}),
+    auth: Object.keys(socket.handshake.auth || {})
+  });
   
   if (token !== WEBSOCKET_AUTH_TOKEN) {
-    console.error(`[Connection] Incorrect socket token for socket: ${socket.id}. Expected: ${WEBSOCKET_AUTH_TOKEN ? '***' : 'NOT SET'}, Got: ${token ? '***' : 'NOT PROVIDED'}`);
+    console.error(`[Connection] Auth FAILED for socket ${socket.id}:`, {
+      expectedTokenSet: !!WEBSOCKET_AUTH_TOKEN,
+      receivedTokenSet: !!token,
+      tokensMatch: token === WEBSOCKET_AUTH_TOKEN
+    });
     socket.emit('error', { message: 'Authentication failed: Invalid token' });
-    socket.disconnect();
+    socket.disconnect(true);
     return;
   }
-  console.log(`[Connection] Authenticated socket connection: ${socket.id} from origin: ${origin}`);
+  
+  console.log(`[Connection] ✓ Authenticated socket: ${socket.id} from origin: ${origin || 'proxy'}`);
 
   // send the connected players to the clients even before login
   // so they can see who is already connected
