@@ -133,7 +133,7 @@ const io = new Server(server, {
   pingInterval: 25000,
   upgradeTimeout: 10000,
   maxHttpBufferSize: 1e6,
-  // Allow all requests through - we check auth in the connection handler
+  // Allow all handshake requests - auth is checked via middleware
   allowRequest: (req, callback) => {
     const origin = req.headers.origin;
     const path = req.url;
@@ -142,10 +142,35 @@ const io = new Server(server, {
     
     console.log(`[Handshake] Origin: ${origin || 'none'}, Path: ${path}, X-Forwarded-For: ${forwardedFor || 'none'}, X-Real-IP: ${realIp || 'none'}`);
     
-    // Always allow the request to proceed
-    // Auth is checked in the connection handler after Socket.IO establishes the connection
+    // Allow all handshakes - auth is checked in middleware after connection
     callback(null, true);
   },
+});
+
+// Use middleware to validate auth BEFORE connection handler
+// This is the correct place to check auth in Socket.IO
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token;
+  const origin = socket.handshake.headers.origin;
+  
+  console.log(`[Middleware] Auth check for socket ${socket.id}:`, {
+    origin: origin || 'none',
+    hasToken: !!token,
+    tokenMatches: token === WEBSOCKET_AUTH_TOKEN,
+    authKeys: Object.keys(socket.handshake.auth || {})
+  });
+  
+  if (token !== WEBSOCKET_AUTH_TOKEN) {
+    console.error(`[Middleware] Auth REJECTED for socket ${socket.id}:`, {
+      expectedTokenSet: !!WEBSOCKET_AUTH_TOKEN,
+      receivedToken: token ? '***' : 'NONE',
+      expectedToken: WEBSOCKET_AUTH_TOKEN ? '***' : 'NOT_SET'
+    });
+    return next(new Error('Authentication failed'));
+  }
+  
+  console.log(`[Middleware] ✓ Auth PASSED for socket ${socket.id}`);
+  next();
 });
 
 interface PlayerInfo {
@@ -265,32 +290,11 @@ function getUniquePlayerId(username: string, socketId: string): string {
 }
 
 io.on('connection', socket => {
-  const token = socket.handshake.auth?.token;
-  const query = socket.handshake.query;
   const origin = socket.handshake.headers.origin;
   const address = socket.handshake.address;
   
-  console.log(`[Connection] New socket connection attempt:`, {
-    id: socket.id,
-    origin: origin || 'none',
-    address,
-    tokenPresent: !!token,
-    query: Object.keys(query || {}),
-    auth: Object.keys(socket.handshake.auth || {})
-  });
-  
-  if (token !== WEBSOCKET_AUTH_TOKEN) {
-    console.error(`[Connection] Auth FAILED for socket ${socket.id}:`, {
-      expectedTokenSet: !!WEBSOCKET_AUTH_TOKEN,
-      receivedTokenSet: !!token,
-      tokensMatch: token === WEBSOCKET_AUTH_TOKEN
-    });
-    socket.emit('error', { message: 'Authentication failed: Invalid token' });
-    socket.disconnect(true);
-    return;
-  }
-  
-  console.log(`[Connection] ✓ Authenticated socket: ${socket.id} from origin: ${origin || 'proxy'}`);
+  // Auth was already checked in middleware, so this socket is authenticated
+  console.log(`[Connection] ✓ Socket connected: ${socket.id} from ${origin || 'proxy'} (${address})`);
 
   // send the connected players to the clients even before login
   // so they can see who is already connected
