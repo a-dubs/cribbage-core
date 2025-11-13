@@ -112,7 +112,8 @@ export class CribbageGame extends EventEmitter {
 
   public startRound(): void {
     // dont rotate dealer if this is the first round
-    if (this.gameSnapshotHistory.length > 0) {
+    // Check roundNumber instead of snapshotHistory.length because dealer selection creates snapshots
+    if (this.gameState.roundNumber > 0) {
       this.gameState.deck = this.generateDeck();
       // Rotate dealer position
       const dealerIndex = this.gameState.players.findIndex(
@@ -155,6 +156,11 @@ export class CribbageGame extends EventEmitter {
   public endGame(winnerId: string): void {
     const winner = this.gameState.players.find(p => p.id === winnerId);
     if (!winner) throw new Error(`Winner not found: ${winnerId}`);
+    
+    // Set phase to END before recording the event so the snapshot includes Phase.END
+    this.gameState.currentPhase = Phase.END;
+    
+    // Record the WIN event and emit final snapshot with Phase.END
     this.recordGameEvent(ActionType.WIN, winnerId, null, 0);
   }
 

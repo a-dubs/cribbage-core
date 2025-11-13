@@ -541,6 +541,10 @@ async function startGame(): Promise<void> {
   const winner = await gameLoop.playGame();
   endGameInDB(gameLoop.cribbageGame.getGameState().id, winner);
 
+  // Wait a brief moment to ensure the final snapshot with Phase.END is sent to all clients
+  // The endGame() call emits a gameSnapshot event which needs to be processed and sent
+  await new Promise(resolve => setTimeout(resolve, 100));
+
   // Clear gameLoop after game ends so a new game can be started
   console.log('Game ended. Clearing game loop to allow new game.');
   gameLoop.removeAllListeners();
