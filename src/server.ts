@@ -186,6 +186,7 @@ interface PlayerInfo {
 interface LoginData {
   username: string;
   name: string;
+  secretKey?: string; // Optional - provided by client if they have one stored
 }
 
 const GAME_EVENTS_FILE = path.join(JSON_DB_DIR, 'gameEvents.json');
@@ -275,6 +276,7 @@ const endGameInDB = (gameId: string, winnerId: string): void => {
 const connectedPlayers: Map<string, PlayerInfo> = new Map();
 const playerIdToSocketId: Map<string, string> = new Map();
 const socketIdToPlayerId: Map<string, string> = new Map(); // Track socket -> player ID mapping for reconnection
+const usernameToSecretKey: Map<string, string> = new Map(); // Track username -> secret key for authentication
 const playAgainVotes: Set<string> = new Set();
 let gameLoop: GameLoop | null = null;
 let mostRecentGameSnapshot: GameSnapshot | null = null;
@@ -377,12 +379,18 @@ io.on('connection', socket => {
   });
 });
 
+// Generate a secure random secret key
+function generateSecretKey(): string {
+  return `${Date.now()}-${Math.random().toString(36).substring(2, 15)}-${Math.random().toString(36).substring(2, 15)}`;
+}
+
 function handleLogin(socket: Socket, data: LoginData): void {
-  const { username, name } = data;
+  const { username, name, secretKey } = data;
   let agent: WebSocketAgent;
   let playerId: string;
+  let newSecretKey: string;
 
-  console.log('Handling login for user:', username, 'socket:', socket.id);
+  console.log('Handling login for user:', username, 'socket:', socket.id, 'hasSecretKey:', !!secretKey);
 
   // Check if this socket already has a player ID (reconnection scenario)
   const existingPlayerId = socketIdToPlayerId.get(socket.id);
@@ -396,6 +404,7 @@ function handleLogin(socket: Socket, data: LoginData): void {
       );
       agent = oldPlayerInfo.agent;
       playerId = existingPlayerId;
+      newSecretKey = usernameToSecretKey.get(username) || generateSecretKey();
       
       // Update socket if different
       if (oldPlayerInfo.agent.socket.id !== socket.id) {
@@ -415,36 +424,32 @@ function handleLogin(socket: Socket, data: LoginData): void {
       // Player ID exists but no player info - create new
       playerId = existingPlayerId;
       agent = new WebSocketAgent(socket, playerId);
+      newSecretKey = usernameToSecretKey.get(username) || generateSecretKey();
       console.log(`Creating new WebSocketAgent for existing player ID: ${playerId}`);
     }
   } else {
     // New login - check if username is already taken
     const existingPlayerInfo = connectedPlayers.get(username);
+    const storedSecretKey = usernameToSecretKey.get(username);
     
     if (existingPlayerInfo) {
-      // Username is taken - check if the old socket is still connected
-      const oldSocketId = playerIdToSocketId.get(username);
-      const oldSocket = oldSocketId ? io.sockets.sockets.get(oldSocketId) : null;
-      
-      if (oldSocket && oldSocket.connected) {
-        // Old socket is still connected - this is a conflict (two people with same username)
-        // Create unique ID to allow both
+      // Username is taken - verify secret key
+      if (secretKey && storedSecretKey && secretKey === storedSecretKey) {
+        // Secret key matches - this is the same user (page refresh scenario)
         console.log(
-          `Username ${username} is already taken by connected socket ${oldSocketId}. Creating unique ID.`
-        );
-        playerId = getUniquePlayerId(username, socket.id);
-        agent = new WebSocketAgent(socket, playerId);
-      } else {
-        // Old socket is disconnected - replace it (page refresh scenario)
-        console.log(
-          `Username ${username} was taken but old socket is disconnected. Replacing with new socket ${socket.id}.`
+          `Username ${username} is taken but secret key matches. Replacing old socket with new socket ${socket.id}.`
         );
         playerId = username;
+        newSecretKey = storedSecretKey; // Keep existing secret key
         
         // Clean up old mappings
+        const oldSocketId = playerIdToSocketId.get(username);
         if (oldSocketId) {
           socketIdToPlayerId.delete(oldSocketId);
-          playerIdToSocketId.delete(username);
+          const oldSocket = io.sockets.sockets.get(oldSocketId);
+          if (oldSocket) {
+            oldSocket.disconnect(true);
+          }
         }
         
         // Reuse existing agent if it's a WebSocketAgent, otherwise create new
@@ -455,16 +460,30 @@ function handleLogin(socket: Socket, data: LoginData): void {
         } else {
           agent = new WebSocketAgent(socket, playerId);
         }
+      } else {
+        // Secret key doesn't match or is missing - reject login
+        console.log(
+          `Username ${username} is already taken and secret key doesn't match. Rejecting login.`
+        );
+        socket.emit('loginRejected', {
+          reason: 'ALREADY_LOGGED_IN',
+          message: 'Cannot login. Already logged in somewhere else.',
+        });
+        return;
       }
     } else {
-      // Username is available - use it directly
+      // Username is available - create new user with new secret key
       playerId = username;
+      newSecretKey = generateSecretKey();
       agent = new WebSocketAgent(socket, playerId);
       console.log(
-        `New player login: ${username} assigned player ID: ${playerId}`
+        `New player login: ${username} assigned player ID: ${playerId} with new secret key`
       );
     }
   }
+
+  // Store secret key for this username
+  usernameToSecretKey.set(username, newSecretKey);
 
   const playerInfo: PlayerInfo = { id: playerId, name, agent };
 
@@ -474,9 +493,10 @@ function handleLogin(socket: Socket, data: LoginData): void {
   connectedPlayers.set(playerId, playerInfo);
 
   console.log('emitting loggedIn event to client:', playerId);
-  const loggedInData: PlayerIdAndName = {
+  const loggedInData: PlayerIdAndName & { secretKey: string } = {
     id: playerId,
     name,
+    secretKey: newSecretKey,
   };
   socket.emit('loggedIn', loggedInData);
   emitConnectedPlayers();
