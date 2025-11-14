@@ -24,25 +24,27 @@ export class CribbageGame extends EventEmitter {
   // private gameEventRecords: GameEvent[]; // Log of all game actions
   private gameSnapshotHistory: GameSnapshot[]; // Log of all game state and events
   private pendingDecisionRequests: DecisionRequest[] = []; // Active decision requests
+  private dealerSelectionCards: Map<string, { cardIndex: number; card: Card; timestamp: number }> = new Map(); // Track dealer selection cards
 
   constructor(playersInfo: PlayerIdAndName[], startingScore = 0) {
     super();
     const deck = this.generateDeck();
-    const players = playersInfo.map((info, index) => ({
+    // Initially, no dealer is set - dealer will be determined by card selection
+    const players = playersInfo.map((info) => ({
       id: info.id,
       name: info.name,
       hand: [],
       peggingHand: [],
       playedCards: [],
       score: startingScore,
-      isDealer: index === 0,
+      isDealer: false, // Dealer will be determined by card selection
     })) as Player[];
     const id = `game-${Date.now()}-${playersInfo.map(p => p.id).join('-')}`;
     this.gameState = {
       id: id,
       players,
       deck,
-      currentPhase: Phase.DEALING,
+      currentPhase: Phase.DEALER_SELECTION, // Start with dealer selection phase
       crib: [],
       turnCard: null,
       peggingStack: [],
@@ -110,7 +112,8 @@ export class CribbageGame extends EventEmitter {
 
   public startRound(): void {
     // dont rotate dealer if this is the first round
-    if (this.gameSnapshotHistory.length > 0) {
+    // Check roundNumber instead of snapshotHistory.length because dealer selection creates snapshots
+    if (this.gameState.roundNumber > 0) {
       this.gameState.deck = this.generateDeck();
       // Rotate dealer position
       const dealerIndex = this.gameState.players.findIndex(
@@ -153,6 +156,11 @@ export class CribbageGame extends EventEmitter {
   public endGame(winnerId: string): void {
     const winner = this.gameState.players.find(p => p.id === winnerId);
     if (!winner) throw new Error(`Winner not found: ${winnerId}`);
+    
+    // Set phase to END before recording the event so the snapshot includes Phase.END
+    this.gameState.currentPhase = Phase.END;
+    
+    // Record the WIN event and emit final snapshot with Phase.END
     this.recordGameEvent(ActionType.WIN, winnerId, null, 0);
   }
 
@@ -254,6 +262,161 @@ export class CribbageGame extends EventEmitter {
     const dealer = this.gameState.players.find(p => p.isDealer);
     if (!dealer) throw new Error('Dealer not found.');
     return dealer.id;
+  }
+
+  /**
+   * Handle dealer card selection with conflict resolution
+   * If two players select the same index, first request gets that index,
+   * second gets next available (or previous if at end)
+   */
+  public selectDealerCard(playerId: string, requestedIndex: number): void {
+    if (this.gameState.currentPhase !== Phase.DEALER_SELECTION) {
+      throw new Error('Cannot select dealer card outside of dealer selection phase.');
+    }
+
+    const player = this.gameState.players.find(p => p.id === playerId);
+    if (!player) throw new Error('Player not found.');
+
+    // Check if player already selected
+    if (this.dealerSelectionCards.has(playerId)) {
+      throw new Error('Player has already selected a dealer card.');
+    }
+
+    // Check if requested index is already taken
+    const takenIndices = Array.from(this.dealerSelectionCards.values()).map(v => v.cardIndex);
+    let finalIndex = requestedIndex;
+
+    if (takenIndices.includes(requestedIndex)) {
+      // Conflict: find next available index
+      const maxIndex = this.gameState.deck.length - 1;
+      let nextIndex = requestedIndex + 1;
+      
+      // Try next indices first
+      while (nextIndex <= maxIndex && takenIndices.includes(nextIndex)) {
+        nextIndex++;
+      }
+      
+      if (nextIndex <= maxIndex) {
+        finalIndex = nextIndex;
+      } else {
+        // Try previous indices if next doesn't work
+        let prevIndex = requestedIndex - 1;
+        while (prevIndex >= 0 && takenIndices.includes(prevIndex)) {
+          prevIndex--;
+        }
+        if (prevIndex >= 0) {
+          finalIndex = prevIndex;
+        } else {
+          throw new Error('No available card indices for dealer selection.');
+        }
+      }
+    }
+
+    // Validate index
+    if (finalIndex < 0 || finalIndex >= this.gameState.deck.length) {
+      throw new Error(`Invalid card index: ${finalIndex}`);
+    }
+
+    const selectedCard = this.gameState.deck[finalIndex];
+    if (!selectedCard) {
+      throw new Error('No card found at selected index.');
+    }
+
+    // Store selection
+    this.dealerSelectionCards.set(playerId, {
+      cardIndex: finalIndex,
+      card: selectedCard,
+      timestamp: Date.now(),
+    });
+
+    // Record event
+    this.recordGameEvent(ActionType.SELECT_DEALER_CARD, playerId, [selectedCard], 0);
+
+    // Check if all players have selected
+    if (this.dealerSelectionCards.size === this.gameState.players.length) {
+      this.determineDealer();
+    }
+  }
+
+  /**
+   * Determine dealer based on selected cards (lowest card wins)
+   * Uses runValue for ranking, suit breaks ties (Clubs < Diamonds < Hearts < Spades)
+   */
+  private determineDealer(): void {
+    const suitOrder: Record<string, number> = {
+      'SPADES': 4,
+      'HEARTS': 3,
+      'DIAMONDS': 2,
+      'CLUBS': 1,
+    };
+
+    if (this.dealerSelectionCards.size === 0) {
+      throw new Error('Could not determine dealer - no cards selected.');
+    }
+
+    // Convert to array for easier processing
+    const selections = Array.from(this.dealerSelectionCards.entries());
+    if (selections.length === 0) {
+      throw new Error('Could not determine dealer - no cards selected.');
+    }
+
+    // Find lowest card
+    const lowestSelection = selections.reduce((lowest, [playerId, selection]) => {
+      const parsed = parseCard(selection.card);
+      const suitOrderValue = suitOrder[parsed.suit] || 0;
+
+      if (!lowest) {
+        return {
+          playerId,
+          card: selection.card,
+          runValue: parsed.runValue,
+          suitOrder: suitOrderValue,
+        };
+      }
+
+      // Compare: first by runValue (lower wins), then by suit (lower wins)
+      if (
+        parsed.runValue < lowest.runValue ||
+        (parsed.runValue === lowest.runValue && suitOrderValue < lowest.suitOrder)
+      ) {
+        return {
+          playerId,
+          card: selection.card,
+          runValue: parsed.runValue,
+          suitOrder: suitOrderValue,
+        };
+      }
+
+      return lowest;
+    }, null as { playerId: string; card: Card; runValue: number; suitOrder: number } | null);
+
+    if (!lowestSelection) {
+      throw new Error('Could not determine dealer - no cards selected.');
+    }
+
+    // Set dealer
+    const dealerId = lowestSelection.playerId;
+    const dealerCard = lowestSelection.card;
+    this.gameState.players.forEach(player => {
+      player.isDealer = player.id === dealerId;
+    });
+
+    console.log(`Dealer determined: Player ${dealerId} selected ${dealerCard} (lowest card)`);
+
+    // Transition to DEALING phase
+    // NOTE: Do NOT clear dealerSelectionCards here - they need to remain visible
+    // during the READY_FOR_GAME_START acknowledgment phase
+    // They will be cleared after acknowledgment completes
+    this.gameState.currentPhase = Phase.DEALING;
+    this.recordGameEvent(ActionType.BEGIN_PHASE, null, null, 0);
+  }
+
+  /**
+   * Clear dealer selection cards after acknowledgment phase
+   * Called after all players have acknowledged ready for game start
+   */
+  public clearDealerSelectionCards(): void {
+    this.dealerSelectionCards.clear();
   }
 
   public getFollowingPlayerId(playerId: string): string {
@@ -592,14 +755,49 @@ export class CribbageGame extends EventEmitter {
     // Redact deck contents (keep count visible via length)
     const redactedDeck = this.gameState.deck.map(() => 'UNKNOWN' as Card);
 
+    // Add dealer selection cards (hidden until all players have selected)
+    const dealerSelectionCards: Record<string, Card | 'UNKNOWN'> = {};
+    if (this.gameState.currentPhase === Phase.DEALER_SELECTION || 
+        (this.gameState.currentPhase === Phase.DEALING && this.dealerSelectionCards.size > 0)) {
+      for (const player of this.gameState.players) {
+        dealerSelectionCards[player.id] = this.getDealerSelectionCard(player.id, forPlayerId);
+      }
+    }
+
     // Return redacted game state
     return {
       ...this.gameState,
       players: redactedPlayers,
       crib: redactedCrib,
       deck: redactedDeck,
+      dealerSelectionCards: Object.keys(dealerSelectionCards).length > 0 ? dealerSelectionCards : undefined,
       // All other fields remain visible (scores, pegging stack, turn card, etc.)
     };
+  }
+
+  /**
+   * Get dealer selection card for a player
+   * Returns 'UNKNOWN' if not all players have selected yet
+   * @param playerId - ID of the player whose selection to get
+   * @param forPlayerId - ID of the player requesting (for redaction)
+   * @returns The selected card, or 'UNKNOWN' if not all have selected
+   */
+  public getDealerSelectionCard(playerId: string, forPlayerId: string): Card | 'UNKNOWN' {
+    // Check if all players have selected
+    const allPlayersSelected = this.dealerSelectionCards.size === this.gameState.players.length;
+    
+    if (!allPlayersSelected) {
+      // Not all players have selected - hide all cards
+      return 'UNKNOWN';
+    }
+    
+    // All players have selected - reveal the card
+    const selection = this.dealerSelectionCards.get(playerId);
+    if (!selection) {
+      return 'UNKNOWN';
+    }
+    
+    return selection.card;
   }
 
   /**
@@ -647,6 +845,12 @@ export class CribbageGame extends EventEmitter {
       case ActionType.PLAY_CARD:
         // Played cards are public (everyone sees what was played)
         shouldRedact = false;
+        break;
+
+      case ActionType.SELECT_DEALER_CARD:
+        // Dealer selection cards are hidden until all players have selected
+        const allPlayersSelected = this.dealerSelectionCards.size === this.gameState.players.length;
+        shouldRedact = !allPlayersSelected;
         break;
 
       case ActionType.SCORE_HAND:

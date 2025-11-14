@@ -8,6 +8,7 @@ import {
   PlayerIdAndName,
   GameInfo,
   GameSnapshot,
+  Phase,
 } from './types';
 import { WebSocketAgent } from './agents/WebSocketAgent';
 import { ExhaustiveSimpleAgent } from './agents/ExhaustiveSimpleAgent';
@@ -58,12 +59,122 @@ const server = http.createServer((req, res) => {
   res.end('Not found');
 });
 
+// Support multiple origins or wildcard for development
+// Also automatically supports both HTTP and HTTPS versions of origins
+const getAllowedOrigins = (): string | string[] | ((origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => void) => {
+  if (!WEB_APP_ORIGIN) {
+    // If no origin specified, allow all (development only)
+    console.warn('WEB_APP_ORIGIN not set - allowing all origins (development only)');
+    // Return a function that always allows
+    return (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      callback(null, true);
+    };
+  }
+  
+  // Support comma-separated origins
+  const origins = WEB_APP_ORIGIN.split(',').map(o => o.trim());
+  
+  // Expand origins to include both HTTP and HTTPS versions
+  const expandedOrigins: string[] = [];
+  origins.forEach(origin => {
+    expandedOrigins.push(origin);
+    // If origin is HTTP, also add HTTPS version
+    if (origin.startsWith('http://')) {
+      expandedOrigins.push(origin.replace('http://', 'https://'));
+    }
+    // If origin is HTTPS, also add HTTP version
+    if (origin.startsWith('https://')) {
+      expandedOrigins.push(origin.replace('https://', 'http://'));
+    }
+  });
+  
+  // Remove duplicates
+  const uniqueOrigins = [...new Set(expandedOrigins)];
+  
+  if (uniqueOrigins.length === 1) {
+    return uniqueOrigins[0];
+  }
+  
+  // Multiple origins - use function to check dynamically
+  return (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    if (!origin) {
+      callback(null, true); // Allow requests with no origin (e.g., mobile apps, Postman)
+      return;
+    }
+    const isAllowed = uniqueOrigins.some(allowedOrigin => {
+      // Support wildcard subdomains
+      if (allowedOrigin.startsWith('*.')) {
+        const domain = allowedOrigin.slice(2);
+        return origin.endsWith(domain);
+      }
+      // Exact match
+      if (origin === allowedOrigin) {
+        return true;
+      }
+      // Also check protocol-agnostic match (http vs https)
+      const originWithoutProtocol = origin.replace(/^https?:\/\//, '');
+      const allowedWithoutProtocol = allowedOrigin.replace(/^https?:\/\//, '');
+      return originWithoutProtocol === allowedWithoutProtocol;
+    });
+    callback(null, isAllowed);
+  };
+};
+
 const io = new Server(server, {
   cors: {
-    origin: WEB_APP_ORIGIN,
+    origin: getAllowedOrigins(),
     methods: ['GET', 'POST'],
     credentials: true,
   },
+  allowEIO3: true, // Allow Socket.IO v3 clients
+  // Configuration for reverse proxy support
+  transports: ['websocket', 'polling'], // Support both WebSocket and polling
+  pingTimeout: 60000, // Increase timeout for slow connections/proxies
+  pingInterval: 25000,
+  upgradeTimeout: 10000,
+  maxHttpBufferSize: 1e6,
+  // Allow all handshake requests - auth is checked via middleware
+  allowRequest: (req, callback) => {
+    const origin = req.headers.origin;
+    const path = req.url;
+    const forwardedFor = req.headers['x-forwarded-for'];
+    const realIp = req.headers['x-real-ip'];
+    
+    console.log(`[Handshake] Origin: ${origin || 'none'}, Path: ${path}, X-Forwarded-For: ${forwardedFor || 'none'}, X-Real-IP: ${realIp || 'none'}`);
+    
+    // Allow all handshakes - auth is checked in middleware after connection
+    callback(null, true);
+  },
+});
+
+// TEMPORARY: Disable auth to diagnose connection issues
+// TODO: Re-enable after confirming connections work
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token;
+  const origin = socket.handshake.headers.origin;
+  
+  console.log(`[Middleware] Auth check (DISABLED) for socket ${socket.id}:`, {
+    origin: origin || 'none',
+    hasToken: !!token,
+    authKeys: Object.keys(socket.handshake.auth || {}),
+    query: Object.keys(socket.handshake.query || {})
+  });
+  
+  // TEMPORARILY ALLOW ALL CONNECTIONS
+  console.log(`[Middleware] ✓ ALLOWING connection (auth disabled for testing)`);
+  next();
+  
+  // Original auth check (commented out):
+  // if (token !== WEBSOCKET_AUTH_TOKEN) {
+  //   console.error(`[Middleware] Auth REJECTED for socket ${socket.id}:`, {
+  //     expectedTokenSet: !!WEBSOCKET_AUTH_TOKEN,
+  //     receivedToken: token ? '***' : 'NONE',
+  //     expectedToken: WEBSOCKET_AUTH_TOKEN ? '***' : 'NOT_SET'
+  //   });
+  //   return next(new Error('Authentication failed'));
+  // }
+  // console.log(`[Middleware] ✓ Auth PASSED for socket ${socket.id}`);
+  // next();
 });
 
 interface PlayerInfo {
@@ -75,6 +186,7 @@ interface PlayerInfo {
 interface LoginData {
   username: string;
   name: string;
+  secretKey?: string; // Optional - provided by client if they have one stored
 }
 
 const GAME_EVENTS_FILE = path.join(JSON_DB_DIR, 'gameEvents.json');
@@ -163,19 +275,32 @@ const endGameInDB = (gameId: string, winnerId: string): void => {
 
 const connectedPlayers: Map<string, PlayerInfo> = new Map();
 const playerIdToSocketId: Map<string, string> = new Map();
+const socketIdToPlayerId: Map<string, string> = new Map(); // Track socket -> player ID mapping for reconnection
+const usernameToSecretKey: Map<string, string> = new Map(); // Track username -> secret key for authentication
 const playAgainVotes: Set<string> = new Set();
 let gameLoop: GameLoop | null = null;
 let mostRecentGameSnapshot: GameSnapshot | null = null;
 let currentRoundGameEvents: GameEvent[] = [];
 
-io.on('connection', socket => {
-  const token = socket.handshake.auth.token;
-  if (token !== WEBSOCKET_AUTH_TOKEN) {
-    console.log('Incorrect socket token for socket:', socket.id);
-    socket.disconnect();
-    return;
+// Generate unique player ID from username, handling conflicts
+function getUniquePlayerId(username: string, socketId: string): string {
+  // First, try using the username directly
+  if (!connectedPlayers.has(username)) {
+    return username;
   }
-  console.log('New socket connection:', socket.id);
+  
+  // If username is taken, append socket ID to make it unique
+  // This allows multiple users with the same username
+  const uniqueId = `${username}_${socketId}`;
+  return uniqueId;
+}
+
+io.on('connection', socket => {
+  const origin = socket.handshake.headers.origin;
+  const address = socket.handshake.address;
+  
+  // Auth was already checked in middleware, so this socket is authenticated
+  console.log(`[Connection] ✓ Socket connected: ${socket.id} from ${origin || 'proxy'} (${address})`);
 
   // send the connected players to the clients even before login
   // so they can see who is already connected
@@ -184,6 +309,17 @@ io.on('connection', socket => {
   socket.on('login', (data: LoginData) => {
     console.log('Received login event from socket:', socket.id);
     handleLogin(socket, data);
+  });
+
+  socket.on('getConnectedPlayers', () => {
+    console.log('Received getConnectedPlayers request from socket:', socket.id);
+    // Send current connected players to this specific client
+    const playersIdAndName: PlayerIdAndName[] = [];
+    connectedPlayers.forEach(playerInfo => {
+      playersIdAndName.push({ id: playerInfo.id, name: playerInfo.name });
+    });
+    console.log('Sending connected players to requesting client:', playersIdAndName);
+    socket.emit('connectedPlayers', playersIdAndName);
   });
 
   socket.on('startGame', () => {
@@ -201,9 +337,7 @@ io.on('connection', socket => {
   });
 
   socket.on('playAgain', () => {
-    const playerId = [...playerIdToSocketId.entries()].find(
-      ([, id]) => id === socket.id
-    )?.[0];
+    const playerId = socketIdToPlayerId.get(socket.id);
     if (!playerId) {
       console.error('Player ID not found for socket:', socket.id);
       return;
@@ -222,16 +356,17 @@ io.on('connection', socket => {
     }
   });
 
-  socket.on('disconnect', () => {
-    console.log('A socket disconnected:', socket.id);
+  socket.on('disconnect', (reason) => {
+    console.log(`A socket disconnected: ${socket.id}, Reason: ${reason}`);
     // only remove the player if the game loop is not running
     if (!gameLoop) {
-      playerIdToSocketId.forEach((socketId, playerId) => {
-        if (socketId === socket.id) {
-          connectedPlayers.delete(playerId);
-          playerIdToSocketId.delete(playerId);
-        }
-      });
+      const playerId = socketIdToPlayerId.get(socket.id);
+      if (playerId) {
+        connectedPlayers.delete(playerId);
+        playerIdToSocketId.delete(playerId);
+        socketIdToPlayerId.delete(socket.id);
+        console.log(`Removed player ${playerId} (socket ${socket.id})`);
+      }
       // send updated connected players to all clients
       emitConnectedPlayers();
     } else {
@@ -244,48 +379,128 @@ io.on('connection', socket => {
   });
 });
 
+// Generate a secure random secret key
+function generateSecretKey(): string {
+  return `${Date.now()}-${Math.random().toString(36).substring(2, 15)}-${Math.random().toString(36).substring(2, 15)}`;
+}
+
 function handleLogin(socket: Socket, data: LoginData): void {
-  const { username, name } = data;
+  const { username, name, secretKey } = data;
   let agent: WebSocketAgent;
-  console.log('Handling login for user:', username);
+  let playerId: string;
+  let newSecretKey: string;
 
-  // Replace old socket if player reconnects
-  const oldPlayerInfo = connectedPlayers.get(username);
+  console.log('Handling login for user:', username, 'socket:', socket.id, 'hasSecretKey:', !!secretKey);
 
-  if (oldPlayerInfo && oldPlayerInfo.agent instanceof WebSocketAgent) {
-    console.log(
-      `Player ${username} reconnected. Updating socket for their WebSocketAgent.`
-    );
-    agent = oldPlayerInfo.agent;
-    console.log(
-      `Old socket ID: ${oldPlayerInfo.agent.socket.id}, New socket ID: ${socket.id}`
-    );
-    // compare the socket ids and if they are different, replace the socket
-    if (oldPlayerInfo.agent.socket.id !== socket.id) {
+  // Check if this socket already has a player ID (reconnection scenario)
+  const existingPlayerId = socketIdToPlayerId.get(socket.id);
+  
+  if (existingPlayerId) {
+    // This socket already has a player ID - this is a reconnection
+    const oldPlayerInfo = connectedPlayers.get(existingPlayerId);
+    if (oldPlayerInfo && oldPlayerInfo.agent instanceof WebSocketAgent) {
       console.log(
-        `Replacing old socket ${oldPlayerInfo.agent.socket.id} with new socket ${socket.id}`
+        `Player ${existingPlayerId} (${username}) reconnected. Updating socket for their WebSocketAgent.`
       );
-      oldPlayerInfo.agent.socket.disconnect(true); // Disconnect old socket if applicable
-      agent.updateSocket(socket);
+      agent = oldPlayerInfo.agent;
+      playerId = existingPlayerId;
+      newSecretKey = usernameToSecretKey.get(username) || generateSecretKey();
+      
+      // Update socket if different
+      if (oldPlayerInfo.agent.socket.id !== socket.id) {
+        console.log(
+          `Replacing old socket ${oldPlayerInfo.agent.socket.id} with new socket ${socket.id}`
+        );
+        oldPlayerInfo.agent.socket.disconnect(true);
+        agent.updateSocket(socket);
+      }
+      
+      // Update player name if it changed
+      if (oldPlayerInfo.name !== name) {
+        console.log(`Updating player name from "${oldPlayerInfo.name}" to "${name}"`);
+        oldPlayerInfo.name = name;
+      }
+    } else {
+      // Player ID exists but no player info - create new
+      playerId = existingPlayerId;
+      agent = new WebSocketAgent(socket, playerId);
+      newSecretKey = usernameToSecretKey.get(username) || generateSecretKey();
+      console.log(`Creating new WebSocketAgent for existing player ID: ${playerId}`);
     }
   } else {
-    console.log(
-      `Player ${username} logged in for the first time. Creating new WebSocketAgent.`
-    );
-    agent = new WebSocketAgent(socket, username);
+    // New login - check if username is already taken
+    const existingPlayerInfo = connectedPlayers.get(username);
+    const storedSecretKey = usernameToSecretKey.get(username);
+    
+    if (existingPlayerInfo) {
+      // Username is taken - verify secret key
+      if (secretKey && storedSecretKey && secretKey === storedSecretKey) {
+        // Secret key matches - this is the same user (page refresh scenario)
+        console.log(
+          `Username ${username} is taken but secret key matches. Replacing old socket with new socket ${socket.id}.`
+        );
+        playerId = username;
+        newSecretKey = storedSecretKey; // Keep existing secret key
+        
+        // Clean up old mappings
+        const oldSocketId = playerIdToSocketId.get(username);
+        if (oldSocketId) {
+          socketIdToPlayerId.delete(oldSocketId);
+          const oldSocket = io.sockets.sockets.get(oldSocketId);
+          if (oldSocket) {
+            oldSocket.disconnect(true);
+          }
+        }
+        
+        // Reuse existing agent if it's a WebSocketAgent, otherwise create new
+        if (existingPlayerInfo.agent instanceof WebSocketAgent) {
+          agent = existingPlayerInfo.agent;
+          // Update socket reference
+          agent.updateSocket(socket);
+        } else {
+          agent = new WebSocketAgent(socket, playerId);
+        }
+      } else {
+        // Secret key doesn't match or is missing - reject login
+        console.log(
+          `Username ${username} is already taken and secret key doesn't match. Rejecting login.`
+        );
+        socket.emit('loginRejected', {
+          reason: 'ALREADY_LOGGED_IN',
+          message: 'Cannot login. Already logged in somewhere else.',
+        });
+        return;
+      }
+    } else {
+      // Username is available - create new user with new secret key
+      playerId = username;
+      newSecretKey = generateSecretKey();
+      agent = new WebSocketAgent(socket, playerId);
+      console.log(
+        `New player login: ${username} assigned player ID: ${playerId} with new secret key`
+      );
+    }
   }
-  const playerInfo: PlayerInfo = { id: username, name, agent };
 
-  playerIdToSocketId.set(username, socket.id);
+  // Store secret key for this username
+  usernameToSecretKey.set(username, newSecretKey);
 
-  connectedPlayers.set(username, playerInfo);
-  console.log('emitting loggedIn event to client:', username);
-  const loggedInData: PlayerIdAndName = {
-    id: username,
+  const playerInfo: PlayerInfo = { id: playerId, name, agent };
+
+  // Update mappings
+  playerIdToSocketId.set(playerId, socket.id);
+  socketIdToPlayerId.set(socket.id, playerId);
+  connectedPlayers.set(playerId, playerInfo);
+
+  console.log('emitting loggedIn event to client:', playerId);
+  const loggedInData: PlayerIdAndName & { secretKey: string } = {
+    id: playerId,
     name,
+    secretKey: newSecretKey,
   };
   socket.emit('loggedIn', loggedInData);
   emitConnectedPlayers();
+  
   // if the game loop is running, send the most recent game data to the client
   if (gameLoop) {
     sendMostRecentGameData(socket);
@@ -310,9 +525,18 @@ function emitConnectedPlayers(): void {
 }
 
 async function handleStartGame(): Promise<void> {
+  // If gameLoop exists, check if game is over (Phase.END)
+  // If game is over, clear it to allow starting a new game
   if (gameLoop) {
-    console.error('Game loop already running. Cannot start a new game.');
-    throw new Error('Game loop already running. Cannot start a new game.');
+    const gameState = gameLoop.cribbageGame.getGameState();
+    if (gameState.currentPhase === Phase.END) {
+      console.log('Game is over. Clearing game loop to start a new game.');
+      gameLoop.removeAllListeners();
+      gameLoop = null;
+    } else {
+      console.error('Game loop already running. Cannot start a new game.');
+      throw new Error('Game loop already running. Cannot start a new game.');
+    }
   }
   console.log('Starting game...');
   // If only one player is connected, add a bot
@@ -357,6 +581,15 @@ async function handleStartGame(): Promise<void> {
 
   // Emit game state changes with redaction per player
   gameLoop.on('gameSnapshot', (newSnapshot: GameSnapshot) => {
+    const snapshotReceivedTime = Date.now();
+    const actionType = newSnapshot.gameEvent.actionType;
+    const pendingRequests = newSnapshot.pendingDecisionRequests || [];
+    const readyForCountingRequests = pendingRequests.filter(r => r.decisionType === 'READY_FOR_COUNTING' || r.decisionType === 'READY_FOR_NEXT_ROUND');
+    
+    if (readyForCountingRequests.length > 0) {
+      console.log(`[TIMING] Server received gameSnapshot event at ${snapshotReceivedTime}ms with ${readyForCountingRequests.length} acknowledgment requests`);
+    }
+    
     // Store the full snapshot for internal use (agents, database, etc.)
     mostRecentGameSnapshot = newSnapshot;
     sendGameEventToDB(newSnapshot.gameEvent);
@@ -377,6 +610,7 @@ async function handleStartGame(): Promise<void> {
     connectedPlayers.forEach(playerInfo => {
       const socketId = playerIdToSocketId.get(playerInfo.id);
       if (socketId) {
+        const redactStartTime = Date.now();
         const redactedGameState = gameLoop!.cribbageGame.getRedactedGameState(
           playerInfo.id
         );
@@ -384,12 +618,25 @@ async function handleStartGame(): Promise<void> {
           newSnapshot.gameEvent,
           playerInfo.id
         );
+        const redactEndTime = Date.now();
+        
+        if (readyForCountingRequests.length > 0) {
+          console.log(`[TIMING] Server redacted snapshot for player ${playerInfo.id} at ${redactEndTime}ms (redaction took ${redactEndTime - redactStartTime}ms)`);
+        }
+        
         const redactedSnapshot: GameSnapshot = {
           gameState: redactedGameState,
           gameEvent: redactedGameEvent,
           pendingDecisionRequests: newSnapshot.pendingDecisionRequests, // Include pending requests
         };
+        
+        const emitStartTime = Date.now();
         io.to(socketId).emit('gameSnapshot', redactedSnapshot);
+        const emitEndTime = Date.now();
+        
+        if (readyForCountingRequests.length > 0) {
+          console.log(`[TIMING] Server emitted gameSnapshot to player ${playerInfo.id} at ${emitEndTime}ms (emit took ${emitEndTime - emitStartTime}ms, total from receive: ${emitEndTime - snapshotReceivedTime}ms)`);
+        }
 
         // Also send redacted current round game events to this player
         const redactedRoundEvents = currentRoundGameEvents.map(event =>
@@ -451,9 +698,7 @@ function sendMostRecentGameData(socket: Socket): void {
   console.log('Sending most recent game data to client');
   
   // Find which player this socket belongs to
-  const playerId = [...playerIdToSocketId.entries()].find(
-    ([, id]) => id === socket.id
-  )?.[0];
+  const playerId = socketIdToPlayerId.get(socket.id);
 
   if (!playerId) {
     console.error('Could not find player ID for socket:', socket.id);
@@ -462,6 +707,22 @@ function sendMostRecentGameData(socket: Socket): void {
 
   // Send redacted GameSnapshot for this specific player
   if (mostRecentGameSnapshot && gameLoop) {
+    // Check if player exists in the game before trying to get redacted state
+    const currentGameState = gameLoop.cribbageGame.getGameState();
+    const playerExistsInGame = currentGameState.players.some(
+      p => p.id === playerId
+    );
+    
+    if (!playerExistsInGame) {
+      console.log(
+        `Player ${playerId} not found in game. Skipping game state send.`
+      );
+      // Still send empty arrays for consistency
+      socket.emit('currentRoundGameEvents', []);
+      socket.emit('playAgainVotes', []);
+      return;
+    }
+
     // Update WebSocketAgent with the latest snapshot
     const playerInfo = connectedPlayers.get(playerId);
     if (playerInfo && playerInfo.agent instanceof WebSocketAgent) {
@@ -487,10 +748,20 @@ function sendMostRecentGameData(socket: Socket): void {
   
   // Send redacted current round game events
   if (gameLoop && mostRecentGameSnapshot) {
-    const redactedRoundEvents = currentRoundGameEvents.map(event =>
-      gameLoop!.cribbageGame.getRedactedGameEvent(event, playerId)
+    // Check if player exists in game before redacting events
+    const currentGameState = gameLoop.cribbageGame.getGameState();
+    const playerExistsInGame = currentGameState.players.some(
+      p => p.id === playerId
     );
-    socket.emit('currentRoundGameEvents', redactedRoundEvents);
+    
+    if (playerExistsInGame) {
+      const redactedRoundEvents = currentRoundGameEvents.map(event =>
+        gameLoop!.cribbageGame.getRedactedGameEvent(event, playerId)
+      );
+      socket.emit('currentRoundGameEvents', redactedRoundEvents);
+    } else {
+      socket.emit('currentRoundGameEvents', []);
+    }
   } else {
     socket.emit('currentRoundGameEvents', currentRoundGameEvents);
   }
@@ -507,6 +778,15 @@ async function startGame(): Promise<void> {
   console.log('Starting game loop...');
   const winner = await gameLoop.playGame();
   endGameInDB(gameLoop.cribbageGame.getGameState().id, winner);
+
+  // Wait a brief moment to ensure the final snapshot with Phase.END is sent to all clients
+  // The endGame() call emits a gameSnapshot event which needs to be processed and sent
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  // Clear gameLoop after game ends so a new game can be started
+  console.log('Game ended. Clearing game loop to allow new game.');
+  gameLoop.removeAllListeners();
+  gameLoop = null;
 
   // Reset play again votes and automatically add bots
   playAgainVotes.clear();

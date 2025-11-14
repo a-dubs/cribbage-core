@@ -2,7 +2,7 @@ import { GameLoop } from '../src/gameplay/GameLoop';
 import { ExhaustiveSimpleAgent } from '../src/agents/ExhaustiveSimpleAgent';
 import { HumanAgent } from './HumanAgent';
 import { GameStatistics } from '../src/core/statistics';
-import { GameEvent, PlayerIdAndName } from '../src/types';
+import { GameEvent, PlayerIdAndName, ActionType } from '../src/types';
 import { scoreHand } from '../src/core/scoring';
 
 interface PlayerStatistics {
@@ -83,6 +83,26 @@ async function main() {
   const gameHistory = gameLoop.cribbageGame
     .getGameSnapshotHistory()
     .map(snapshot => snapshot.gameEvent);
+
+  // Log dealer selection results
+  const dealerSelectionEvents = gameHistory.filter(
+    event => event.actionType === ActionType.SELECT_DEALER_CARD
+  );
+  if (dealerSelectionEvents.length > 0) {
+    console.log('\n--- Dealer Selection ---');
+    for (const event of dealerSelectionEvents) {
+      const player = playersInfo.find(p => p.id === event.playerId);
+      const playerName = player?.name || event.playerId;
+      const card = event.cards?.[0] || 'Unknown';
+      console.log(`${playerName} selected: ${card}`);
+    }
+    const dealer = gameLoop.cribbageGame.getGameState().players.find(p => p.isDealer);
+    if (dealer) {
+      const dealerInfo = playersInfo.find(p => p.id === dealer.id);
+      console.log(`Dealer: ${dealerInfo?.name || dealer.id}`);
+    }
+    console.log('---\n');
+  }
 
   const NumberOfRounds = GameStatistics.numberOfRounds(gameHistory);
   console.log(`Winner: ${result} after ${NumberOfRounds} rounds`);
