@@ -418,12 +418,52 @@ function handleLogin(socket: Socket, data: LoginData): void {
       console.log(`Creating new WebSocketAgent for existing player ID: ${playerId}`);
     }
   } else {
-    // New login - use username as player ID, with conflict resolution
-    playerId = getUniquePlayerId(username, socket.id);
-    agent = new WebSocketAgent(socket, playerId);
-    console.log(
-      `New player login: ${username} assigned player ID: ${playerId}`
-    );
+    // New login - check if username is already taken
+    const existingPlayerInfo = connectedPlayers.get(username);
+    
+    if (existingPlayerInfo) {
+      // Username is taken - check if the old socket is still connected
+      const oldSocketId = playerIdToSocketId.get(username);
+      const oldSocket = oldSocketId ? io.sockets.sockets.get(oldSocketId) : null;
+      
+      if (oldSocket && oldSocket.connected) {
+        // Old socket is still connected - this is a conflict (two people with same username)
+        // Create unique ID to allow both
+        console.log(
+          `Username ${username} is already taken by connected socket ${oldSocketId}. Creating unique ID.`
+        );
+        playerId = getUniquePlayerId(username, socket.id);
+        agent = new WebSocketAgent(socket, playerId);
+      } else {
+        // Old socket is disconnected - replace it (page refresh scenario)
+        console.log(
+          `Username ${username} was taken but old socket is disconnected. Replacing with new socket ${socket.id}.`
+        );
+        playerId = username;
+        
+        // Clean up old mappings
+        if (oldSocketId) {
+          socketIdToPlayerId.delete(oldSocketId);
+          playerIdToSocketId.delete(username);
+        }
+        
+        // Reuse existing agent if it's a WebSocketAgent, otherwise create new
+        if (existingPlayerInfo.agent instanceof WebSocketAgent) {
+          agent = existingPlayerInfo.agent;
+          // Update socket reference
+          agent.updateSocket(socket);
+        } else {
+          agent = new WebSocketAgent(socket, playerId);
+        }
+      }
+    } else {
+      // Username is available - use it directly
+      playerId = username;
+      agent = new WebSocketAgent(socket, playerId);
+      console.log(
+        `New player login: ${username} assigned player ID: ${playerId}`
+      );
+    }
   }
 
   const playerInfo: PlayerInfo = { id: playerId, name, agent };
