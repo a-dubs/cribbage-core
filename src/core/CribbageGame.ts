@@ -961,10 +961,17 @@ export class CribbageGame extends EventEmitter {
       return {
         ...gameEvent,
         cards: gameEvent.cards.map(() => 'UNKNOWN' as Card),
+        // Preserve scoreBreakdown - it's safe to show breakdown even if cards are redacted
+        // because breakdown shows scoring reasons, not card values
+        scoreBreakdown: gameEvent.scoreBreakdown,
       };
     }
 
-    return gameEvent;
+    // Return event with all fields including scoreBreakdown
+    return {
+      ...gameEvent,
+      scoreBreakdown: gameEvent.scoreBreakdown,
+    };
   }
 
   /**
