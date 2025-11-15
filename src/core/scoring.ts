@@ -1,4 +1,4 @@
-import { Card } from '../types'; // Assuming this is the file where the Card type is defined.
+import { Card, ScoreBreakdownItem } from '../types'; // Assuming this is the file where the Card type is defined.
 
 type CardValue = {
   pegValue: number;
@@ -313,4 +313,32 @@ export const scorePegging = (peggingStack: Card[]): number => {
   score += scorePeggingRun(parsedStack);
 
   return score;
+};
+
+/**
+ * Score hand with detailed breakdown
+ * Returns both total score and itemized breakdown
+ */
+export const scoreHandWithBreakdown = (
+  hand: Card[],
+  cutCard: Card,
+  isCrib: boolean
+): { total: number; breakdown: ScoreBreakdownItem[] } => {
+  // TODO: Implement using TDD
+  // For now, return stub that calls existing function
+  const total = scoreHand(hand, cutCard, isCrib);
+  return { total, breakdown: [] };
+};
+
+/**
+ * Score pegging stack with detailed breakdown
+ * Returns both total score and itemized breakdown
+ */
+export const scorePeggingWithBreakdown = (
+  peggingStack: Card[]
+): { total: number; breakdown: ScoreBreakdownItem[] } => {
+  // TODO: Implement using TDD
+  // For now, return stub that calls existing function
+  const total = scorePegging(peggingStack);
+  return { total, breakdown: [] };
 };
