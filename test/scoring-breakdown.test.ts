@@ -13,12 +13,17 @@ describe('Scoring Breakdown System', () => {
     item: ScoreBreakdownItem,
     expectedType: ScoreBreakdownItem['type'],
     expectedPoints: number,
-    expectedCardCount: number,
+    expectedCardCount: number | any, // any to allow expect.any(Number)
     expectedDescription?: string
   ) {
     expect(item.type).toBe(expectedType);
     expect(item.points).toBe(expectedPoints);
-    expect(item.cards.length).toBe(expectedCardCount);
+    // Check if expectedCardCount is a Jest matcher (like expect.any)
+    if (expectedCardCount && typeof expectedCardCount === 'object' && expectedCardCount.asymmetricMatch) {
+      expect(item.cards.length).toEqual(expectedCardCount);
+    } else {
+      expect(item.cards.length).toBe(expectedCardCount);
+    }
     if (expectedDescription) {
       expect(item.description).toBe(expectedDescription);
     }
@@ -149,8 +154,9 @@ describe('Scoring Breakdown System', () => {
 
     describe('RUN_OF_4', () => {
       it('should detect run of 4', () => {
+        // Hand with 4 consecutive cards, cut card doesn't extend the run
         const hand: Card[] = ['FIVE_SPADES', 'SIX_HEARTS', 'SEVEN_CLUBS', 'EIGHT_DIAMONDS'];
-        const cutCard: Card = 'NINE_SPADES';
+        const cutCard: Card = 'TWO_SPADES'; // Not part of the run
         const result = scoreHandWithBreakdown(hand, cutCard, false);
 
         verifyTotalMatchesBreakdown(result.total, result.breakdown);
