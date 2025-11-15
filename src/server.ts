@@ -534,8 +534,10 @@ async function handleStartGame(): Promise<void> {
       gameLoop.removeAllListeners();
       gameLoop = null;
     } else {
-      console.error('Game loop already running. Cannot start a new game.');
-      throw new Error('Game loop already running. Cannot start a new game.');
+      // Game is already running - silently ignore duplicate startGame requests
+      // This can happen during restart when client sends startGame after server already started it
+      console.log('Game loop already running. Ignoring duplicate startGame request.');
+      return;
     }
   }
   console.log('Starting game...');
