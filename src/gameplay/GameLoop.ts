@@ -28,6 +28,8 @@ dotenv.config();
 const startingScore = process.env.OVERRIDE_START_SCORE
   ? parseInt(process.env.OVERRIDE_START_SCORE)
   : 0;
+// Feature flag for READY_FOR_COUNTING decision request (defaults to disabled)
+const ENABLE_READY_FOR_COUNTING = process.env.ENABLE_READY_FOR_COUNTING === 'true';
 
 export class GameLoop extends EventEmitter {
   public cribbageGame: CribbageGame;
@@ -598,10 +600,15 @@ export class GameLoop extends EventEmitter {
     }
 
     // READY_FOR_COUNTING: Parallel acknowledgment (all players)
-    await this.waitForAllPlayersReady(
-      AgentDecisionType.READY_FOR_COUNTING,
-      'Ready for counting'
-    );
+    // Feature flag: can be enabled via ENABLE_READY_FOR_COUNTING=true env var
+    if (ENABLE_READY_FOR_COUNTING) {
+      await this.waitForAllPlayersReady(
+        AgentDecisionType.READY_FOR_COUNTING,
+        'Ready for counting'
+      );
+    } else {
+      console.log('[FEATURE FLAG] READY_FOR_COUNTING is disabled, skipping acknowledgment request');
+    }
 
     // SCORING PHASE
     // Loop through each player and score their hand, starting with player after dealer and ending with dealer
