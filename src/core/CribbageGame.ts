@@ -492,18 +492,18 @@ export class CribbageGame extends EventEmitter {
       ) {
         // call resetPeggingRound to reset the pegging round and return the ID of last card player
         console.log(`Player ${playerId} got the last card! and scored 1 point`);
+        // Capture pegging stack BEFORE calling startNewPeggingRound() which clears it
+        const peggingStackForBreakdown = [...this.gameState.peggingStack];
         const lastPlayer = this.startNewPeggingRound();
         // give the player a point for playing the last card
         player.score += 1;
         // log the scoring of the last card
-        // Include the entire pegging stack for context
+        // Include the entire pegging stack for context (captured before reset)
         const lastCardBreakdown: ScoreBreakdownItem[] = [
           {
             type: 'LAST_CARD',
             points: 1,
-            cards: this.gameState.peggingStack.length > 0 
-              ? this.gameState.peggingStack 
-              : [],
+            cards: peggingStackForBreakdown,
             description: 'Last card',
           },
         ];
