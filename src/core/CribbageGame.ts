@@ -15,7 +15,10 @@ import {
   scoreHand,
   scorePegging,
   sumOfPeggingStack,
+  scoreHandWithBreakdown,
+  scorePeggingWithBreakdown,
 } from './scoring';
+import { ScoreBreakdownItem } from '../types';
 import EventEmitter from 'eventemitter3';
 import { isValidDiscard } from './utils';
 
@@ -84,7 +87,8 @@ export class CribbageGame extends EventEmitter {
     actionType: ActionType,
     playerId: string | null,
     cards: Card[] | null,
-    scoreChange: number
+    scoreChange: number,
+    scoreBreakdown?: ScoreBreakdownItem[]
   ) {
     this.gameState.snapshotId += 1;
     const gameEvent: GameEvent = {
@@ -96,6 +100,7 @@ export class CribbageGame extends EventEmitter {
       scoreChange,
       timestamp: new Date(),
       snapshotId: this.gameState.snapshotId,
+      scoreBreakdown: scoreBreakdown || [],
     };
     const newGameSnapshot: GameSnapshot = {
       gameEvent,
@@ -244,7 +249,21 @@ export class CribbageGame extends EventEmitter {
       const dealer = this.gameState.players.find(p => p.isDealer);
       if (!dealer) throw new Error('Dealer not found.');
       dealer.score += 2;
-      this.recordGameEvent(ActionType.SCORE_HEELS, dealer.id, [cutCard], 2);
+      const heelsBreakdown: ScoreBreakdownItem[] = [
+        {
+          type: 'HEELS',
+          points: 2,
+          cards: [cutCard],
+          description: 'Heels',
+        },
+      ];
+      this.recordGameEvent(
+        ActionType.SCORE_HEELS,
+        dealer.id,
+        [cutCard],
+        2,
+        heelsBreakdown
+      );
     }
 
     // Advance to the pegging phase
@@ -473,11 +492,28 @@ export class CribbageGame extends EventEmitter {
       ) {
         // call resetPeggingRound to reset the pegging round and return the ID of last card player
         console.log(`Player ${playerId} got the last card! and scored 1 point`);
+        // Capture pegging stack BEFORE calling startNewPeggingRound() which clears it
+        const peggingStackForBreakdown = [...this.gameState.peggingStack];
         const lastPlayer = this.startNewPeggingRound();
         // give the player a point for playing the last card
         player.score += 1;
         // log the scoring of the last card
-        this.recordGameEvent(ActionType.LAST_CARD, playerId, null, 1);
+        // Include the entire pegging stack for context (captured before reset)
+        const lastCardBreakdown: ScoreBreakdownItem[] = [
+          {
+            type: 'LAST_CARD',
+            points: 1,
+            cards: peggingStackForBreakdown,
+            description: 'Last card',
+          },
+        ];
+        this.recordGameEvent(
+          ActionType.LAST_CARD,
+          playerId,
+          null,
+          1,
+          lastCardBreakdown
+        );
         return lastPlayer;
       }
 
@@ -497,10 +533,12 @@ export class CribbageGame extends EventEmitter {
     this.gameState.playedCards.push({ playerId, card });
 
     // score the pegging stack
-    const score = scorePegging(this.gameState.peggingStack);
+    const { total, breakdown } = scorePeggingWithBreakdown(
+      this.gameState.peggingStack
+    );
 
     // add the score to the player's total
-    player.score += score;
+    player.score += total;
 
     // remove the played card from the player's hand
     player.peggingHand = player.peggingHand.filter(c => c !== card);
@@ -509,7 +547,13 @@ export class CribbageGame extends EventEmitter {
     this.gameState.peggingLastCardPlayer = playerId;
 
     // log the play action
-    this.recordGameEvent(ActionType.PLAY_CARD, playerId, [card], score);
+    this.recordGameEvent(
+      ActionType.PLAY_CARD,
+      playerId,
+      [card],
+      total,
+      breakdown
+    );
 
     // if this is the last card in the pegging round, give the player a point for last
     const playersWithCards = this.gameState.players.filter(
@@ -519,7 +563,24 @@ export class CribbageGame extends EventEmitter {
       // give the player a point for playing the last card
       player.score += 1;
       // log the scoring of the last card
-      this.recordGameEvent(ActionType.LAST_CARD, playerId, null, 1);
+      // Include the entire pegging stack for context
+      const lastCardBreakdown: ScoreBreakdownItem[] = [
+        {
+          type: 'LAST_CARD',
+          points: 1,
+          cards: this.gameState.peggingStack.length > 0 
+            ? this.gameState.peggingStack 
+            : [],
+          description: 'Last card',
+        },
+      ];
+      this.recordGameEvent(
+        ActionType.LAST_CARD,
+        playerId,
+        null,
+        1,
+        lastCardBreakdown
+      );
       // call resetPeggingRound to reset the pegging round and return the ID of last card player
       console.log(`Player ${playerId} played the last card and scored 1 point`);
       return this.startNewPeggingRound();
@@ -529,12 +590,12 @@ export class CribbageGame extends EventEmitter {
     if (sumOfPeggingStack(this.gameState.peggingStack) === 31) {
       // call resetPeggingRound to reset the pegging round and return the ID of last card player
       console.log(
-        `Player ${playerId} played ${card} and got 31 for ${score} points`
+        `Player ${playerId} played ${card} and got 31 for ${total} points`
       );
       return this.startNewPeggingRound();
     }
     console.log(
-      `Player ${playerId} played ${card} for ${score} points - ${sumOfPeggingStack(
+      `Player ${playerId} played ${card} for ${total} points - ${sumOfPeggingStack(
         this.gameState.peggingStack
       )}`
     );
@@ -575,10 +636,20 @@ export class CribbageGame extends EventEmitter {
       throw new Error('Cannot score hand without a turn card.');
     }
 
-    const score = scoreHand(player.hand, this.gameState.turnCard, false);
-    player.score += score;
-    this.recordGameEvent(ActionType.SCORE_HAND, playerId, player.hand, score);
-    return score;
+    const { total, breakdown } = scoreHandWithBreakdown(
+      player.hand,
+      this.gameState.turnCard,
+      false
+    );
+    player.score += total;
+    this.recordGameEvent(
+      ActionType.SCORE_HAND,
+      playerId,
+      player.hand,
+      total,
+      breakdown
+    );
+    return total;
   }
 
   public scoreCrib(playerId: string): number {
@@ -592,15 +663,20 @@ export class CribbageGame extends EventEmitter {
       throw new Error('Cannot score crib without a turn card.');
     }
 
-    const score = scoreHand(this.gameState.crib, this.gameState.turnCard, true);
-    player.score += score;
+    const { total, breakdown } = scoreHandWithBreakdown(
+      this.gameState.crib,
+      this.gameState.turnCard,
+      true
+    );
+    player.score += total;
     this.recordGameEvent(
       ActionType.SCORE_CRIB,
       playerId,
       this.gameState.crib,
-      score
+      total,
+      breakdown
     );
-    return score;
+    return total;
   }
 
   /**
@@ -885,10 +961,17 @@ export class CribbageGame extends EventEmitter {
       return {
         ...gameEvent,
         cards: gameEvent.cards.map(() => 'UNKNOWN' as Card),
+        // Preserve scoreBreakdown - it's safe to show breakdown even if cards are redacted
+        // because breakdown shows scoring reasons, not card values
+        scoreBreakdown: gameEvent.scoreBreakdown,
       };
     }
 
-    return gameEvent;
+    // Return event with all fields including scoreBreakdown
+    return {
+      ...gameEvent,
+      scoreBreakdown: gameEvent.scoreBreakdown,
+    };
   }
 
   /**

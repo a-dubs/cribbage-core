@@ -124,6 +124,7 @@ export interface GameEvent {
   cards: Card[] | null; // Card involved in the last action, if any
   scoreChange: number; // Points gained from the last action, if any
   timestamp: Date; // Time of the last action
+  scoreBreakdown?: ScoreBreakdownItem[]; // NEW: Detailed breakdown of scoring (empty array if no scoring)
   // peggingStack?: Card[]; // Stack of played cards during pegging (including card just played) (if phase is PEGGING)
   // peggingGoPlayers?: string[]; // List of players who have said "Go" during this pegging stack (if phase is PEGGING)
   // peggingLastCardPlayer?: string; // Player who played the last card during pegging (if phase is PEGGING)
@@ -270,6 +271,50 @@ export type ScoreType =
   | 'DOUBLE_RUN_OF_4'
   | 'TRIPLE_RUN_OF_3'
   | 'QUADRUBLE_RUN_OF_3';
+
+/**
+ * Scoring breakdown type - detailed scoring reasons
+ */
+export type ScoreBreakdownType =
+  // Hand/Crib Scoring
+  | 'FIFTEEN'                    // Combination summing to 15
+  | 'PAIR'                       // Two cards of same rank
+  | 'THREE_OF_A_KIND'            // Three cards of same rank
+  | 'FOUR_OF_A_KIND'             // Four cards of same rank
+  | 'RUN_OF_3'                   // Three consecutive cards
+  | 'RUN_OF_4'                   // Four consecutive cards
+  | 'RUN_OF_5'                   // Five consecutive cards
+  | 'DOUBLE_RUN_OF_3'            // Run of 3 with one duplicate (e.g., 2,3,4,4)
+  | 'DOUBLE_RUN_OF_4'             // Run of 4 with one duplicate
+  | 'TRIPLE_RUN_OF_3'            // Run of 3 with two duplicates (e.g., 2,3,4,4,4)
+  | 'QUADRUPLE_RUN_OF_3'         // Run of 3 with three duplicates (e.g., 2,3,3,4,4)
+  | 'FLUSH_4'                    // Four cards of same suit (hand only, not crib)
+  | 'FLUSH_5'                    // Five cards of same suit (including cut card)
+  | 'RIGHT_JACK'                 // Jack in hand matching cut card suit
+  // Pegging Scoring
+  | 'PEGGING_FIFTEEN'            // Pegging stack sums to 15 (all cards in stack)
+  | 'PEGGING_THIRTY_ONE'         // Pegging stack sums to 31 (all cards in stack)
+  | 'PEGGING_PAIR'               // Last 2 cards same rank
+  | 'PEGGING_THREE_OF_A_KIND'    // Last 3 cards same rank
+  | 'PEGGING_FOUR_OF_A_KIND'     // Last 4 cards same rank
+  | 'PEGGING_RUN_OF_3'           // Last 3 cards form run
+  | 'PEGGING_RUN_OF_4'           // Last 4 cards form run
+  | 'PEGGING_RUN_OF_5'           // Last 5 cards form run
+  | 'PEGGING_RUN_OF_6'           // Last 6 cards form run
+  | 'PEGGING_RUN_OF_7'           // Last 7 cards form run (maximum possible)
+  // Special Scoring
+  | 'LAST_CARD'                  // Player played last card in pegging round
+  | 'HEELS';                     // Dealer got jack as turn card
+
+/**
+ * Individual scoring breakdown item
+ */
+export interface ScoreBreakdownItem {
+  type: ScoreBreakdownType;  // Type of scoring (e.g., 'FIFTEEN', 'PAIR', 'DOUBLE_RUN_OF_3')
+  points: number;            // Points awarded for this specific item
+  cards: Card[];             // Cards that contributed to this score
+  description: string;       // Human-readable description (e.g., "Double run of 3")
+}
 
 ////// Types for Event Emitters //////
 
