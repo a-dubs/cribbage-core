@@ -569,9 +569,15 @@ async function handleStartGame(): Promise<void> {
   const botsNeeded = Math.max(0, requestedPlayerCount - connectedPlayers.size);
   console.log(`Current players: ${connectedPlayers.size}, Bots needed: ${botsNeeded}`);
   
+  // Friendly bot names
+  const botNames = [
+    'Chip',
+    'Shuffle',
+    'Lucky',
+  ];
+  
   for (let i = 0; i < botsNeeded; i++) {
-    const botNumber = i + 1;
-    const botName = `Bot ${botNumber}`;
+    const botName = botNames[i] || `Bot ${i + 1}`;
     const botAgent = new ExhaustiveSimpleAgent();
     // Create unique bot ID by appending timestamp and counter to avoid collisions
     const botId = `${botAgent.playerId}-${Date.now()}-${i}`;
@@ -581,7 +587,7 @@ async function handleStartGame(): Promise<void> {
       agent: botAgent,
     };
     connectedPlayers.set(botId, botPlayerInfo);
-    console.log(`Added bot ${botNumber} (ID: ${botId})`);
+    console.log(`Added bot: ${botName} (ID: ${botId})`);
   }
 
   if (connectedPlayers.size < requestedPlayerCount) {
