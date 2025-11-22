@@ -153,6 +153,21 @@ interface PlayerInfo {
   agent: GameAgent;
 }
 
+interface PlayerInLobby {
+  playerId: string;
+  displayName: string;
+}
+
+interface Lobby {
+  id: string;
+  name?: string;
+  hostId: string;
+  playerCount: number; // 2–4
+  players: PlayerInLobby[]; // humans only; bots are added when starting game
+  status: 'waiting' | 'in_progress' | 'finished';
+  createdAt: number;
+}
+
 interface LoginData {
   username: string;
   name: string;
@@ -247,6 +262,15 @@ const connectedPlayers: Map<string, PlayerInfo> = new Map();
 const playerIdToSocketId: Map<string, string> = new Map();
 const socketIdToPlayerId: Map<string, string> = new Map(); // Track socket -> player ID mapping for reconnection
 const usernameToSecretKey: Map<string, string> = new Map(); // Track username -> secret key for authentication
+
+// In-memory lobby state (foundational data structures for future lobby support)
+const lobbiesById: Map<string, Lobby> = new Map();
+const lobbyIdByPlayerId: Map<string, string> = new Map(); // Each player can be in at most one lobby
+const gameIdByLobbyId: Map<string, string> = new Map();
+
+// Temporary default lobby ID used until full lobby management is implemented
+const DEFAULT_LOBBY_ID = 'default-lobby';
+
 const playAgainVotes: Set<string> = new Set();
 let gameLoop: GameLoop | null = null;
 let mostRecentGameSnapshot: GameSnapshot | null = null;
@@ -656,7 +680,8 @@ async function handleStartGame(): Promise<void> {
 
   // Start the game in the database
   const gameId = gameLoop.cribbageGame.getGameState().id;
-  const lobbyId = 'lobbyId'; // TODO: replace with actual lobby ID once lobbies are implemented
+  // For now, associate all games with a single default lobby ID until real lobbies are wired up
+  const lobbyId = DEFAULT_LOBBY_ID;
   startGameInDB(gameId, playersIdAndName, lobbyId);
 
   // send gameStart event to all clients
