@@ -49,6 +49,9 @@ describe('Type System Tests', () => {
       ]);
 
       // Get a snapshot (by recording an event)
+      // Set up game properly: select dealer and start round
+      game.getGameState().players[0].isDealer = true;
+      game.startRound();
       game.deal();
       const history = game.getGameSnapshotHistory();
       
@@ -81,7 +84,8 @@ describe('Type System Tests', () => {
       game.addDecisionRequest(request);
       expect(game.getPendingDecisionRequests().length).toBe(1);
 
-      // Start a new round
+      // Start a new round (must set dealer first)
+      game.getGameState().players[0].isDealer = true;
       game.startRound();
 
       const pendingRequests = game.getPendingDecisionRequests();

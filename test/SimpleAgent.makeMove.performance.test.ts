@@ -41,7 +41,9 @@ describe('Agent.makeMove Performance Tests', () => {
       { id: 'opponent', name: 'Opponent' },
     ]);
     
-    // Set up a game state for testing
+    // Set up game properly: select dealer and start round
+    game.getGameState().players[0].isDealer = true;
+    game.startRound();
     game.deal();
     
     // Complete discard phase
