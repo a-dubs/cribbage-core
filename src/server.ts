@@ -281,6 +281,7 @@ const playAgainVotes: Set<string> = new Set();
 let gameLoop: GameLoop | null = null;
 let mostRecentGameSnapshot: GameSnapshot | null = null;
 let currentRoundGameEvents: GameEvent[] = [];
+let requestedPlayerCount: number = 2; // Track requested player count for current game
 
 // Generate unique player ID from username, handling conflicts
 function getUniquePlayerId(username: string, socketId: string): string {
@@ -324,6 +325,21 @@ io.on('connection', socket => {
 
   socket.on('startGame', () => {
     console.log('Received startGame event from socket:', socket.id);
+    requestedPlayerCount = 2; // Default to 2-player game
+    handleStartGame().catch(error => {
+      console.error('Error starting game:', error);
+    });
+  });
+
+  socket.on('startGameWithPlayerCount', (data: { playerCount: number }) => {
+    console.log('Received startGameWithPlayerCount event from socket:', socket.id, 'playerCount:', data?.playerCount);
+    const playerCount = data?.playerCount;
+    if (!playerCount || playerCount < 2 || playerCount > 4) {
+      console.error('Invalid player count:', playerCount);
+      socket.emit('error', { message: 'Player count must be between 2 and 4' });
+      return;
+    }
+    requestedPlayerCount = playerCount;
     handleStartGame().catch(error => {
       console.error('Error starting game:', error);
     });
@@ -540,11 +556,22 @@ async function handleStartGame(): Promise<void> {
       return;
     }
   }
-  console.log('Starting game...');
-  // If only one player is connected, add a bot
-  if (connectedPlayers.size === 1) {
-    console.log('Adding a bot to start the game.');
-    const botName = 'Simple Optimal Bot';
+  
+  console.log(`Starting game... (requested player count: ${requestedPlayerCount})`);
+  
+  // Validate requested player count
+  if (requestedPlayerCount < 2 || requestedPlayerCount > 4) {
+    console.error(`Invalid player count: ${requestedPlayerCount}. Must be between 2 and 4.`);
+    return;
+  }
+  
+  // Add bots to fill empty seats
+  const botsNeeded = Math.max(0, requestedPlayerCount - connectedPlayers.size);
+  console.log(`Current players: ${connectedPlayers.size}, Bots needed: ${botsNeeded}`);
+  
+  for (let i = 0; i < botsNeeded; i++) {
+    const botNumber = i + 1;
+    const botName = `Bot ${botNumber}`;
     const botAgent = new ExhaustiveSimpleAgent();
     const botId = botAgent.playerId;
     const botPlayerInfo: PlayerInfo = {
@@ -553,11 +580,16 @@ async function handleStartGame(): Promise<void> {
       agent: botAgent,
     };
     connectedPlayers.set(botId, botPlayerInfo);
+    console.log(`Added bot ${botNumber} (ID: ${botId})`);
   }
 
-  if (connectedPlayers.size < 2) {
-    console.log('Not enough players to start the game.');
+  if (connectedPlayers.size < requestedPlayerCount) {
+    console.log(`Not enough players to start the game. Expected ${requestedPlayerCount}, got ${connectedPlayers.size}.`);
     return;
+  }
+  
+  if (connectedPlayers.size > requestedPlayerCount) {
+    console.log(`Warning: More players than requested. Expected ${requestedPlayerCount}, got ${connectedPlayers.size}. Game will proceed with all players.`);
   }
 
   const playersIdAndName: PlayerIdAndName[] = [];
@@ -692,7 +724,8 @@ async function handleRestartGame(): Promise<void> {
   // Emit game reset event to all clients
   io.emit('gameReset');
 
-  // Start a new game
+  // Start a new game with the same player count
+  console.log(`Restarting with ${requestedPlayerCount} players`);
   await handleStartGame();
 }
 
