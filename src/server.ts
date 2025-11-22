@@ -16,6 +16,8 @@ import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { logger } from './utils/logger';
+import { uniqueNamesGenerator, adjectives, animals } from 'unique-names-generator';
+import { v4 as uuidv4 } from 'uuid';
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
 dotenv.config();
@@ -271,6 +273,31 @@ const gameIdByLobbyId: Map<string, string> = new Map();
 // Temporary default lobby ID used until full lobby management is implemented
 const DEFAULT_LOBBY_ID = 'default-lobby';
 
+// Generate a unique lobby name (adjective-animal) that doesn't collide with active lobbies
+function generateUniqueLobbyName(): string {
+  const maxAttempts = 50;
+  for (let i = 0; i < maxAttempts; i++) {
+    const name = uniqueNamesGenerator({
+      dictionaries: [adjectives, animals],
+      separator: ' ',
+      style: 'capital',
+    });
+    // Check if this name is already in use by a waiting or in_progress lobby
+    const nameInUse = Array.from(lobbiesById.values()).some(
+      lobby => lobby.name === name && lobby.status !== 'finished'
+    );
+    if (!nameInUse) {
+      return name;
+    }
+  }
+  // Fallback: append timestamp to guarantee uniqueness
+  return `${uniqueNamesGenerator({
+    dictionaries: [adjectives, animals],
+    separator: ' ',
+    style: 'capital',
+  })} ${Date.now()}`;
+}
+
 const playAgainVotes: Set<string> = new Set();
 let gameLoop: GameLoop | null = null;
 let mostRecentGameSnapshot: GameSnapshot | null = null;
@@ -304,6 +331,11 @@ io.on('connection', socket => {
   socket.on('login', (data: LoginData) => {
     console.log('Received login event from socket:', socket.id);
     handleLogin(socket, data);
+  });
+
+  socket.on('createLobby', (data: { playerCount: number; name?: string }) => {
+    console.log('Received createLobby event from socket:', socket.id, 'playerCount:', data?.playerCount);
+    handleCreateLobby(socket, data);
   });
 
   socket.on('getConnectedPlayers', () => {
@@ -392,6 +424,60 @@ io.on('connection', socket => {
 // Generate a secure random secret key
 function generateSecretKey(): string {
   return `${Date.now()}-${Math.random().toString(36).substring(2, 15)}-${Math.random().toString(36).substring(2, 15)}`;
+}
+
+function handleCreateLobby(socket: Socket, data: { playerCount: number; name?: string }): void {
+  const playerId = socketIdToPlayerId.get(socket.id);
+  if (!playerId) {
+    console.error('Player ID not found for socket:', socket.id);
+    socket.emit('error', { message: 'Not logged in' });
+    return;
+  }
+
+  // Check if player is already in a lobby
+  if (lobbyIdByPlayerId.has(playerId)) {
+    console.error('Player already in a lobby:', playerId);
+    socket.emit('error', { message: 'Already in a lobby' });
+    return;
+  }
+
+  const { playerCount, name: customName } = data;
+
+  // Validate player count
+  if (!playerCount || playerCount < 2 || playerCount > 4) {
+    console.error('Invalid player count:', playerCount);
+    socket.emit('error', { message: 'Player count must be between 2 and 4' });
+    return;
+  }
+
+  // Generate lobby name (either custom or auto-generated)
+  const lobbyName = customName?.trim() || generateUniqueLobbyName();
+
+  // Create the lobby
+  const lobbyId = uuidv4();
+  const playerInfo = connectedPlayers.get(playerId);
+  const hostDisplayName = playerInfo?.name || 'Unknown';
+
+  const lobby: Lobby = {
+    id: lobbyId,
+    name: lobbyName,
+    hostId: playerId,
+    playerCount,
+    players: [{ playerId, displayName: hostDisplayName }],
+    status: 'waiting',
+    createdAt: Date.now(),
+  };
+
+  lobbiesById.set(lobbyId, lobby);
+  lobbyIdByPlayerId.set(playerId, lobbyId);
+
+  console.log(`Lobby created: ${lobbyName} (${lobbyId}) by ${hostDisplayName}`);
+
+  // Broadcast the new lobby to all clients
+  io.emit('lobbyUpdated', lobby);
+
+  // Also send direct confirmation to the creator
+  socket.emit('lobbyCreated', { lobbyId, name: lobbyName });
 }
 
 function handleLogin(socket: Socket, data: LoginData): void {
@@ -623,7 +709,7 @@ async function handleStartGame(): Promise<void> {
       : 'System';
     
     logger.logGameEvent(eventPlayer, newSnapshot.gameEvent.actionType, newSnapshot.gameEvent.scoreChange);
-    logger.logGameState(gameState.roundNumber, gameState.currentPhase, gameState.snapshotId);
+    logger.logGameState(gameState.roundNumber, gameState.currentPhase, gameState.snapshotId.toString());
     
     const pendingRequests = newSnapshot.pendingDecisionRequests || [];
     const requestInfo = pendingRequests.map(r => ({
