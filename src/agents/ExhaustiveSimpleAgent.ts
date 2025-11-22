@@ -9,7 +9,11 @@ const DEBUG_TIMING = process.env.DEBUG_SIMPLE_AGENT_TIMING === 'true';
 export class ExhaustiveSimpleAgent extends RandomAgent {
   playerId: string = AGENT_ID;
   human = false;
-  cribbageGame: CribbageGame = new CribbageGame([]);
+  // Use dummy players for internal game (only used for generateDeck())
+  cribbageGame: CribbageGame = new CribbageGame([
+    { id: 'dummy-1', name: 'Dummy 1' },
+    { id: 'dummy-2', name: 'Dummy 2' },
+  ]);
 
   constructor() {
     super();

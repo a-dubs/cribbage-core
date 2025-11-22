@@ -22,6 +22,7 @@ import {
 import { displayCard, parseCard, suitToEmoji } from '../core/scoring';
 import EventEmitter from 'eventemitter3';
 import dotenv from 'dotenv';
+import { getPlayerCountConfig } from './rules';
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
 dotenv.config();
@@ -444,8 +445,9 @@ export class GameLoop extends EventEmitter {
     // Request discards from ALL players in parallel
     const discardRequests: DecisionRequest[] = [];
     const gameState = this.cribbageGame.getGameState();
-    const numberOfCardsToDiscard =
-      gameState.players.length === 2 ? 2 : 1;
+    // Get discard count based on player count configuration
+    const config = getPlayerCountConfig(gameState.players.length);
+    const numberOfCardsToDiscard = config.discardPerPlayer;
 
     for (const player of gameState.players) {
       const request = this.requestDecision(

@@ -256,23 +256,30 @@ describe('CribbageGame Helper Methods', () => {
   });
 
   describe('getRedactedGameState', () => {
-    it('should return game state (stub implementation)', () => {
+    it('should return redacted game state', () => {
       const redactedState = game.getRedactedGameState('player-1');
       const fullState = game.getGameState();
 
-      // Currently returns full state (stub)
-      expect(redactedState).toBe(fullState);
+      // Redacted state should be a different object (not the same reference)
+      expect(redactedState).not.toBe(fullState);
+      // But should have same basic properties
       expect(redactedState.id).toBe(fullState.id);
       expect(redactedState.players.length).toBe(fullState.players.length);
+      // Deck should be redacted (all UNKNOWN)
+      expect(redactedState.deck.every(c => c === 'UNKNOWN')).toBe(true);
     });
 
     it('should accept any player ID parameter', () => {
       expect(() => {
         game.getRedactedGameState('player-1');
         game.getRedactedGameState('player-2');
-        game.getRedactedGameState('non-existent-player');
       }).not.toThrow();
     });
+
+    it('should throw for non-existent player', () => {
+      expect(() => {
+        game.getRedactedGameState('non-existent-player');
+      }).toThrow('Player non-existent-player not found');
   });
 });
 

@@ -77,7 +77,8 @@ describe('CribbageGame Setter Methods', () => {
   describe('setPhase', () => {
     it('should change phase and log event', () => {
       const initialPhase = game.getGameState().currentPhase;
-      expect(initialPhase).toBe(Phase.DEALING);
+      // Games now start in DEALER_SELECTION phase
+      expect(initialPhase).toBe(Phase.DEALER_SELECTION);
 
       const initialHistoryLength = game.getGameSnapshotHistory().length;
 
