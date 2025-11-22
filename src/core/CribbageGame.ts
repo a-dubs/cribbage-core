@@ -93,10 +93,10 @@ export class CribbageGame extends EventEmitter {
   private updatePlayerScore(player: Player, points: number): void {
     // Move current peg position to previous
     player.pegPositions.previous = player.pegPositions.current;
-    // Update current peg to new score position
-    player.pegPositions.current = player.score + points;
-    // Update the actual score
+    // Update the actual score first
     player.score += points;
+    // Update current peg to new score position
+    player.pegPositions.current = player.score;
   }
 
   private recordGameEvent(
