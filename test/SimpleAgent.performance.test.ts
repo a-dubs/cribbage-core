@@ -36,7 +36,9 @@ describe('SimpleAgent Performance Tests', () => {
       { id: 'opponent', name: 'Opponent' },
     ]);
     
-    // Set up a game state for testing
+    // Set up game properly: select dealer and start round
+    game.getGameState().players[0].isDealer = true;
+    game.startRound();
     game.deal();
     
     // Complete discard phase
@@ -143,6 +145,8 @@ describe('SimpleAgent Performance Tests', () => {
         { id: 'test-player', name: 'Test Player' },
         { id: 'opponent', name: 'Opponent' },
       ]);
+      game.getGameState().players[0].isDealer = true;
+      game.startRound();
       game.deal();
       const state = game.getGameState();
       const player = state.players.find(p => p.id === 'test-player')!;
@@ -162,6 +166,8 @@ describe('SimpleAgent Performance Tests', () => {
         { id: 'test-player', name: 'Test Player' },
         { id: 'opponent', name: 'Opponent' },
       ]);
+      game.getGameState().players[0].isDealer = true;
+      game.startRound();
       game.deal();
       const state = game.getGameState();
 
@@ -174,6 +180,8 @@ describe('SimpleAgent Performance Tests', () => {
           { id: 'test-player', name: 'Test Player' },
           { id: 'opponent', name: 'Opponent' },
         ]);
+        freshGame.getGameState().players[0].isDealer = true;
+        freshGame.startRound();
         freshGame.deal();
         const freshState = freshGame.getGameState();
 

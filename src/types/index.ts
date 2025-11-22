@@ -19,6 +19,7 @@ export enum ActionType {
   END_PHASE = 'END_PHASE', // Used to indicate phase has ended w/o a specific action being taken by a player
   DEAL = 'DEAL', // When dealer deals cards
   SHUFFLE_DECK = 'SHUFFLE_DECK',
+  AUTO_CRIB_CARD = 'AUTO_CRIB_CARD', // Card(s) automatically dealt to crib from deck (3-player games)
   DISCARD = 'DISCARD',
   PLAY_CARD = 'PLAY_CARD', // player plays a card during pegging phase
   GO = 'GO', // Player says "Go" during pegging phase when they can't play a card
@@ -105,6 +106,10 @@ export interface Player extends PlayerIdAndName {
   playedCards: Card[]; // Cards played by the player during the pegging phase
   score: number; // Player's score
   isDealer: boolean; // Whether the player is the dealer for the current round
+  pegPositions: {
+    current: number; // Position of current (front) peg on the board
+    previous: number; // Position of previous (back) peg on the board
+  };
 }
 
 export interface PlayerIdAndName {

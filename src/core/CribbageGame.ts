@@ -21,6 +21,7 @@ import {
 import { ScoreBreakdownItem } from '../types';
 import EventEmitter from 'eventemitter3';
 import { isValidDiscard } from './utils';
+import { validatePlayerCount, getPlayerCountConfig, getExpectedCribSize } from '../gameplay/rules';
 
 export class CribbageGame extends EventEmitter {
   private gameState: GameState;
@@ -31,6 +32,8 @@ export class CribbageGame extends EventEmitter {
 
   constructor(playersInfo: PlayerIdAndName[], startingScore = 0) {
     super();
+    // Validate player count (2-4 players)
+    validatePlayerCount(playersInfo.length);
     const deck = this.generateDeck();
     // Initially, no dealer is set - dealer will be determined by card selection
     const players = playersInfo.map((info) => ({
@@ -41,6 +44,10 @@ export class CribbageGame extends EventEmitter {
       playedCards: [],
       score: startingScore,
       isDealer: false, // Dealer will be determined by card selection
+      pegPositions: {
+        current: startingScore,
+        previous: startingScore,
+      },
     })) as Player[];
     const id = `game-${Date.now()}-${playersInfo.map(p => p.id).join('-')}`;
     this.gameState = {
@@ -81,6 +88,20 @@ export class CribbageGame extends EventEmitter {
       'KING',
     ];
     return suits.flatMap(suit => ranks.map(rank => `${rank}_${suit}` as Card));
+  }
+
+  private updatePlayerScore(player: Player, points: number): void {
+    // Only move pegs when the player's score actually increases
+    if (points <= 0) {
+      return;
+    }
+
+    // Move current peg position to previous
+    player.pegPositions.previous = player.pegPositions.current;
+    // Update the actual score first
+    player.score += points;
+    // Update current peg to new score position
+    player.pegPositions.current = player.score;
   }
 
   private recordGameEvent(
@@ -148,6 +169,22 @@ export class CribbageGame extends EventEmitter {
       player.playedCards = [];
     });
     this.recordGameEvent(ActionType.START_ROUND, null, null, 0);
+
+    // Auto-deal cards to crib for 3-player games
+    const config = getPlayerCountConfig(this.gameState.players.length);
+    if (config.autoCribCardsFromDeck > 0) {
+      // Deal cards from deck to crib before player dealing
+      const autoCribCards = this.gameState.deck.splice(0, config.autoCribCardsFromDeck);
+      this.gameState.crib.push(...autoCribCards);
+      // Record the auto-crib event
+      this.recordGameEvent(
+        ActionType.AUTO_CRIB_CARD,
+        null, // No player associated with auto-crib
+        autoCribCards,
+        0
+      );
+      console.log(`Auto-dealt ${autoCribCards.length} card(s) to crib: ${autoCribCards.join(', ')}`);
+    }
   }
 
   public endScoring(): void {
@@ -189,8 +226,11 @@ export class CribbageGame extends EventEmitter {
 
     this.shuffleDeck();
 
+    // Get hand size based on player count
+    const config = getPlayerCountConfig(this.gameState.players.length);
+    
     this.gameState.players.forEach((player: Player) => {
-      player.hand = this.gameState.deck.splice(0, 6);
+      player.hand = this.gameState.deck.splice(0, config.handSize);
       this.recordGameEvent(ActionType.DEAL, player.id, player.hand, 0);
     });
 
@@ -216,8 +256,12 @@ export class CribbageGame extends EventEmitter {
   }
 
   public completeCribPhase(): void {
-    if (this.gameState.crib.length !== 4) {
-      throw new Error('Crib phase not complete. Ensure all players discarded.');
+    const expectedSize = getExpectedCribSize(this.gameState.players.length);
+    if (this.gameState.crib.length !== expectedSize) {
+      throw new Error(
+        `Crib phase not complete. Ensure all players discarded. ` +
+        `Expected ${expectedSize} cards in crib, but found ${this.gameState.crib.length}.`
+      );
     }
 
     // copy each players hands to their pegging hands
@@ -248,7 +292,7 @@ export class CribbageGame extends EventEmitter {
     if (cutCard.split('_')[0] === 'JACK') {
       const dealer = this.gameState.players.find(p => p.isDealer);
       if (!dealer) throw new Error('Dealer not found.');
-      dealer.score += 2;
+      this.updatePlayerScore(dealer, 2);
       const heelsBreakdown: ScoreBreakdownItem[] = [
         {
           type: 'HEELS',
@@ -496,7 +540,7 @@ export class CribbageGame extends EventEmitter {
         const peggingStackForBreakdown = [...this.gameState.peggingStack];
         const lastPlayer = this.startNewPeggingRound();
         // give the player a point for playing the last card
-        player.score += 1;
+        this.updatePlayerScore(player, 1);
         // log the scoring of the last card
         // Include the entire pegging stack for context (captured before reset)
         const lastCardBreakdown: ScoreBreakdownItem[] = [
@@ -538,7 +582,7 @@ export class CribbageGame extends EventEmitter {
     );
 
     // add the score to the player's total
-    player.score += total;
+    this.updatePlayerScore(player, total);
 
     // remove the played card from the player's hand
     player.peggingHand = player.peggingHand.filter(c => c !== card);
@@ -561,7 +605,7 @@ export class CribbageGame extends EventEmitter {
     );
     if (playersWithCards.length === 0) {
       // give the player a point for playing the last card
-      player.score += 1;
+      this.updatePlayerScore(player, 1);
       // log the scoring of the last card
       // Include the entire pegging stack for context
       const lastCardBreakdown: ScoreBreakdownItem[] = [
@@ -641,7 +685,7 @@ export class CribbageGame extends EventEmitter {
       this.gameState.turnCard,
       false
     );
-    player.score += total;
+    this.updatePlayerScore(player, total);
     this.recordGameEvent(
       ActionType.SCORE_HAND,
       playerId,
@@ -668,7 +712,7 @@ export class CribbageGame extends EventEmitter {
       this.gameState.turnCard,
       true
     );
-    player.score += total;
+    this.updatePlayerScore(player, total);
     this.recordGameEvent(
       ActionType.SCORE_CRIB,
       playerId,
@@ -698,7 +742,7 @@ export class CribbageGame extends EventEmitter {
       throw new Error(`Player ${playerId} not found`);
     }
 
-    player.score += points;
+    this.updatePlayerScore(player, points);
 
     // Automatically log event
     this.recordGameEvent(reason, playerId, cards, points);
@@ -908,6 +952,11 @@ export class CribbageGame extends EventEmitter {
     let shouldRedact = false;
 
     switch (gameEvent.actionType) {
+      case ActionType.AUTO_CRIB_CARD:
+        // Auto-crib cards should be redacted until counting phase (like regular crib cards)
+        shouldRedact = !isCountingPhase;
+        break;
+
       case ActionType.DISCARD:
         // Opponent's discards are private
         shouldRedact = isOpponentEvent;
