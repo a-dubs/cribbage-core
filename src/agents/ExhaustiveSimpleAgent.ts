@@ -19,44 +19,55 @@ export class ExhaustiveSimpleAgent extends RandomAgent {
     super();
   }
 
-  private getBestHand(hand: Card[]): Card[] {
+  private getBestHand(hand: Card[], numberOfCardsToDiscard: number): Card[] {
     const startTime = DEBUG_TIMING ? Date.now() : 0;
     // score all possible hands with all possible discards with any possible remaining cut card
     // choose the discard that results in the highest score
-    let bestHand = hand.slice(0, 4);
+    const handSize = hand.length - numberOfCardsToDiscard;
+    let bestHand = hand.slice(0, handSize);
     let bestScore = 0;
 
     const possibleTurnCards = this.cribbageGame
       .generateDeck()
       .filter(card => !hand.includes(card));
-    for (const discard1 of hand) {
-      for (const discard2 of hand) {
-        if (discard1 === discard2) {
-          continue;
-        }
-        const scores: number[] = [];
-        for (const turnCard of possibleTurnCards) {
-          const score = scoreHand(
-            hand.filter(card => card !== discard1 && card !== discard2),
-            turnCard,
-            false
-          );
-          scores.push(score);
-        }
-        const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
-        if (avgScore > bestScore) {
-          bestScore = avgScore;
-          bestHand = hand.filter(
-            card => card !== discard1 && card !== discard2
-          );
-        }
+
+    // Generate all combinations of cards to discard
+    const discardCombinations = this.generateCombinations(hand, numberOfCardsToDiscard);
+
+    for (const discards of discardCombinations) {
+      const remainingHand = hand.filter(card => !discards.includes(card));
+      const scores: number[] = [];
+      for (const turnCard of possibleTurnCards) {
+        const score = scoreHand(remainingHand, turnCard, false);
+        scores.push(score);
+      }
+      const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+      if (avgScore > bestScore) {
+        bestScore = avgScore;
+        bestHand = remainingHand;
       }
     }
+
     if (DEBUG_TIMING) {
       const duration = Date.now() - startTime;
-      console.log(`[ExhaustiveSimpleAgent.getBestHand] ${duration}ms for hand of ${hand.length} cards`);
+      console.log(`[ExhaustiveSimpleAgent.getBestHand] ${duration}ms for hand of ${hand.length} cards, discarding ${numberOfCardsToDiscard}`);
     }
     return bestHand;
+  }
+
+  private generateCombinations<T>(array: T[], k: number): T[][] {
+    if (k === 0) return [[]];
+    if (k > array.length) return [];
+
+    const result: T[][] = [];
+    for (let i = 0; i <= array.length - k; i++) {
+      const remaining = array.slice(i + 1);
+      const combinations = this.generateCombinations(remaining, k - 1);
+      for (const combo of combinations) {
+        result.push([array[i], ...combo]);
+      }
+    }
+    return result;
   }
 
   discard(
@@ -74,7 +85,7 @@ export class ExhaustiveSimpleAgent extends RandomAgent {
       throw new Error('Not enough cards to discard.');
     }
 
-    const bestHand = this.getBestHand(player.hand);
+    const bestHand = this.getBestHand(player.hand, numberOfCardsToDiscard);
     const discards = player.hand.filter(card => !bestHand.includes(card));
     
     if (DEBUG_TIMING) {
