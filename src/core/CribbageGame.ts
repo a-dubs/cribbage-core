@@ -91,6 +91,11 @@ export class CribbageGame extends EventEmitter {
   }
 
   private updatePlayerScore(player: Player, points: number): void {
+    // Only move pegs when the player's score actually increases
+    if (points <= 0) {
+      return;
+    }
+
     // Move current peg position to previous
     player.pegPositions.previous = player.pegPositions.current;
     // Update the actual score first

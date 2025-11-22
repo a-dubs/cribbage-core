@@ -97,4 +97,32 @@ describe('pegPositions', () => {
       previous: 7,
     });
   });
+
+  it('should not move pegPositions when score does not change', () => {
+    const game = new CribbageGame(
+      [
+        { id: 'player1', name: 'Player 1' },
+        { id: 'player2', name: 'Player 2' },
+      ],
+      0
+    );
+
+    const gameState = (game as any).gameState;
+    const player = gameState.players[0];
+
+    // First score to move pegs off the starting position
+    (game as any).updatePlayerScore(player, 4);
+    expect(player.pegPositions).toEqual({
+      current: 4,
+      previous: 0,
+    });
+
+    // Zero-point update should not change pegs or score
+    (game as any).updatePlayerScore(player, 0);
+    expect(player.score).toBe(4);
+    expect(player.pegPositions).toEqual({
+      current: 4,
+      previous: 0,
+    });
+  });
 });
