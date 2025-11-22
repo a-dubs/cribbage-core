@@ -21,6 +21,7 @@ import {
 import { ScoreBreakdownItem } from '../types';
 import EventEmitter from 'eventemitter3';
 import { isValidDiscard } from './utils';
+import { validatePlayerCount, getPlayerCountConfig, getExpectedCribSize } from '../gameplay/rules';
 
 export class CribbageGame extends EventEmitter {
   private gameState: GameState;
@@ -31,6 +32,8 @@ export class CribbageGame extends EventEmitter {
 
   constructor(playersInfo: PlayerIdAndName[], startingScore = 0) {
     super();
+    // Validate player count (2-4 players)
+    validatePlayerCount(playersInfo.length);
     const deck = this.generateDeck();
     // Initially, no dealer is set - dealer will be determined by card selection
     const players = playersInfo.map((info) => ({
@@ -148,6 +151,22 @@ export class CribbageGame extends EventEmitter {
       player.playedCards = [];
     });
     this.recordGameEvent(ActionType.START_ROUND, null, null, 0);
+
+    // Auto-deal cards to crib for 3-player games
+    const config = getPlayerCountConfig(this.gameState.players.length);
+    if (config.autoCribCardsFromDeck > 0) {
+      // Deal cards from deck to crib before player dealing
+      const autoCribCards = this.gameState.deck.splice(0, config.autoCribCardsFromDeck);
+      this.gameState.crib.push(...autoCribCards);
+      // Record the auto-crib event
+      this.recordGameEvent(
+        ActionType.AUTO_CRIB_CARD,
+        null, // No player associated with auto-crib
+        autoCribCards,
+        0
+      );
+      console.log(`Auto-dealt ${autoCribCards.length} card(s) to crib: ${autoCribCards.join(', ')}`);
+    }
   }
 
   public endScoring(): void {
@@ -189,8 +208,11 @@ export class CribbageGame extends EventEmitter {
 
     this.shuffleDeck();
 
+    // Get hand size based on player count
+    const config = getPlayerCountConfig(this.gameState.players.length);
+    
     this.gameState.players.forEach((player: Player) => {
-      player.hand = this.gameState.deck.splice(0, 6);
+      player.hand = this.gameState.deck.splice(0, config.handSize);
       this.recordGameEvent(ActionType.DEAL, player.id, player.hand, 0);
     });
 
@@ -216,8 +238,12 @@ export class CribbageGame extends EventEmitter {
   }
 
   public completeCribPhase(): void {
-    if (this.gameState.crib.length !== 4) {
-      throw new Error('Crib phase not complete. Ensure all players discarded.');
+    const expectedSize = getExpectedCribSize(this.gameState.players.length);
+    if (this.gameState.crib.length !== expectedSize) {
+      throw new Error(
+        `Crib phase not complete. Ensure all players discarded. ` +
+        `Expected ${expectedSize} cards in crib, but found ${this.gameState.crib.length}.`
+      );
     }
 
     // copy each players hands to their pegging hands
@@ -908,6 +934,11 @@ export class CribbageGame extends EventEmitter {
     let shouldRedact = false;
 
     switch (gameEvent.actionType) {
+      case ActionType.AUTO_CRIB_CARD:
+        // Auto-crib cards should be redacted until counting phase (like regular crib cards)
+        shouldRedact = !isCountingPhase;
+        break;
+
       case ActionType.DISCARD:
         // Opponent's discards are private
         shouldRedact = isOpponentEvent;
