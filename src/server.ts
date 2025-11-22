@@ -428,19 +428,50 @@ io.on('connection', socket => {
 
   socket.on('disconnect', (reason) => {
     console.log(`A socket disconnected: ${socket.id}, Reason: ${reason}`);
-    // only remove the player if the game loop is not running
-    if (!gameLoop) {
-      const playerId = socketIdToPlayerId.get(socket.id);
-      if (playerId) {
+    const playerId = socketIdToPlayerId.get(socket.id);
+    
+    if (playerId) {
+      // If player is in a lobby, remove them and handle cleanup
+      const lobbyId = lobbyIdByPlayerId.get(playerId);
+      if (lobbyId) {
+        const lobby = lobbiesById.get(lobbyId);
+        if (lobby && lobby.status === 'waiting') {
+          console.log(`Player ${playerId} disconnected while in lobby ${lobby.name}`);
+          // Remove player from lobby
+          const playerIndex = lobby.players.findIndex(p => p.playerId === playerId);
+          if (playerIndex !== -1) {
+            lobby.players.splice(playerIndex, 1);
+          }
+          lobbyIdByPlayerId.delete(playerId);
+          
+          // If host left and others remain, transfer host
+          if (playerId === lobby.hostId && lobby.players.length > 0) {
+            const newHostId = lobby.players[0].playerId;
+            lobby.hostId = newHostId;
+            console.log(`Host transferred to ${lobby.players[0].displayName} in lobby ${lobby.name}`);
+            io.emit('lobbyUpdated', lobby);
+          } else if (lobby.players.length === 0) {
+            // If lobby is now empty, mark as finished
+            lobby.status = 'finished';
+            console.log(`Lobby ${lobby.name} is now empty after disconnect, marking as finished`);
+            io.emit('lobbyClosed', { lobbyId });
+          } else {
+            io.emit('lobbyUpdated', lobby);
+          }
+        }
+      }
+      
+      // Only remove the player if the game loop is not running
+      if (!gameLoop) {
         connectedPlayers.delete(playerId);
         playerIdToSocketId.delete(playerId);
         socketIdToPlayerId.delete(socket.id);
         console.log(`Removed player ${playerId} (socket ${socket.id})`);
+        // send updated connected players to all clients
+        emitConnectedPlayers();
+      } else {
+        console.log('Game loop is already running. Not removing player.');
       }
-      // send updated connected players to all clients
-      emitConnectedPlayers();
-    } else {
-      console.log('Game loop is already running. Not removing player.');
     }
   });
 
