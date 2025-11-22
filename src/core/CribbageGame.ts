@@ -44,6 +44,10 @@ export class CribbageGame extends EventEmitter {
       playedCards: [],
       score: startingScore,
       isDealer: false, // Dealer will be determined by card selection
+      pegPositions: {
+        current: startingScore,
+        previous: startingScore,
+      },
     })) as Player[];
     const id = `game-${Date.now()}-${playersInfo.map(p => p.id).join('-')}`;
     this.gameState = {
@@ -84,6 +88,15 @@ export class CribbageGame extends EventEmitter {
       'KING',
     ];
     return suits.flatMap(suit => ranks.map(rank => `${rank}_${suit}` as Card));
+  }
+
+  private updatePlayerScore(player: Player, points: number): void {
+    // Move current peg position to previous
+    player.pegPositions.previous = player.pegPositions.current;
+    // Update current peg to new score position
+    player.pegPositions.current = player.score + points;
+    // Update the actual score
+    player.score += points;
   }
 
   private recordGameEvent(
@@ -274,7 +287,7 @@ export class CribbageGame extends EventEmitter {
     if (cutCard.split('_')[0] === 'JACK') {
       const dealer = this.gameState.players.find(p => p.isDealer);
       if (!dealer) throw new Error('Dealer not found.');
-      dealer.score += 2;
+      this.updatePlayerScore(dealer, 2);
       const heelsBreakdown: ScoreBreakdownItem[] = [
         {
           type: 'HEELS',
@@ -522,7 +535,7 @@ export class CribbageGame extends EventEmitter {
         const peggingStackForBreakdown = [...this.gameState.peggingStack];
         const lastPlayer = this.startNewPeggingRound();
         // give the player a point for playing the last card
-        player.score += 1;
+        this.updatePlayerScore(player, 1);
         // log the scoring of the last card
         // Include the entire pegging stack for context (captured before reset)
         const lastCardBreakdown: ScoreBreakdownItem[] = [
@@ -564,7 +577,7 @@ export class CribbageGame extends EventEmitter {
     );
 
     // add the score to the player's total
-    player.score += total;
+    this.updatePlayerScore(player, total);
 
     // remove the played card from the player's hand
     player.peggingHand = player.peggingHand.filter(c => c !== card);
@@ -587,7 +600,7 @@ export class CribbageGame extends EventEmitter {
     );
     if (playersWithCards.length === 0) {
       // give the player a point for playing the last card
-      player.score += 1;
+      this.updatePlayerScore(player, 1);
       // log the scoring of the last card
       // Include the entire pegging stack for context
       const lastCardBreakdown: ScoreBreakdownItem[] = [
@@ -667,7 +680,7 @@ export class CribbageGame extends EventEmitter {
       this.gameState.turnCard,
       false
     );
-    player.score += total;
+    this.updatePlayerScore(player, total);
     this.recordGameEvent(
       ActionType.SCORE_HAND,
       playerId,
@@ -694,7 +707,7 @@ export class CribbageGame extends EventEmitter {
       this.gameState.turnCard,
       true
     );
-    player.score += total;
+    this.updatePlayerScore(player, total);
     this.recordGameEvent(
       ActionType.SCORE_CRIB,
       playerId,
@@ -724,7 +737,7 @@ export class CribbageGame extends EventEmitter {
       throw new Error(`Player ${playerId} not found`);
     }
 
-    player.score += points;
+    this.updatePlayerScore(player, points);
 
     // Automatically log event
     this.recordGameEvent(reason, playerId, cards, points);

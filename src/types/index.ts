@@ -106,6 +106,10 @@ export interface Player extends PlayerIdAndName {
   playedCards: Card[]; // Cards played by the player during the pegging phase
   score: number; // Player's score
   isDealer: boolean; // Whether the player is the dealer for the current round
+  pegPositions: {
+    current: number; // Position of current (front) peg on the board
+    previous: number; // Position of previous (back) peg on the board
+  };
 }
 
 export interface PlayerIdAndName {
