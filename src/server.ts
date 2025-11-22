@@ -353,6 +353,19 @@ io.on('connection', socket => {
     handleKickPlayer(socket, data);
   });
 
+  socket.on('listLobbies', () => {
+    console.log('Received listLobbies request from socket:', socket.id);
+    handleListLobbies(socket);
+  });
+
+  socket.on('startLobbyGame', (data: { lobbyId: string }) => {
+    console.log('Received startLobbyGame event from socket:', socket.id, 'lobbyId:', data?.lobbyId);
+    handleStartLobbyGame(socket, data).catch(error => {
+      console.error('Error starting lobby game:', error);
+      socket.emit('error', { message: 'Failed to start game' });
+    });
+  });
+
   socket.on('getConnectedPlayers', () => {
     console.log('Received getConnectedPlayers request from socket:', socket.id);
     // Send current connected players to this specific client
@@ -603,6 +616,117 @@ function handleKickPlayer(socket: Socket, data: { lobbyId: string; targetPlayerI
 
   // Broadcast update to all clients
   io.emit('lobbyUpdated', lobby);
+}
+
+function handleListLobbies(socket: Socket): void {
+  const waitingLobbies = Array.from(lobbiesById.values())
+    .filter(lobby => lobby.status === 'waiting')
+    .map(lobby => {
+      const hostPlayerInfo = connectedPlayers.get(lobby.hostId);
+      const hostDisplayName = hostPlayerInfo?.name || 'Unknown';
+      return {
+        id: lobby.id,
+        name: lobby.name,
+        hostDisplayName,
+        currentPlayers: lobby.players.length,
+        playerCount: lobby.playerCount,
+        createdAt: lobby.createdAt,
+      };
+    });
+
+  console.log(`Sending ${waitingLobbies.length} waiting lobbies to client`);
+  socket.emit('lobbyList', { lobbies: waitingLobbies });
+}
+
+async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }): Promise<void> {
+  const playerId = socketIdToPlayerId.get(socket.id);
+  if (!playerId) {
+    console.error('Player ID not found for socket:', socket.id);
+    socket.emit('error', { message: 'Not logged in' });
+    return;
+  }
+
+  const { lobbyId } = data;
+
+  // Check if lobby exists
+  const lobby = lobbiesById.get(lobbyId);
+  if (!lobby) {
+    console.error('Lobby not found:', lobbyId);
+    socket.emit('error', { message: 'Lobby not found' });
+    return;
+  }
+
+  // Check if player is host
+  if (playerId !== lobby.hostId) {
+    console.error('Not the host:', playerId, 'actual host:', lobby.hostId);
+    socket.emit('error', { message: 'Only the host can start the game' });
+    return;
+  }
+
+  // Check if lobby is waiting
+  if (lobby.status !== 'waiting') {
+    console.error('Lobby not waiting:', lobbyId, 'status:', lobby.status);
+    socket.emit('error', { message: 'Lobby is not in waiting state' });
+    return;
+  }
+
+  // Build playersInfo from lobby members (humans only, no bots yet)
+  const playersInfo: PlayerIdAndName[] = lobby.players.map(p => ({ id: p.playerId, name: p.displayName }));
+
+  // Calculate bots needed
+  const botsNeeded = Math.max(0, lobby.playerCount - playersInfo.length);
+  console.log(`Starting lobby game: ${lobby.name} with ${playersInfo.length} humans and ${botsNeeded} bots needed`);
+
+  // Create bots
+  const botNames = ['Bot Alex', 'Bot Morgan', 'Bot Jordan'];
+  const newBotIds: string[] = [];
+  for (let i = 0; i < botsNeeded; i++) {
+    const botName = botNames[i] || `Bot ${i + 1}`;
+    const botAgent = new ExhaustiveSimpleAgent();
+    const botId = `${botAgent.playerId}-${Date.now()}-${i}`;
+    playersInfo.push({ id: botId, name: botName });
+    const botPlayerInfo: PlayerInfo = {
+      id: botId,
+      name: botName,
+      agent: botAgent,
+    };
+    connectedPlayers.set(botId, botPlayerInfo);
+    newBotIds.push(botId);
+    console.log(`Added bot: ${botName} (ID: ${botId})`);
+  }
+
+  // Create GameLoop using players from the lobby
+  const agents: Map<string, GameAgent> = new Map();
+  // Populate human agents
+  lobby.players.forEach(p => {
+    const info = connectedPlayers.get(p.playerId);
+    if (info) agents.set(info.id, info.agent);
+  });
+  // Populate bot agents
+  newBotIds.forEach(id => {
+    const info = connectedPlayers.get(id);
+    if (info) agents.set(info.id, info.agent);
+  });
+
+  gameLoop = new GameLoop(playersInfo);
+  agents.forEach((agent, id) => gameLoop!.addAgent(id, agent));
+
+  // Map lobby -> game
+  const gameId = gameLoop.cribbageGame.getGameState().id;
+  gameIdByLobbyId.set(lobby.id, gameId);
+
+  // Update lobby status and broadcast updates
+  lobby.status = 'in_progress';
+  io.emit('lobbyUpdated', lobby);
+
+  // Persist game start info
+  startGameInDB(gameId, playersInfo, lobby.id);
+
+  // Notify lobby members of the game start
+  io.emit('gameStartedFromLobby', { lobbyId: lobby.id, gameId, players: playersInfo });
+
+  // Start the game loop
+  await startGame();
 }
 
 function handleCreateLobby(socket: Socket, data: { playerCount: number; name?: string }): void {
