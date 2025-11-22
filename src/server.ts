@@ -338,6 +338,21 @@ io.on('connection', socket => {
     handleCreateLobby(socket, data);
   });
 
+  socket.on('joinLobby', (data: { lobbyId: string }) => {
+    console.log('Received joinLobby event from socket:', socket.id, 'lobbyId:', data?.lobbyId);
+    handleJoinLobby(socket, data);
+  });
+
+  socket.on('leaveLobby', (data: { lobbyId: string }) => {
+    console.log('Received leaveLobby event from socket:', socket.id, 'lobbyId:', data?.lobbyId);
+    handleLeaveLobby(socket, data);
+  });
+
+  socket.on('kickPlayer', (data: { lobbyId: string; targetPlayerId: string }) => {
+    console.log('Received kickPlayer event from socket:', socket.id, 'lobbyId:', data?.lobbyId, 'target:', data?.targetPlayerId);
+    handleKickPlayer(socket, data);
+  });
+
   socket.on('getConnectedPlayers', () => {
     console.log('Received getConnectedPlayers request from socket:', socket.id);
     // Send current connected players to this specific client
@@ -424,6 +439,170 @@ io.on('connection', socket => {
 // Generate a secure random secret key
 function generateSecretKey(): string {
   return `${Date.now()}-${Math.random().toString(36).substring(2, 15)}-${Math.random().toString(36).substring(2, 15)}`;
+}
+
+function handleJoinLobby(socket: Socket, data: { lobbyId: string }): void {
+  const playerId = socketIdToPlayerId.get(socket.id);
+  if (!playerId) {
+    console.error('Player ID not found for socket:', socket.id);
+    socket.emit('error', { message: 'Not logged in' });
+    return;
+  }
+
+  const { lobbyId } = data;
+
+  // Check if player is already in a lobby
+  if (lobbyIdByPlayerId.has(playerId)) {
+    console.error('Player already in a lobby:', playerId);
+    socket.emit('error', { message: 'Already in a lobby' });
+    return;
+  }
+
+  // Check if lobby exists
+  const lobby = lobbiesById.get(lobbyId);
+  if (!lobby) {
+    console.error('Lobby not found:', lobbyId);
+    socket.emit('error', { message: 'Lobby not found' });
+    return;
+  }
+
+  // Check if lobby is waiting
+  if (lobby.status !== 'waiting') {
+    console.error('Lobby not waiting:', lobbyId, 'status:', lobby.status);
+    socket.emit('error', { message: 'Lobby is not accepting new players' });
+    return;
+  }
+
+  // Check if lobby is full
+  if (lobby.players.length >= lobby.playerCount) {
+    console.error('Lobby is full:', lobbyId);
+    socket.emit('error', { message: 'Lobby is full' });
+    return;
+  }
+
+  const playerInfo = connectedPlayers.get(playerId);
+  const playerDisplayName = playerInfo?.name || 'Unknown';
+
+  // Add player to lobby
+  lobby.players.push({ playerId, displayName: playerDisplayName });
+  lobbyIdByPlayerId.set(playerId, lobbyId);
+
+  console.log(`Player ${playerDisplayName} joined lobby ${lobby.name} (${lobbyId})`);
+
+  // Broadcast update to all clients
+  io.emit('lobbyUpdated', lobby);
+}
+
+function handleLeaveLobby(socket: Socket, data: { lobbyId: string }): void {
+  const playerId = socketIdToPlayerId.get(socket.id);
+  if (!playerId) {
+    console.error('Player ID not found for socket:', socket.id);
+    socket.emit('error', { message: 'Not logged in' });
+    return;
+  }
+
+  const { lobbyId } = data;
+
+  // Check if lobby exists
+  const lobby = lobbiesById.get(lobbyId);
+  if (!lobby) {
+    console.error('Lobby not found:', lobbyId);
+    socket.emit('error', { message: 'Lobby not found' });
+    return;
+  }
+
+  // Check if player is in this lobby
+  const playerIndex = lobby.players.findIndex(p => p.playerId === playerId);
+  if (playerIndex === -1) {
+    console.error('Player not in lobby:', playerId, lobbyId);
+    socket.emit('error', { message: 'You are not in this lobby' });
+    return;
+  }
+
+  // Remove player from lobby
+  lobby.players.splice(playerIndex, 1);
+  lobbyIdByPlayerId.delete(playerId);
+
+  const playerInfo = connectedPlayers.get(playerId);
+  const playerDisplayName = playerInfo?.name || 'Unknown';
+  console.log(`Player ${playerDisplayName} left lobby ${lobby.name} (${lobbyId})`);
+
+  // If host left and others remain, transfer host
+  if (playerId === lobby.hostId && lobby.players.length > 0) {
+    const newHostId = lobby.players[0].playerId;
+    lobby.hostId = newHostId;
+    console.log(`Host transferred to ${lobby.players[0].displayName} in lobby ${lobby.name}`);
+  }
+
+  // If lobby is empty, mark as finished
+  if (lobby.players.length === 0) {
+    lobby.status = 'finished';
+    console.log(`Lobby ${lobby.name} is now empty, marking as finished`);
+    io.emit('lobbyClosed', { lobbyId });
+    return;
+  }
+
+  // Broadcast update to all clients
+  io.emit('lobbyUpdated', lobby);
+}
+
+function handleKickPlayer(socket: Socket, data: { lobbyId: string; targetPlayerId: string }): void {
+  const playerId = socketIdToPlayerId.get(socket.id);
+  if (!playerId) {
+    console.error('Player ID not found for socket:', socket.id);
+    socket.emit('error', { message: 'Not logged in' });
+    return;
+  }
+
+  const { lobbyId, targetPlayerId } = data;
+
+  // Check if lobby exists
+  const lobby = lobbiesById.get(lobbyId);
+  if (!lobby) {
+    console.error('Lobby not found:', lobbyId);
+    socket.emit('error', { message: 'Lobby not found' });
+    return;
+  }
+
+  // Check if player is host
+  if (playerId !== lobby.hostId) {
+    console.error('Not the host:', playerId, 'actual host:', lobby.hostId);
+    socket.emit('error', { message: 'Only the host can kick players' });
+    return;
+  }
+
+  // Check if target is in this lobby
+  const targetIndex = lobby.players.findIndex(p => p.playerId === targetPlayerId);
+  if (targetIndex === -1) {
+    console.error('Target player not in lobby:', targetPlayerId, lobbyId);
+    socket.emit('error', { message: 'Player not in this lobby' });
+    return;
+  }
+
+  const targetPlayerName = lobby.players[targetIndex].displayName;
+
+  // Remove target from lobby
+  lobby.players.splice(targetIndex, 1);
+  lobbyIdByPlayerId.delete(targetPlayerId);
+
+  console.log(`Player ${targetPlayerName} was kicked from lobby ${lobby.name} (${lobbyId}) by host ${playerId}`);
+
+  // Notify the kicked player
+  const targetSocketId = playerIdToSocketId.get(targetPlayerId);
+  if (targetSocketId) {
+    io.to(targetSocketId).emit('kickedFromLobby', { lobbyId, reason: 'You were kicked by the host' });
+  }
+
+  // If lobby is now empty, mark as finished
+  if (lobby.players.length === 0) {
+    lobby.status = 'finished';
+    console.log(`Lobby ${lobby.name} is now empty, marking as finished`);
+    io.emit('lobbyClosed', { lobbyId });
+    return;
+  }
+
+  // Broadcast update to all clients
+  io.emit('lobbyUpdated', lobby);
 }
 
 function handleCreateLobby(socket: Socket, data: { playerCount: number; name?: string }): void {
