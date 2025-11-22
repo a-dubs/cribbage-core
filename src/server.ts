@@ -15,6 +15,7 @@ import { ExhaustiveSimpleAgent } from './agents/ExhaustiveSimpleAgent';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
+import { logger } from './utils/logger';
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
 dotenv.config();
@@ -23,21 +24,21 @@ const PORT = process.env.PORT || 3002;
 const WEB_APP_ORIGIN = process.env.WEB_APP_ORIGIN || 'http://localhost:3000';
 const WEBSOCKET_AUTH_TOKEN = process.env.WEBSOCKET_AUTH_TOKEN;
 const JSON_DB_DIR = process.env.JSON_DB_DIR || path.join(__dirname, 'json_db');
-console.log('JSON_DB_DIR:', JSON_DB_DIR);
+logger.info('JSON_DB_DIR:', JSON_DB_DIR);
 // create the directory if it does not exist
 if (!fs.existsSync(JSON_DB_DIR)) {
   fs.mkdirSync(JSON_DB_DIR);
 }
 
 if (!WEBSOCKET_AUTH_TOKEN) {
-  console.error('WEBSOCKET_AUTH_TOKEN is not set');
+  logger.error('WEBSOCKET_AUTH_TOKEN is not set');
   throw new Error('WEBSOCKET_AUTH_TOKEN is not set');
 }
 
-console.log('PORT:', PORT);
-console.log('WEB_APP_ORIGIN:', WEB_APP_ORIGIN);
+logger.info('PORT:', PORT);
+logger.info('WEB_APP_ORIGIN:', WEB_APP_ORIGIN);
 
-console.log('Cribbage-core server starting...');
+logger.info('Cribbage-core server starting...');
 
 const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/ping') {
@@ -134,47 +135,16 @@ const io = new Server(server, {
   upgradeTimeout: 10000,
   maxHttpBufferSize: 1e6,
   // Allow all handshake requests - auth is checked via middleware
+  // Handshake validation (auth checked in middleware)
   allowRequest: (req, callback) => {
-    const origin = req.headers.origin;
-    const path = req.url;
-    const forwardedFor = req.headers['x-forwarded-for'];
-    const realIp = req.headers['x-real-ip'];
-    
-    console.log(`[Handshake] Origin: ${origin || 'none'}, Path: ${path}, X-Forwarded-For: ${forwardedFor || 'none'}, X-Real-IP: ${realIp || 'none'}`);
-    
-    // Allow all handshakes - auth is checked in middleware after connection
     callback(null, true);
   },
 });
 
-// TEMPORARY: Disable auth to diagnose connection issues
-// TODO: Re-enable after confirming connections work
+// Auth middleware (currently disabled for development)
 io.use((socket, next) => {
-  const token = socket.handshake.auth?.token;
-  const origin = socket.handshake.headers.origin;
-  
-  console.log(`[Middleware] Auth check (DISABLED) for socket ${socket.id}:`, {
-    origin: origin || 'none',
-    hasToken: !!token,
-    authKeys: Object.keys(socket.handshake.auth || {}),
-    query: Object.keys(socket.handshake.query || {})
-  });
-  
-  // TEMPORARILY ALLOW ALL CONNECTIONS
-  console.log(`[Middleware] ✓ ALLOWING connection (auth disabled for testing)`);
+  // TODO: Re-enable auth check when needed
   next();
-  
-  // Original auth check (commented out):
-  // if (token !== WEBSOCKET_AUTH_TOKEN) {
-  //   console.error(`[Middleware] Auth REJECTED for socket ${socket.id}:`, {
-  //     expectedTokenSet: !!WEBSOCKET_AUTH_TOKEN,
-  //     receivedToken: token ? '***' : 'NONE',
-  //     expectedToken: WEBSOCKET_AUTH_TOKEN ? '***' : 'NOT_SET'
-  //   });
-  //   return next(new Error('Authentication failed'));
-  // }
-  // console.log(`[Middleware] ✓ Auth PASSED for socket ${socket.id}`);
-  // next();
 });
 
 interface PlayerInfo {
@@ -622,18 +592,24 @@ async function handleStartGame(): Promise<void> {
 
   // Emit game state changes with redaction per player
   gameLoop.on('gameSnapshot', (newSnapshot: GameSnapshot) => {
-    const snapshotReceivedTime = Date.now();
-    const actionType = newSnapshot.gameEvent.actionType;
-    const pendingRequests = newSnapshot.pendingDecisionRequests || [];
-    const readyForCountingRequests = pendingRequests.filter(r => r.decisionType === 'READY_FOR_COUNTING' || r.decisionType === 'READY_FOR_NEXT_ROUND');
+    // Log tri-line snapshot format
+    const gameState = gameLoop!.cribbageGame.getGameState();
+    const eventPlayer = newSnapshot.gameEvent.playerId
+      ? gameState.players.find(p => p.id === newSnapshot.gameEvent.playerId)?.name || 'Unknown'
+      : 'System';
     
-    if (readyForCountingRequests.length > 0) {
-      console.log(`[TIMING] Server received gameSnapshot event at ${snapshotReceivedTime}ms with ${readyForCountingRequests.length} acknowledgment requests`);
-    }
+    logger.logGameEvent(eventPlayer, newSnapshot.gameEvent.actionType, newSnapshot.gameEvent.scoreChange);
+    logger.logGameState(gameState.roundNumber, gameState.currentPhase, gameState.snapshotId);
+    
+    const pendingRequests = newSnapshot.pendingDecisionRequests || [];
+    const requestInfo = pendingRequests.map(r => ({
+      name: gameState.players.find(p => p.id === r.playerId)?.name || r.playerId,
+      type: r.decisionType,
+    }));
+    logger.logPendingRequests(requestInfo);
     
     // Store the full snapshot for internal use (agents, database, etc.)
     mostRecentGameSnapshot = newSnapshot;
-    sendGameEventToDB(newSnapshot.gameEvent);
     currentRoundGameEvents.push(newSnapshot.gameEvent);
     if (newSnapshot.gameEvent.actionType === ActionType.START_ROUND) {
       currentRoundGameEvents = [];
@@ -651,7 +627,6 @@ async function handleStartGame(): Promise<void> {
     connectedPlayers.forEach(playerInfo => {
       const socketId = playerIdToSocketId.get(playerInfo.id);
       if (socketId) {
-        const redactStartTime = Date.now();
         const redactedGameState = gameLoop!.cribbageGame.getRedactedGameState(
           playerInfo.id
         );
@@ -659,11 +634,6 @@ async function handleStartGame(): Promise<void> {
           newSnapshot.gameEvent,
           playerInfo.id
         );
-        const redactEndTime = Date.now();
-        
-        if (readyForCountingRequests.length > 0) {
-          console.log(`[TIMING] Server redacted snapshot for player ${playerInfo.id} at ${redactEndTime}ms (redaction took ${redactEndTime - redactStartTime}ms)`);
-        }
         
         const redactedSnapshot: GameSnapshot = {
           gameState: redactedGameState,
@@ -671,13 +641,7 @@ async function handleStartGame(): Promise<void> {
           pendingDecisionRequests: newSnapshot.pendingDecisionRequests, // Include pending requests
         };
         
-        const emitStartTime = Date.now();
         io.to(socketId).emit('gameSnapshot', redactedSnapshot);
-        const emitEndTime = Date.now();
-        
-        if (readyForCountingRequests.length > 0) {
-          console.log(`[TIMING] Server emitted gameSnapshot to player ${playerInfo.id} at ${emitEndTime}ms (emit took ${emitEndTime - emitStartTime}ms, total from receive: ${emitEndTime - snapshotReceivedTime}ms)`);
-        }
 
         // Also send redacted current round game events to this player
         const redactedRoundEvents = currentRoundGameEvents.map(event =>
