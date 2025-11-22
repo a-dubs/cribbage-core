@@ -573,7 +573,8 @@ async function handleStartGame(): Promise<void> {
     const botNumber = i + 1;
     const botName = `Bot ${botNumber}`;
     const botAgent = new ExhaustiveSimpleAgent();
-    const botId = botAgent.playerId;
+    // Create unique bot ID by appending timestamp and counter to avoid collisions
+    const botId = `${botAgent.playerId}-${Date.now()}-${i}`;
     const botPlayerInfo: PlayerInfo = {
       id: botId,
       name: botName,
