@@ -569,11 +569,11 @@ async function handleStartGame(): Promise<void> {
   const botsNeeded = Math.max(0, requestedPlayerCount - connectedPlayers.size);
   console.log(`Current players: ${connectedPlayers.size}, Bots needed: ${botsNeeded}`);
   
-  // Friendly bot names
+  // Friendly bot names with "Bot " prefix
   const botNames = [
-    'Chip',
-    'Shuffle',
-    'Lucky',
+    'Bot Alex',
+    'Bot Morgan',
+    'Bot Jordan',
   ];
   
   for (let i = 0; i < botsNeeded; i++) {
