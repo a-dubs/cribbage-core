@@ -23,6 +23,7 @@ import { displayCard, parseCard, suitToEmoji } from '../core/scoring';
 import EventEmitter from 'eventemitter3';
 import dotenv from 'dotenv';
 import { getPlayerCountConfig } from './rules';
+import { logger } from '../utils/logger';
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
 dotenv.config();
@@ -173,21 +174,26 @@ export class GameLoop extends EventEmitter {
 
     switch (request.decisionType) {
       case AgentDecisionType.PLAY_CARD: {
+        const playerName = this.cribbageGame.getGameState().players.find(p => p.id === request.playerId)?.name || request.playerId;
+        const moveStartTime = Date.now();
         const card = await agent.makeMove(redactedSnapshot, request.playerId);
+        const moveEndTime = Date.now();
+        logger.logAgentDuration('MOVE', playerName, moveEndTime - moveStartTime);
         this.cribbageGame.removeDecisionRequest(request.requestId);
-        console.log(`[waitForDecision] PLAY_CARD resolved for player ${request.playerId}`);
         return card;
       }
 
       case AgentDecisionType.DISCARD: {
         const data = request.requestData as DiscardRequestData;
-        console.log(`[waitForDecision] Calling agent.discard() for player ${request.playerId} (${agent.human ? 'human' : 'bot'})`);
+        const playerName = this.cribbageGame.getGameState().players.find(p => p.id === request.playerId)?.name || request.playerId;
+        const discardStartTime = Date.now();
         const discards = await agent.discard(
           redactedSnapshot,
           request.playerId,
           data.numberOfCardsToDiscard
         );
-        console.log(`[waitForDecision] DISCARD resolved for player ${request.playerId}, got ${discards.length} cards`);
+        const discardEndTime = Date.now();
+        logger.logAgentDuration('DISCARD', playerName, discardEndTime - discardStartTime);
         this.cribbageGame.removeDecisionRequest(request.requestId);
         return discards;
       }
