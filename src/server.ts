@@ -303,6 +303,24 @@ let mostRecentGameSnapshot: GameSnapshot | null = null;
 let currentRoundGameEvents: GameEvent[] = [];
 let currentGameBotIds: string[] = []; // Track bots created for current game so we can clean them up
 
+/**
+ * Clean up bots from connectedPlayers and related maps
+ */
+function cleanupBots(): void {
+  if (currentGameBotIds.length === 0) {
+    return;
+  }
+  console.log(`Cleaning up ${currentGameBotIds.length} bots`);
+  currentGameBotIds.forEach(botId => {
+    connectedPlayers.delete(botId);
+    playerIdToSocketId.delete(botId);
+    socketIdToPlayerId.delete(botId);
+    console.log(`Removed bot: ${botId}`);
+  });
+  currentGameBotIds = [];
+  emitConnectedPlayers();
+}
+
 // Generate unique player ID from username, handling conflicts
 function getUniquePlayerId(username: string, socketId: string): string {
   // First, try using the username directly
@@ -851,6 +869,20 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, c
     return;
   }
 
+  // Check if a game is already running
+  if (gameLoop !== null) {
+    console.error('Game loop already exists. Cannot start new game.');
+    const errorMsg = 'A game is already in progress';
+    socket.emit('error', { message: errorMsg });
+    if (callback) {
+      callback({ error: errorMsg });
+    }
+    return;
+  }
+
+  // Clean up any existing bots before creating new ones
+  cleanupBots();
+
   // Build playersInfo from lobby members (humans only, no bots yet)
   const playersInfo: PlayerIdAndName[] = lobby.players.map(p => ({ id: p.playerId, name: p.displayName }));
 
@@ -896,6 +928,7 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, c
   agents.forEach((agent, id) => gameLoop!.addAgent(id, agent));
 
   // Set up gameSnapshot listener to broadcast to all clients
+  let firstSnapshotEmitted = false;
   gameLoop.on('gameSnapshot', (newSnapshot: GameSnapshot) => {
     io.emit('gameSnapshot', newSnapshot);
     mostRecentGameSnapshot = newSnapshot;
@@ -905,6 +938,19 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, c
       currentRoundGameEvents = [];
     }
     io.emit('currentRoundGameEvents', currentRoundGameEvents);
+    
+    // After the first snapshot, ensure all clients received it by re-emitting
+    // This helps clients that reset state after gameStartedFromLobby
+    if (!firstSnapshotEmitted) {
+      firstSnapshotEmitted = true;
+      // Small delay to ensure clients have processed gameStartedFromLobby and set up listeners
+      setTimeout(() => {
+        if (mostRecentGameSnapshot === newSnapshot) {
+          console.log('Re-emitting first game snapshot to ensure all clients received it');
+          io.emit('gameSnapshot', newSnapshot);
+        }
+      }, 100);
+    }
   });
 
   // Map lobby -> game
@@ -926,8 +972,11 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, c
     callback({ success: true, gameId });
   }
 
-  // Start the game loop
-  await startGame();
+  // Start the game loop (this will emit snapshots as the game progresses)
+  // Don't await - let it run in the background
+  startGame().catch(error => {
+    console.error('[handleStartLobbyGame] Error in game loop:', error);
+  });
 }
 
 function handleCreateLobby(socket: Socket, data: { playerCount: number; name?: string }, callback?: (response: any) => void): void {
@@ -1186,9 +1235,12 @@ function handleRestartGame(socket: Socket): void {
 
   console.log(`Restarting game for lobby: ${lobby.name} (${lobbyId})`);
 
-  // Clear the game loop
+  // Clean up bots immediately (don't wait for game to finish)
+  cleanupBots();
+
+  // Cancel and clear the game loop
   if (gameLoop) {
-    gameLoop.removeAllListeners();
+    gameLoop.cancel();
     gameLoop = null;
   }
   mostRecentGameSnapshot = null;
@@ -1282,33 +1334,61 @@ async function startGame(): Promise<void> {
     );
     return;
   }
-  console.log('Starting game loop...');
-  const winner = await gameLoop.playGame();
-  endGameInDB(gameLoop.cribbageGame.getGameState().id, winner);
+  
+  // Store reference to current game loop to check if it was cancelled
+  const currentGameLoop = gameLoop;
+  
+  try {
+    console.log('Starting game loop...');
+    const winner = await currentGameLoop.playGame();
+    
+    // Check if this game loop was cancelled (replaced by a new one)
+    if (gameLoop !== currentGameLoop) {
+      console.log('[startGame()] Game loop was replaced, ignoring completion');
+      return;
+    }
+    
+    endGameInDB(currentGameLoop.cribbageGame.getGameState().id, winner);
 
-  // Wait a brief moment to ensure the final snapshot with Phase.END is sent to all clients
-  // The endGame() call emits a gameSnapshot event which needs to be processed and sent
-  await new Promise(resolve => setTimeout(resolve, 100));
+    // Wait a brief moment to ensure the final snapshot with Phase.END is sent to all clients
+    // The endGame() call emits a gameSnapshot event which needs to be processed and sent
+    await new Promise(resolve => setTimeout(resolve, 100));
 
-  // Clear gameLoop after game ends so a new game can be started
-  console.log('Game ended. Clearing game loop to allow new game.');
-  gameLoop.removeAllListeners();
-  gameLoop = null;
+    // Check again if game loop was replaced during the wait
+    if (gameLoop !== currentGameLoop) {
+      console.log('[startGame()] Game loop was replaced during wait, ignoring completion');
+      return;
+    }
 
-  // Clean up bots that were created for this game
-  console.log(`Cleaning up ${currentGameBotIds.length} bots after game end`);
-  currentGameBotIds.forEach(botId => {
-    connectedPlayers.delete(botId);
-    playerIdToSocketId.delete(botId);
-    socketIdToPlayerId.delete(botId);
-    console.log(`Removed bot: ${botId}`);
-  });
-  currentGameBotIds = [];
+    // Clear gameLoop after game ends so a new game can be started
+    // Only clear if this is still the current game loop (hasn't been replaced)
+    if (gameLoop === currentGameLoop) {
+      console.log('Game ended. Clearing game loop to allow new game.');
+      currentGameLoop.removeAllListeners();
+      gameLoop = null;
+    } else {
+      console.log('[startGame()] Game loop was replaced, not clearing (new game already started)');
+    }
 
-  // Emit updated connected players list to all clients
-  emitConnectedPlayers();
+    // Clean up bots that were created for this game
+    cleanupBots();
 
-  io.emit('gameOver', winner);
+    io.emit('gameOver', winner);
+  } catch (error) {
+    // If game loop was cancelled, that's expected - just log and return
+    if (error instanceof Error && error.message === 'Game loop was cancelled') {
+      console.log('[startGame()] Game loop was cancelled, cleaning up');
+      // Clean up bots even if cancelled
+      if (gameLoop === currentGameLoop) {
+        cleanupBots();
+        gameLoop = null;
+      }
+      return;
+    }
+    // Otherwise, rethrow the error
+    console.error('[startGame()] Error during game:', error);
+    throw error;
+  }
 }
 
 // Start the server

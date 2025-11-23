@@ -36,6 +36,7 @@ const ENABLE_READY_FOR_COUNTING = process.env.ENABLE_READY_FOR_COUNTING === 'tru
 export class GameLoop extends EventEmitter {
   public cribbageGame: CribbageGame;
   private agents: Record<string, GameAgent> = {};
+  private cancelled: boolean = false;
 
   constructor(playersInfo: PlayerIdAndName[]) {
     super();
@@ -49,6 +50,14 @@ export class GameLoop extends EventEmitter {
     this.cribbageGame.on('gameSnapshot', (newGameSnapshot: GameSnapshot) => {
       this.emit('gameSnapshot', newGameSnapshot);
     });
+  }
+
+  /**
+   * Cancel the game loop - stops all pending decision requests
+   */
+  public cancel(): void {
+    this.cancelled = true;
+    this.removeAllListeners();
   }
 
   public addAgent(playerId: string, agent: GameAgent): void {
@@ -162,6 +171,11 @@ export class GameLoop extends EventEmitter {
    * @returns The response from the agent
    */
   private async waitForDecision(request: DecisionRequest): Promise<any> {
+    // Check if game loop was cancelled
+    if (this.cancelled) {
+      throw new Error('Game loop was cancelled');
+    }
+
     const agent = this.agents[request.playerId];
     if (!agent) throw new Error(`No agent for player ${request.playerId}`);
 
@@ -171,6 +185,11 @@ export class GameLoop extends EventEmitter {
     const redactedSnapshot = this.cribbageGame.getRedactedGameSnapshot(
       request.playerId
     );
+
+    // Check again after getting snapshot (in case cancelled during async operation)
+    if (this.cancelled) {
+      throw new Error('Game loop was cancelled');
+    }
 
     switch (request.decisionType) {
       case AgentDecisionType.PLAY_CARD: {
@@ -794,17 +813,35 @@ export class GameLoop extends EventEmitter {
    * @returns the ID of the winning player
    */
   public async playGame(): Promise<string> {
-    // Handle dealer selection before first round
-    await this.doDealerSelection();
+    try {
+      // Handle dealer selection before first round
+      await this.doDealerSelection();
 
-    let winner: string | null = null;
+      let winner: string | null = null;
 
-    while (!winner) {
-      winner = await this.doRound();
+      while (!winner && !this.cancelled) {
+        winner = await this.doRound();
+      }
+
+      if (this.cancelled) {
+        throw new Error('Game loop was cancelled');
+      }
+
+      // At this point, winner must be non-null (loop exits when winner is set)
+      if (!winner) {
+        throw new Error('Game ended without a winner');
+      }
+
+      this.cribbageGame.endGame(winner);
+
+      return Promise.resolve(winner);
+    } catch (error) {
+      // If cancelled, don't end the game - just throw
+      if (this.cancelled) {
+        throw error;
+      }
+      // Otherwise rethrow the error
+      throw error;
     }
-
-    this.cribbageGame.endGame(winner);
-
-    return Promise.resolve(winner);
   }
 }
