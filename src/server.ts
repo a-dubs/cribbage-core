@@ -886,6 +886,18 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, c
   gameLoop = new GameLoop(playersInfo);
   agents.forEach((agent, id) => gameLoop!.addAgent(id, agent));
 
+  // Set up gameSnapshot listener to broadcast to all clients
+  gameLoop.on('gameSnapshot', (newSnapshot: GameSnapshot) => {
+    io.emit('gameSnapshot', newSnapshot);
+    mostRecentGameSnapshot = newSnapshot;
+    sendGameEventToDB(newSnapshot.gameEvent);
+    currentRoundGameEvents.push(newSnapshot.gameEvent);
+    if (newSnapshot.gameEvent.actionType === ActionType.START_ROUND) {
+      currentRoundGameEvents = [];
+    }
+    io.emit('currentRoundGameEvents', currentRoundGameEvents);
+  });
+
   // Map lobby -> game
   const gameId = gameLoop.cribbageGame.getGameState().id;
   gameIdByLobbyId.set(lobby.id, gameId);
