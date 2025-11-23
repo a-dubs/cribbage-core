@@ -356,6 +356,11 @@ io.on('connection', socket => {
     handleUpdateLobbySize(socket, data, callback);
   });
 
+  socket.on('updateLobbyName', (data: { lobbyId: string; name: string }, callback?: (response: any) => void) => {
+    console.log('Received updateLobbyName event from socket:', socket.id, 'lobbyId:', data?.lobbyId, 'name:', data?.name);
+    handleUpdateLobbyName(socket, data, callback);
+  });
+
   socket.on('listLobbies', () => {
     console.log('Received listLobbies request from socket:', socket.id);
     handleListLobbies(socket);
@@ -706,6 +711,72 @@ function handleUpdateLobbySize(socket: Socket, data: { lobbyId: string; playerCo
   io.emit('lobbyUpdated', lobby);
 }
 
+function handleUpdateLobbyName(socket: Socket, data: { lobbyId: string; name: string }, callback?: (response: any) => void): void {
+  const playerId = socketIdToPlayerId.get(socket.id);
+  if (!playerId) {
+    console.error('Player ID not found for socket:', socket.id);
+    const error = { error: 'Not logged in' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Not logged in' });
+    return;
+  }
+
+  const { lobbyId, name } = data;
+
+  // Validate name
+  const trimmedName = name?.trim();
+  if (!trimmedName || trimmedName.length === 0) {
+    const error = { error: 'Lobby name cannot be empty' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Lobby name cannot be empty' });
+    return;
+  }
+
+  if (trimmedName.length > 50) {
+    const error = { error: 'Lobby name must be 50 characters or less' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Lobby name must be 50 characters or less' });
+    return;
+  }
+
+  // Check if lobby exists
+  const lobby = lobbiesById.get(lobbyId);
+  if (!lobby) {
+    const error = { error: 'Lobby not found' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Lobby not found' });
+    return;
+  }
+
+  // Check if player is host
+  if (playerId !== lobby.hostId) {
+    const error = { error: 'Only the host can change lobby name' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Only the host can change lobby name' });
+    return;
+  }
+
+  // Check if lobby is still waiting
+  if (lobby.status !== 'waiting') {
+    const error = { error: 'Cannot change name after game has started' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Cannot change name after game has started' });
+    return;
+  }
+
+  // Update the lobby name
+  lobby.name = trimmedName;
+  console.log(`Lobby ${lobbyId} name updated to "${trimmedName}" by host ${playerId}`);
+
+  // Send callback response
+  if (callback) {
+    callback({ lobby });
+  }
+
+  // Broadcast update to all clients
+  io.emit('lobbyUpdated', lobby);
+}
+
 function handleListLobbies(socket: Socket): void {
   const waitingLobbies = Array.from(lobbiesById.values())
     .filter(lobby => lobby.status === 'waiting')
@@ -856,8 +927,8 @@ function handleCreateLobby(socket: Socket, data: { playerCount: number; name?: s
     return;
   }
 
-  // Generate lobby name (either custom or auto-generated)
-  const lobbyName = customName?.trim() || generateUniqueLobbyName();
+  // Generate lobby name (either custom or default to "<host's name>'s lobby")
+  const lobbyName = customName?.trim() || `${hostDisplayName}'s lobby`;
 
   // Create the lobby
   const lobbyId = uuidv4();
