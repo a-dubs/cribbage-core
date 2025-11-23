@@ -418,8 +418,6 @@ export class GameLoop extends EventEmitter {
 
       // if the round is over, start next round with the person following the last person to play a card
       if (roundOverLastPlayer) {
-        currentPlayerId =
-          this.cribbageGame.getFollowingPlayerId(roundOverLastPlayer);
         // update the list of players done - check all players to see if they are out of cards
         for (const player of this.cribbageGame.getGameState().players) {
           if (
@@ -429,11 +427,27 @@ export class GameLoop extends EventEmitter {
             playersDone.push(player.id);
           }
         }
+        // Check if all players are done before continuing
+        if (playersDone.length >= this.cribbageGame.getGameState().players.length) {
+          break;
+        }
+        currentPlayerId =
+          this.cribbageGame.getFollowingPlayerId(roundOverLastPlayer);
+        // Skip players who are done
+        while (playersDone.includes(currentPlayerId)) {
+          currentPlayerId =
+            this.cribbageGame.getFollowingPlayerId(currentPlayerId);
+        }
       }
       // if the round is not over, continue with the next player
       else {
         currentPlayerId =
           this.cribbageGame.getFollowingPlayerId(currentPlayerId);
+        // Skip players who are done
+        while (playersDone.includes(currentPlayerId)) {
+          currentPlayerId =
+            this.cribbageGame.getFollowingPlayerId(currentPlayerId);
+        }
       }
     }
     // if all players are out of cards, pegging is over
