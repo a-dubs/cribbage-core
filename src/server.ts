@@ -946,6 +946,32 @@ function handleLogin(socket: Socket, data: LoginData): void {
   playerIdToSocketId.set(playerId, socket.id);
   socketIdToPlayerId.set(socket.id, playerId);
   connectedPlayers.set(playerId, playerInfo);
+  
+  // Clean up any stale lobby membership from previous session
+  if (lobbyIdByPlayerId.has(playerId)) {
+    const staleLobbyt = lobbyIdByPlayerId.get(playerId);
+    if (staleLobbyt) {
+      console.log(`[handleLogin] Cleaning up stale lobby membership for ${playerId} in lobby ${staleLobbyt}`);
+      // Remove player from stale lobby if it exists
+      const lobby = lobbiesById.get(staleLobbyt);
+      if (lobby) {
+        const playerIndex = lobby.players.findIndex(p => p.playerId === playerId);
+        if (playerIndex !== -1) {
+          lobby.players.splice(playerIndex, 1);
+          console.log(`[handleLogin] Removed ${playerId} from stale lobby ${staleLobbyt}`);
+          // If lobby is now empty, mark as finished
+          if (lobby.players.length === 0) {
+            lobby.status = 'finished';
+            io.emit('lobbyClosed', { lobbyId: staleLobbyt });
+          } else {
+            io.emit('lobbyUpdated', lobby);
+          }
+        }
+      }
+    }
+    // Clear the stale mapping
+    lobbyIdByPlayerId.delete(playerId);
+  }
 
   console.log('emitting loggedIn event to client:', playerId);
   const loggedInData: PlayerIdAndName & { secretKey: string } = {
