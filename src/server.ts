@@ -336,24 +336,24 @@ io.on('connection', socket => {
     handleCreateLobby(socket, data, callback);
   });
 
-  socket.on('joinLobby', (data: { lobbyId: string }) => {
+  socket.on('joinLobby', (data: { lobbyId: string }, callback?: (response: any) => void) => {
     console.log('Received joinLobby event from socket:', socket.id, 'lobbyId:', data?.lobbyId);
-    handleJoinLobby(socket, data);
+    handleJoinLobby(socket, data, callback);
   });
 
-  socket.on('leaveLobby', (data: { lobbyId: string }) => {
+  socket.on('leaveLobby', (data: { lobbyId: string }, callback?: (response: any) => void) => {
     console.log('Received leaveLobby event from socket:', socket.id, 'lobbyId:', data?.lobbyId);
-    handleLeaveLobby(socket, data);
+    handleLeaveLobby(socket, data, callback);
   });
 
-  socket.on('kickPlayer', (data: { lobbyId: string; targetPlayerId: string }) => {
+  socket.on('kickPlayer', (data: { lobbyId: string; targetPlayerId: string }, callback?: (response: any) => void) => {
     console.log('Received kickPlayer event from socket:', socket.id, 'lobbyId:', data?.lobbyId, 'target:', data?.targetPlayerId);
-    handleKickPlayer(socket, data);
+    handleKickPlayer(socket, data, callback);
   });
 
-  socket.on('updateLobbySize', (data: { lobbyId: string; playerCount: number }) => {
+  socket.on('updateLobbySize', (data: { lobbyId: string; playerCount: number }, callback?: (response: any) => void) => {
     console.log('Received updateLobbySize event from socket:', socket.id, 'lobbyId:', data?.lobbyId, 'playerCount:', data?.playerCount);
-    handleUpdateLobbySize(socket, data);
+    handleUpdateLobbySize(socket, data, callback);
   });
 
   socket.on('listLobbies', () => {
@@ -361,10 +361,11 @@ io.on('connection', socket => {
     handleListLobbies(socket);
   });
 
-  socket.on('startLobbyGame', (data: { lobbyId: string }) => {
+  socket.on('startLobbyGame', (data: { lobbyId: string }, callback?: (response: any) => void) => {
     console.log('Received startLobbyGame event from socket:', socket.id, 'lobbyId:', data?.lobbyId);
-    handleStartLobbyGame(socket, data).catch(error => {
+    handleStartLobbyGame(socket, data, callback).catch(error => {
       console.error('Error starting lobby game:', error);
+      if (callback) callback({ error: 'Failed to start game' });
       socket.emit('error', { message: 'Failed to start game' });
     });
   });
@@ -444,10 +445,12 @@ function generateSecretKey(): string {
   return `${Date.now()}-${Math.random().toString(36).substring(2, 15)}-${Math.random().toString(36).substring(2, 15)}`;
 }
 
-function handleJoinLobby(socket: Socket, data: { lobbyId: string }): void {
+function handleJoinLobby(socket: Socket, data: { lobbyId: string }, callback?: (response: any) => void): void {
   const playerId = socketIdToPlayerId.get(socket.id);
   if (!playerId) {
     console.error('Player ID not found for socket:', socket.id);
+    const error = { error: 'Not logged in' };
+    if (callback) callback(error);
     socket.emit('error', { message: 'Not logged in' });
     return;
   }
@@ -457,6 +460,8 @@ function handleJoinLobby(socket: Socket, data: { lobbyId: string }): void {
   // Check if player is already in a lobby
   if (lobbyIdByPlayerId.has(playerId)) {
     console.error('Player already in a lobby:', playerId);
+    const error = { error: 'Already in a lobby' };
+    if (callback) callback(error);
     socket.emit('error', { message: 'Already in a lobby' });
     return;
   }
@@ -465,6 +470,8 @@ function handleJoinLobby(socket: Socket, data: { lobbyId: string }): void {
   const lobby = lobbiesById.get(lobbyId);
   if (!lobby) {
     console.error('Lobby not found:', lobbyId);
+    const error = { error: 'Lobby not found' };
+    if (callback) callback(error);
     socket.emit('error', { message: 'Lobby not found' });
     return;
   }
@@ -472,6 +479,8 @@ function handleJoinLobby(socket: Socket, data: { lobbyId: string }): void {
   // Check if lobby is waiting
   if (lobby.status !== 'waiting') {
     console.error('Lobby not waiting:', lobbyId, 'status:', lobby.status);
+    const error = { error: 'Lobby is not accepting new players' };
+    if (callback) callback(error);
     socket.emit('error', { message: 'Lobby is not accepting new players' });
     return;
   }
@@ -479,6 +488,8 @@ function handleJoinLobby(socket: Socket, data: { lobbyId: string }): void {
   // Check if lobby is full
   if (lobby.players.length >= lobby.playerCount) {
     console.error('Lobby is full:', lobbyId);
+    const error = { error: 'Lobby is full' };
+    if (callback) callback(error);
     socket.emit('error', { message: 'Lobby is full' });
     return;
   }
@@ -492,14 +503,21 @@ function handleJoinLobby(socket: Socket, data: { lobbyId: string }): void {
 
   console.log(`Player ${playerDisplayName} joined lobby ${lobby.name} (${lobbyId})`);
 
+  // Send callback response
+  if (callback) {
+    callback({ lobby });
+  }
+
   // Broadcast update to all clients
   io.emit('lobbyUpdated', lobby);
 }
 
-function handleLeaveLobby(socket: Socket, data: { lobbyId: string }): void {
+function handleLeaveLobby(socket: Socket, data: { lobbyId: string }, callback?: (response: any) => void): void {
   const playerId = socketIdToPlayerId.get(socket.id);
   if (!playerId) {
     console.error('Player ID not found for socket:', socket.id);
+    const error = { error: 'Not logged in' };
+    if (callback) callback(error);
     socket.emit('error', { message: 'Not logged in' });
     return;
   }
@@ -510,6 +528,8 @@ function handleLeaveLobby(socket: Socket, data: { lobbyId: string }): void {
   const lobby = lobbiesById.get(lobbyId);
   if (!lobby) {
     console.error('Lobby not found:', lobbyId);
+    const error = { error: 'Lobby not found' };
+    if (callback) callback(error);
     socket.emit('error', { message: 'Lobby not found' });
     return;
   }
@@ -518,6 +538,8 @@ function handleLeaveLobby(socket: Socket, data: { lobbyId: string }): void {
   const playerIndex = lobby.players.findIndex(p => p.playerId === playerId);
   if (playerIndex === -1) {
     console.error('Player not in lobby:', playerId, lobbyId);
+    const error = { error: 'You are not in this lobby' };
+    if (callback) callback(error);
     socket.emit('error', { message: 'You are not in this lobby' });
     return;
   }
@@ -529,6 +551,11 @@ function handleLeaveLobby(socket: Socket, data: { lobbyId: string }): void {
   const playerInfo = connectedPlayers.get(playerId);
   const playerDisplayName = playerInfo?.name || 'Unknown';
   console.log(`Player ${playerDisplayName} left lobby ${lobby.name} (${lobbyId})`);
+
+  // Send callback response
+  if (callback) {
+    callback({ success: true });
+  }
 
   // If host left and others remain, transfer host
   if (playerId === lobby.hostId && lobby.players.length > 0) {
@@ -549,10 +576,12 @@ function handleLeaveLobby(socket: Socket, data: { lobbyId: string }): void {
   io.emit('lobbyUpdated', lobby);
 }
 
-function handleKickPlayer(socket: Socket, data: { lobbyId: string; targetPlayerId: string }): void {
+function handleKickPlayer(socket: Socket, data: { lobbyId: string; targetPlayerId: string }, callback?: (response: any) => void): void {
   const playerId = socketIdToPlayerId.get(socket.id);
   if (!playerId) {
     console.error('Player ID not found for socket:', socket.id);
+    const error = { error: 'Not logged in' };
+    if (callback) callback(error);
     socket.emit('error', { message: 'Not logged in' });
     return;
   }
@@ -563,6 +592,8 @@ function handleKickPlayer(socket: Socket, data: { lobbyId: string; targetPlayerI
   const lobby = lobbiesById.get(lobbyId);
   if (!lobby) {
     console.error('Lobby not found:', lobbyId);
+    const error = { error: 'Lobby not found' };
+    if (callback) callback(error);
     socket.emit('error', { message: 'Lobby not found' });
     return;
   }
@@ -570,6 +601,8 @@ function handleKickPlayer(socket: Socket, data: { lobbyId: string; targetPlayerI
   // Check if player is host
   if (playerId !== lobby.hostId) {
     console.error('Not the host:', playerId, 'actual host:', lobby.hostId);
+    const error = { error: 'Only the host can kick players' };
+    if (callback) callback(error);
     socket.emit('error', { message: 'Only the host can kick players' });
     return;
   }
@@ -578,6 +611,8 @@ function handleKickPlayer(socket: Socket, data: { lobbyId: string; targetPlayerI
   const targetIndex = lobby.players.findIndex(p => p.playerId === targetPlayerId);
   if (targetIndex === -1) {
     console.error('Target player not in lobby:', targetPlayerId, lobbyId);
+    const error = { error: 'Player not in this lobby' };
+    if (callback) callback(error);
     socket.emit('error', { message: 'Player not in this lobby' });
     return;
   }
@@ -589,6 +624,11 @@ function handleKickPlayer(socket: Socket, data: { lobbyId: string; targetPlayerI
   lobbyIdByPlayerId.delete(targetPlayerId);
 
   console.log(`Player ${targetPlayerName} was kicked from lobby ${lobby.name} (${lobbyId}) by host ${playerId}`);
+
+  // Send callback response
+  if (callback) {
+    callback({ success: true });
+  }
 
   // Notify the kicked player
   const targetSocketId = playerIdToSocketId.get(targetPlayerId);
@@ -608,10 +648,12 @@ function handleKickPlayer(socket: Socket, data: { lobbyId: string; targetPlayerI
   io.emit('lobbyUpdated', lobby);
 }
 
-function handleUpdateLobbySize(socket: Socket, data: { lobbyId: string; playerCount: number }): void {
+function handleUpdateLobbySize(socket: Socket, data: { lobbyId: string; playerCount: number }, callback?: (response: any) => void): void {
   const playerId = socketIdToPlayerId.get(socket.id);
   if (!playerId) {
     console.error('Player ID not found for socket:', socket.id);
+    const error = { error: 'Not logged in' };
+    if (callback) callback(error);
     socket.emit('error', { message: 'Not logged in' });
     return;
   }
@@ -620,6 +662,8 @@ function handleUpdateLobbySize(socket: Socket, data: { lobbyId: string; playerCo
 
   // Validate player count
   if (!playerCount || playerCount < 2 || playerCount > 4) {
+    const error = { error: 'Player count must be between 2 and 4' };
+    if (callback) callback(error);
     socket.emit('error', { message: 'Player count must be between 2 and 4' });
     return;
   }
@@ -627,18 +671,24 @@ function handleUpdateLobbySize(socket: Socket, data: { lobbyId: string; playerCo
   // Check if lobby exists
   const lobby = lobbiesById.get(lobbyId);
   if (!lobby) {
+    const error = { error: 'Lobby not found' };
+    if (callback) callback(error);
     socket.emit('error', { message: 'Lobby not found' });
     return;
   }
 
   // Check if player is host
   if (playerId !== lobby.hostId) {
+    const error = { error: 'Only the host can change lobby size' };
+    if (callback) callback(error);
     socket.emit('error', { message: 'Only the host can change lobby size' });
     return;
   }
 
   // Check if lobby is still waiting
   if (lobby.status !== 'waiting') {
+    const error = { error: 'Cannot change size after game has started' };
+    if (callback) callback(error);
     socket.emit('error', { message: 'Cannot change size after game has started' });
     return;
   }
@@ -646,6 +696,11 @@ function handleUpdateLobbySize(socket: Socket, data: { lobbyId: string; playerCo
   // Update the player count
   lobby.playerCount = playerCount;
   console.log(`Lobby ${lobby.name} size updated to ${playerCount} by host ${playerId}`);
+
+  // Send callback response
+  if (callback) {
+    callback({ lobby });
+  }
 
   // Broadcast update to all clients
   io.emit('lobbyUpdated', lobby);
@@ -671,7 +726,7 @@ function handleListLobbies(socket: Socket): void {
   socket.emit('lobbyList', { lobbies: waitingLobbies });
 }
 
-async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }): Promise<void> {
+async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, callback?: (response: any) => void): Promise<void> {
   const playerId = socketIdToPlayerId.get(socket.id);
   if (!playerId) {
     console.error('Player ID not found for socket:', socket.id);
