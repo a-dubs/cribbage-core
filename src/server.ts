@@ -927,13 +927,15 @@ function handleCreateLobby(socket: Socket, data: { playerCount: number; name?: s
     return;
   }
 
+  // Get player info for host display name
+  const playerInfo = connectedPlayers.get(playerId);
+  const hostDisplayName = playerInfo?.name || 'Unknown';
+
   // Generate lobby name (either custom or default to "<host's name>'s lobby")
   const lobbyName = customName?.trim() || `${hostDisplayName}'s lobby`;
 
   // Create the lobby
   const lobbyId = uuidv4();
-  const playerInfo = connectedPlayers.get(playerId);
-  const hostDisplayName = playerInfo?.name || 'Unknown';
 
   const lobby: Lobby = {
     id: lobbyId,
