@@ -298,7 +298,6 @@ function generateUniqueLobbyName(): string {
   })} ${Date.now()}`;
 }
 
-const playAgainVotes: Set<string> = new Set();
 let gameLoop: GameLoop | null = null;
 let mostRecentGameSnapshot: GameSnapshot | null = null;
 let currentRoundGameEvents: GameEvent[] = [];
@@ -984,7 +983,6 @@ function sendMostRecentGameData(socket: Socket): void {
       );
       // Still send empty arrays for consistency
       socket.emit('currentRoundGameEvents', []);
-      socket.emit('playAgainVotes', []);
       return;
     }
 
@@ -1028,9 +1026,8 @@ function sendMostRecentGameData(socket: Socket): void {
       socket.emit('currentRoundGameEvents', []);
     }
   } else {
-    socket.emit('currentRoundGameEvents', currentRoundGameEvents);
+      socket.emit('currentRoundGameEvents', currentRoundGameEvents);
   }
-  socket.emit('playAgainVotes', Array.from(playAgainVotes));
 }
 
 async function startGame(): Promise<void> {
@@ -1053,21 +1050,6 @@ async function startGame(): Promise<void> {
   gameLoop.removeAllListeners();
   gameLoop = null;
 
-  // Reset play again votes and automatically add bots
-  playAgainVotes.clear();
-
-  // Add all bot players to play again votes automatically
-  connectedPlayers.forEach(playerInfo => {
-    if (playerInfo.agent instanceof ExhaustiveSimpleAgent) {
-      playAgainVotes.add(playerInfo.id);
-      console.log(
-        `Bot player ${playerInfo.id} automatically voted to play again.`
-      );
-    }
-  });
-
-  // Emit updated play again votes to all clients
-  io.emit('playAgainVotes', Array.from(playAgainVotes));
   io.emit('gameOver', winner);
 }
 
