@@ -301,6 +301,7 @@ function generateUniqueLobbyName(): string {
 let gameLoop: GameLoop | null = null;
 let mostRecentGameSnapshot: GameSnapshot | null = null;
 let currentRoundGameEvents: GameEvent[] = [];
+let currentGameBotIds: string[] = []; // Track bots created for current game so we can clean them up
 
 // Generate unique player ID from username, handling conflicts
 function getUniquePlayerId(username: string, socketId: string): string {
@@ -888,6 +889,9 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, c
     if (info) agents.set(info.id, info.agent);
   });
 
+  // Store bot IDs for cleanup after game ends
+  currentGameBotIds = newBotIds;
+
   gameLoop = new GameLoop(playersInfo);
   agents.forEach((agent, id) => gameLoop!.addAgent(id, agent));
 
@@ -1290,6 +1294,19 @@ async function startGame(): Promise<void> {
   console.log('Game ended. Clearing game loop to allow new game.');
   gameLoop.removeAllListeners();
   gameLoop = null;
+
+  // Clean up bots that were created for this game
+  console.log(`Cleaning up ${currentGameBotIds.length} bots after game end`);
+  currentGameBotIds.forEach(botId => {
+    connectedPlayers.delete(botId);
+    playerIdToSocketId.delete(botId);
+    socketIdToPlayerId.delete(botId);
+    console.log(`Removed bot: ${botId}`);
+  });
+  currentGameBotIds = [];
+
+  // Emit updated connected players list to all clients
+  emitConnectedPlayers();
 
   io.emit('gameOver', winner);
 }
