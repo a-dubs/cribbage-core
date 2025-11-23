@@ -375,6 +375,11 @@ io.on('connection', socket => {
     });
   });
 
+  socket.on('restartGame', () => {
+    console.log('Received restartGame event from socket:', socket.id);
+    handleRestartGame(socket);
+  });
+
   socket.on('getConnectedPlayers', () => {
     console.log('Received getConnectedPlayers request from socket:', socket.id);
     // Send current connected players to this specific client
@@ -1145,7 +1150,54 @@ function emitConnectedPlayers(): void {
   // }
 }
 
-// NOTE: Removed handleStartGame() and handleRestartGame() - use handleStartLobbyGame() instead.
+function handleRestartGame(socket: Socket): void {
+  const playerId = socketIdToPlayerId.get(socket.id);
+  if (!playerId) {
+    console.error('Player ID not found for socket:', socket.id);
+    socket.emit('error', { message: 'Not logged in' });
+    return;
+  }
+
+  // Get the lobby this player is in
+  const lobbyId = lobbyIdByPlayerId.get(playerId);
+  if (!lobbyId) {
+    console.error('Player not in a lobby:', playerId);
+    socket.emit('error', { message: 'Not in a lobby' });
+    return;
+  }
+
+  const lobby = lobbiesById.get(lobbyId);
+  if (!lobby) {
+    console.error('Lobby not found:', lobbyId);
+    socket.emit('error', { message: 'Lobby not found' });
+    return;
+  }
+
+  // Check if the game is finished (not in progress)
+  if (lobby.status !== 'in_progress' && lobby.status !== 'finished') {
+    console.error('Cannot restart game - lobby is not in progress:', lobbyId);
+    socket.emit('error', { message: 'Game is not in progress' });
+    return;
+  }
+
+  console.log(`Restarting game for lobby: ${lobby.name} (${lobbyId})`);
+
+  // Clear the game loop
+  if (gameLoop) {
+    gameLoop.removeAllListeners();
+    gameLoop = null;
+  }
+  mostRecentGameSnapshot = null;
+  currentRoundGameEvents = [];
+  gameIdByLobbyId.delete(lobbyId);
+
+  // Reset lobby to waiting state so it can be started again
+  lobby.status = 'waiting';
+  io.emit('lobbyUpdated', lobby);
+  io.emit('gameRestarted', { lobbyId });
+
+  console.log(`Game restarted. Lobby ${lobby.name} is now waiting for restart.`);
+}
 
 function sendMostRecentGameData(socket: Socket): void {
   console.log('Sending most recent game data to client');
