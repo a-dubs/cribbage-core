@@ -1064,10 +1064,9 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, c
   gameLoopsByLobbyId.set(lobby.id, gameLoop);
   currentRoundGameEventsByLobbyId.set(lobby.id, []);
 
-  // Set up gameSnapshot listener to broadcast to all clients
+  // Set up gameSnapshot listener to send redacted snapshots to all clients
   let firstSnapshotEmitted = false;
   gameLoop.on('gameSnapshot', (newSnapshot: GameSnapshot) => {
-    io.emit('gameSnapshot', newSnapshot);
     mostRecentGameSnapshotByLobbyId.set(lobby.id, newSnapshot);
     sendGameEventToDB(newSnapshot.gameEvent);
     const existingEvents = currentRoundGameEventsByLobbyId.get(lobby.id) || [];
@@ -1076,7 +1075,9 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, c
       updatedEvents = [];
     }
     currentRoundGameEventsByLobbyId.set(lobby.id, updatedEvents);
-    io.emit('currentRoundGameEvents', updatedEvents);
+    
+    // Send redacted snapshots to all players
+    sendRedactedSnapshotToAllPlayers(gameLoop, newSnapshot, updatedEvents, lobby.id);
     
     // After the first snapshot, ensure all clients received it by re-emitting
     // This helps clients that reset state after gameStartedFromLobby
@@ -1085,9 +1086,10 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, c
       // Small delay to ensure clients have processed gameStartedFromLobby and set up listeners
       setTimeout(() => {
         const latestSnapshot = mostRecentGameSnapshotByLobbyId.get(lobby.id);
+        const latestEvents = currentRoundGameEventsByLobbyId.get(lobby.id) || [];
         if (latestSnapshot === newSnapshot) {
           console.log('Re-emitting first game snapshot to ensure all clients received it');
-          io.emit('gameSnapshot', newSnapshot);
+          sendRedactedSnapshotToAllPlayers(gameLoop, latestSnapshot, latestEvents, lobby.id);
         }
       }, 100);
     }
@@ -1496,10 +1498,9 @@ function handleRestartGame(socket: Socket): void {
   gameLoopsByLobbyId.set(lobby.id, gameLoop);
   currentRoundGameEventsByLobbyId.set(lobby.id, []);
 
-  // Set up gameSnapshot listener to broadcast to all clients
+  // Set up gameSnapshot listener to send redacted snapshots to all clients
   let firstSnapshotEmitted = false;
   gameLoop.on('gameSnapshot', (newSnapshot: GameSnapshot) => {
-    io.emit('gameSnapshot', newSnapshot);
     mostRecentGameSnapshotByLobbyId.set(lobby.id, newSnapshot);
     sendGameEventToDB(newSnapshot.gameEvent);
     const existingEvents = currentRoundGameEventsByLobbyId.get(lobby.id) || [];
@@ -1508,16 +1509,19 @@ function handleRestartGame(socket: Socket): void {
       updatedEvents = [];
     }
     currentRoundGameEventsByLobbyId.set(lobby.id, updatedEvents);
-    io.emit('currentRoundGameEvents', updatedEvents);
+    
+    // Send redacted snapshots to all players
+    sendRedactedSnapshotToAllPlayers(gameLoop, newSnapshot, updatedEvents, lobby.id);
     
     // After the first snapshot, ensure all clients received it by re-emitting
     if (!firstSnapshotEmitted) {
       firstSnapshotEmitted = true;
       setTimeout(() => {
         const latestSnapshot = mostRecentGameSnapshotByLobbyId.get(lobby.id);
+        const latestEvents = currentRoundGameEventsByLobbyId.get(lobby.id) || [];
         if (latestSnapshot === newSnapshot) {
           console.log('Re-emitting first game snapshot to ensure all clients received it');
-          io.emit('gameSnapshot', newSnapshot);
+          sendRedactedSnapshotToAllPlayers(gameLoop, latestSnapshot, latestEvents, lobby.id);
         }
       }, 100);
     }
@@ -1548,6 +1552,60 @@ function handleRestartGame(socket: Socket): void {
   });
 
   console.log(`Game restarted. New game started for lobby ${lobby.name}.`);
+}
+
+/**
+ * Send redacted game snapshot and events to all players in a game
+ */
+function sendRedactedSnapshotToAllPlayers(
+  gameLoop: GameLoop,
+  snapshot: GameSnapshot,
+  roundEvents: GameEvent[],
+  lobbyId: string,
+): void {
+  const gameState = gameLoop.cribbageGame.getGameState();
+  
+  // Send redacted snapshot to each player
+  gameState.players.forEach(player => {
+    const socketId = playerIdToSocketId.get(player.id);
+    if (!socketId) {
+      // Player might be a bot or disconnected - skip
+      return;
+    }
+    
+    const socket = io.sockets.sockets.get(socketId);
+    if (!socket) {
+      // Socket not found - skip
+      return;
+    }
+    
+    // Update WebSocketAgent with the latest snapshot if this is a human player
+    const playerInfo = connectedPlayers.get(player.id);
+    if (playerInfo && playerInfo.agent instanceof WebSocketAgent) {
+      playerInfo.agent.updateGameSnapshot(snapshot);
+    }
+    
+    // Get redacted state and event for this player
+    const redactedGameState = gameLoop.cribbageGame.getRedactedGameState(player.id);
+    const redactedGameEvent = gameLoop.cribbageGame.getRedactedGameEvent(
+      snapshot.gameEvent,
+      player.id
+    );
+    const redactedSnapshot: GameSnapshot = {
+      gameState: redactedGameState,
+      gameEvent: redactedGameEvent,
+      pendingDecisionRequests: snapshot.pendingDecisionRequests,
+    };
+    
+    // Send redacted snapshot
+    socket.emit('gameSnapshot', redactedSnapshot);
+    
+    // Send redacted round events
+    const redactedRoundEvents = roundEvents.map(event =>
+      gameLoop.cribbageGame.getRedactedGameEvent(event, player.id)
+    );
+    socket.emit('currentRoundGameEvents', redactedRoundEvents);
+  });
 }
 
 function sendMostRecentGameData(socket: Socket): void {
