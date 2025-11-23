@@ -352,6 +352,11 @@ io.on('connection', socket => {
     handleKickPlayer(socket, data);
   });
 
+  socket.on('updateLobbySize', (data: { lobbyId: string; playerCount: number }) => {
+    console.log('Received updateLobbySize event from socket:', socket.id, 'lobbyId:', data?.lobbyId, 'playerCount:', data?.playerCount);
+    handleUpdateLobbySize(socket, data);
+  });
+
   socket.on('listLobbies', () => {
     console.log('Received listLobbies request from socket:', socket.id);
     handleListLobbies(socket);
@@ -599,6 +604,49 @@ function handleKickPlayer(socket: Socket, data: { lobbyId: string; targetPlayerI
     io.emit('lobbyClosed', { lobbyId });
     return;
   }
+
+  // Broadcast update to all clients
+  io.emit('lobbyUpdated', lobby);
+}
+
+function handleUpdateLobbySize(socket: Socket, data: { lobbyId: string; playerCount: number }): void {
+  const playerId = socketIdToPlayerId.get(socket.id);
+  if (!playerId) {
+    console.error('Player ID not found for socket:', socket.id);
+    socket.emit('error', { message: 'Not logged in' });
+    return;
+  }
+
+  const { lobbyId, playerCount } = data;
+
+  // Validate player count
+  if (!playerCount || playerCount < 2 || playerCount > 4) {
+    socket.emit('error', { message: 'Player count must be between 2 and 4' });
+    return;
+  }
+
+  // Check if lobby exists
+  const lobby = lobbiesById.get(lobbyId);
+  if (!lobby) {
+    socket.emit('error', { message: 'Lobby not found' });
+    return;
+  }
+
+  // Check if player is host
+  if (playerId !== lobby.hostId) {
+    socket.emit('error', { message: 'Only the host can change lobby size' });
+    return;
+  }
+
+  // Check if lobby is still waiting
+  if (lobby.status !== 'waiting') {
+    socket.emit('error', { message: 'Cannot change size after game has started' });
+    return;
+  }
+
+  // Update the player count
+  lobby.playerCount = playerCount;
+  console.log(`Lobby ${lobby.name} size updated to ${playerCount} by host ${playerId}`);
 
   // Broadcast update to all clients
   io.emit('lobbyUpdated', lobby);
