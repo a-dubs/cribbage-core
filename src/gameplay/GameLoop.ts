@@ -433,20 +433,42 @@ export class GameLoop extends EventEmitter {
         }
         currentPlayerId =
           this.cribbageGame.getFollowingPlayerId(roundOverLastPlayer);
-        // Skip players who are done
-        while (playersDone.includes(currentPlayerId)) {
+        // Skip players who are done, but prevent infinite loop
+        const startPlayerId = currentPlayerId;
+        let iterations = 0;
+        while (playersDone.includes(currentPlayerId) && iterations < this.cribbageGame.getGameState().players.length) {
           currentPlayerId =
             this.cribbageGame.getFollowingPlayerId(currentPlayerId);
+          iterations++;
+          // If we've cycled back to start, all remaining players are done
+          if (currentPlayerId === startPlayerId) {
+            break;
+          }
+        }
+        // If all remaining players are done, exit
+        if (playersDone.includes(currentPlayerId)) {
+          break;
         }
       }
       // if the round is not over, continue with the next player
       else {
         currentPlayerId =
           this.cribbageGame.getFollowingPlayerId(currentPlayerId);
-        // Skip players who are done
-        while (playersDone.includes(currentPlayerId)) {
+        // Skip players who are done, but prevent infinite loop
+        const startPlayerId = currentPlayerId;
+        let iterations = 0;
+        while (playersDone.includes(currentPlayerId) && iterations < this.cribbageGame.getGameState().players.length) {
           currentPlayerId =
             this.cribbageGame.getFollowingPlayerId(currentPlayerId);
+          iterations++;
+          // If we've cycled back to start, all remaining players are done
+          if (currentPlayerId === startPlayerId) {
+            break;
+          }
+        }
+        // If all remaining players are done, exit
+        if (playersDone.includes(currentPlayerId)) {
+          break;
         }
       }
     }
