@@ -764,19 +764,28 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }): 
 
 function handleCreateLobby(socket: Socket, data: { playerCount: number; name?: string }, callback?: (response: any) => void): void {
   const playerId = socketIdToPlayerId.get(socket.id);
+  console.log(`[handleCreateLobby] Starting for player: ${playerId}, callback present: ${!!callback}`);
+  
   if (!playerId) {
     console.error('Player ID not found for socket:', socket.id);
     const error = { error: 'Not logged in' };
-    if (callback) callback(error);
+    if (callback) {
+      console.log('[handleCreateLobby] Sending error callback: Not logged in');
+      callback(error);
+    }
     socket.emit('error', { message: 'Not logged in' });
     return;
   }
 
   // Check if player is already in a lobby
   if (lobbyIdByPlayerId.has(playerId)) {
-    console.error('Player already in a lobby:', playerId);
+    const existingLobbyId = lobbyIdByPlayerId.get(playerId);
+    console.error(`[handleCreateLobby] Player ${playerId} already in lobby ${existingLobbyId}`);
     const error = { error: 'Already in a lobby' };
-    if (callback) callback(error);
+    if (callback) {
+      console.log('[handleCreateLobby] Sending error callback: Already in a lobby');
+      callback(error);
+    }
     socket.emit('error', { message: 'Already in a lobby' });
     return;
   }
@@ -813,11 +822,14 @@ function handleCreateLobby(socket: Socket, data: { playerCount: number; name?: s
   lobbiesById.set(lobbyId, lobby);
   lobbyIdByPlayerId.set(playerId, lobbyId);
 
-  console.log(`Lobby created: ${lobbyName} (${lobbyId}) by ${hostDisplayName}`);
+  console.log(`[handleCreateLobby] Lobby created: ${lobbyName} (${lobbyId}) by ${hostDisplayName}`);
 
   // Send callback response with the created lobby
   if (callback) {
+    console.log('[handleCreateLobby] Sending success callback with lobby:', lobbyId);
     callback({ lobby });
+  } else {
+    console.error('[handleCreateLobby] WARNING: No callback provided!');
   }
 
   // Broadcast the new lobby to all clients
