@@ -801,7 +801,11 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, c
   const playerId = socketIdToPlayerId.get(socket.id);
   if (!playerId) {
     console.error('Player ID not found for socket:', socket.id);
-    socket.emit('error', { message: 'Not logged in' });
+    const errorMsg = 'Not logged in';
+    socket.emit('error', { message: errorMsg });
+    if (callback) {
+      callback({ error: errorMsg });
+    }
     return;
   }
 
@@ -811,21 +815,33 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, c
   const lobby = lobbiesById.get(lobbyId);
   if (!lobby) {
     console.error('Lobby not found:', lobbyId);
-    socket.emit('error', { message: 'Lobby not found' });
+    const errorMsg = 'Lobby not found';
+    socket.emit('error', { message: errorMsg });
+    if (callback) {
+      callback({ error: errorMsg });
+    }
     return;
   }
 
   // Check if player is host
   if (playerId !== lobby.hostId) {
     console.error('Not the host:', playerId, 'actual host:', lobby.hostId);
-    socket.emit('error', { message: 'Only the host can start the game' });
+    const errorMsg = 'Only the host can start the game';
+    socket.emit('error', { message: errorMsg });
+    if (callback) {
+      callback({ error: errorMsg });
+    }
     return;
   }
 
   // Check if lobby is waiting
   if (lobby.status !== 'waiting') {
     console.error('Lobby not waiting:', lobbyId, 'status:', lobby.status);
-    socket.emit('error', { message: 'Lobby is not in waiting state' });
+    const errorMsg = 'Lobby is not in waiting state';
+    socket.emit('error', { message: errorMsg });
+    if (callback) {
+      callback({ error: errorMsg });
+    }
     return;
   }
 
@@ -883,6 +899,11 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, c
 
   // Notify lobby members of the game start
   io.emit('gameStartedFromLobby', { lobbyId: lobby.id, gameId, players: playersInfo });
+
+  // Call callback if provided
+  if (callback) {
+    callback({ success: true, gameId });
+  }
 
   // Start the game loop
   await startGame();
