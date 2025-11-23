@@ -331,9 +331,9 @@ io.on('connection', socket => {
     handleLogin(socket, data);
   });
 
-  socket.on('createLobby', (data: { playerCount: number; name?: string }) => {
+  socket.on('createLobby', (data: { playerCount: number; name?: string }, callback?: (response: any) => void) => {
     console.log('Received createLobby event from socket:', socket.id, 'playerCount:', data?.playerCount);
-    handleCreateLobby(socket, data);
+    handleCreateLobby(socket, data, callback);
   });
 
   socket.on('joinLobby', (data: { lobbyId: string }) => {
@@ -762,10 +762,12 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }): 
   await startGame();
 }
 
-function handleCreateLobby(socket: Socket, data: { playerCount: number; name?: string }): void {
+function handleCreateLobby(socket: Socket, data: { playerCount: number; name?: string }, callback?: (response: any) => void): void {
   const playerId = socketIdToPlayerId.get(socket.id);
   if (!playerId) {
     console.error('Player ID not found for socket:', socket.id);
+    const error = { error: 'Not logged in' };
+    if (callback) callback(error);
     socket.emit('error', { message: 'Not logged in' });
     return;
   }
@@ -773,6 +775,8 @@ function handleCreateLobby(socket: Socket, data: { playerCount: number; name?: s
   // Check if player is already in a lobby
   if (lobbyIdByPlayerId.has(playerId)) {
     console.error('Player already in a lobby:', playerId);
+    const error = { error: 'Already in a lobby' };
+    if (callback) callback(error);
     socket.emit('error', { message: 'Already in a lobby' });
     return;
   }
@@ -782,6 +786,8 @@ function handleCreateLobby(socket: Socket, data: { playerCount: number; name?: s
   // Validate player count
   if (!playerCount || playerCount < 2 || playerCount > 4) {
     console.error('Invalid player count:', playerCount);
+    const error = { error: 'Player count must be between 2 and 4' };
+    if (callback) callback(error);
     socket.emit('error', { message: 'Player count must be between 2 and 4' });
     return;
   }
@@ -808,6 +814,11 @@ function handleCreateLobby(socket: Socket, data: { playerCount: number; name?: s
   lobbyIdByPlayerId.set(playerId, lobbyId);
 
   console.log(`Lobby created: ${lobbyName} (${lobbyId}) by ${hostDisplayName}`);
+
+  // Send callback response with the created lobby
+  if (callback) {
+    callback({ lobby });
+  }
 
   // Broadcast the new lobby to all clients
   io.emit('lobbyUpdated', lobby);
