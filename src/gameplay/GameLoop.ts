@@ -411,10 +411,10 @@ export class GameLoop extends EventEmitter {
         return Promise.resolve(currentPlayerId);
       }
 
-      // // if player is out of cards now, add them to the list of players done
-      // if (this.game.getPlayer(currentPlayer).peggingHand.length === 0) {
-      //   playersDone.push(currentPlayer);
-      // }
+      // if player is out of cards now, add them to the list of players done
+      if (player.peggingHand.length === 0 && !playersDone.includes(currentPlayerId)) {
+        playersDone.push(currentPlayerId);
+      }
 
       // if the round is over, start next round with the person following the last person to play a card
       if (roundOverLastPlayer) {
