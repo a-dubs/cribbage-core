@@ -22,6 +22,7 @@ import { ScoreBreakdownItem } from '../types';
 import EventEmitter from 'eventemitter3';
 import { isValidDiscard } from './utils';
 import { validatePlayerCount, getPlayerCountConfig, getExpectedCribSize } from '../gameplay/rules';
+import { logger } from '../utils/logger';
 
 export class CribbageGame extends EventEmitter {
   private gameState: GameState;

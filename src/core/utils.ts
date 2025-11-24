@@ -1,5 +1,6 @@
 import { ActionType, Card, GameEvent, GameState, Player } from '../types';
 import { parseCard, sumOfPeggingStack } from './scoring';
+import { logger } from '../utils/logger';
 
 export function isValidDiscard(
   game: GameState,

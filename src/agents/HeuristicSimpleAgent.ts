@@ -2,6 +2,7 @@ import { CribbageGame } from '../core/CribbageGame';
 import { parseCard, scoreHand, scorePegging } from '../core/scoring';
 import { GameSnapshot, Card } from '../types';
 import { ExhaustiveSimpleAgent } from './ExhaustiveSimpleAgent';
+import { logger } from '../utils/logger';
 
 const AGENT_ID = 'heuristic-simple-bot-v1.0';
 const DEBUG_TIMING = process.env.DEBUG_SIMPLE_AGENT_TIMING === 'true';

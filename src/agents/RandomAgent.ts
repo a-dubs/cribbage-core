@@ -1,5 +1,6 @@
 import { parseCard } from '../core/scoring';
 import { GameSnapshot, GameAgent, Card } from '../types';
+import { logger } from '../utils/logger';
 
 const AGENT_ID = 'random-bot-v1.0';
 
