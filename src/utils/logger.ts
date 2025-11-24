@@ -1,17 +1,29 @@
 import fs from 'fs';
 import path from 'path';
 
+const isNode =
+  typeof process !== 'undefined' && typeof process.versions?.node === 'string';
+const baseDir = isNode
+  ? typeof __dirname !== 'undefined'
+    ? __dirname
+    : process.cwd?.() ?? undefined
+  : undefined;
+
 // Configuration from environment
-const LOG_DIR = process.env.LOG_DIR || path.join(__dirname, '../../logs');
+const LOG_DIR =
+  process.env.LOG_DIR || (baseDir ? path.join(baseDir, '../../logs') : undefined);
 const LOG_FILE = process.env.LOG_FILE || 'server.log';
 const DEBUG_LOGGING = process.env.DEBUG_LOGGING === 'true';
 
-// Ensure log directory exists
-if (!fs.existsSync(LOG_DIR)) {
-  fs.mkdirSync(LOG_DIR, { recursive: true });
+// Ensure log directory exists when running in Node
+if (isNode && LOG_DIR) {
+  if (!fs.existsSync(LOG_DIR)) {
+    fs.mkdirSync(LOG_DIR, { recursive: true });
+  }
 }
 
-const logFilePath = path.join(LOG_DIR, LOG_FILE);
+const logFilePath =
+  isNode && LOG_DIR ? path.join(LOG_DIR, LOG_FILE) : undefined;
 
 /**
  * Get current timestamp in ISO format
@@ -32,13 +44,15 @@ function writeLog(level: string, message: string, ...args: any[]): void {
   consoleMethod(formattedMessage, ...args);
   
   // File output
-  try {
-    const fileMessage = args.length > 0 
-      ? `${formattedMessage} ${JSON.stringify(args)}`
-      : formattedMessage;
-    fs.appendFileSync(logFilePath, `${fileMessage}\n`, 'utf-8');
-  } catch (err) {
-    console.error('Failed to write to log file:', err);
+  if (logFilePath) {
+    try {
+      const fileMessage = args.length > 0 
+        ? `${formattedMessage} ${JSON.stringify(args)}`
+        : formattedMessage;
+      fs.appendFileSync(logFilePath, `${fileMessage}\n`, 'utf-8');
+    } catch (err) {
+      console.error('Failed to write to log file:', err);
+    }
   }
 }
 
