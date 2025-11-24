@@ -33,7 +33,7 @@ export type LobbyInvitation = {
   created_at: string;
 };
 export type LobbyInvitationWithLobby = LobbyInvitation & {
-  lobbies: LobbyRecord;
+  lobbies: LobbyRecord | null;
 };
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -458,7 +458,14 @@ export async function listLobbyInvitations(userId: string): Promise<{
   if (error) {
     throw new Error(error.message);
   }
-  const rows = (data ?? []) as LobbyInvitationWithLobby[];
+  type RawLobbyInvitationRow = LobbyInvitation & {
+    lobbies: LobbyRecord[] | LobbyRecord | null;
+  };
+  const rows = ((data ?? []) as RawLobbyInvitationRow[])
+    .map(row => ({
+      ...row,
+      lobbies: Array.isArray(row.lobbies) ? row.lobbies[0] ?? null : row.lobbies ?? null,
+    })) as LobbyInvitationWithLobby[];
   return {
     incoming: rows.filter(row => row.recipient_id === userId),
     outgoing: rows.filter(row => row.sender_id === userId),
@@ -598,7 +605,18 @@ export async function listFriendRequestsWithProfiles(userId: string): Promise<{
     throw new Error(error.message);
   }
 
-  const rows = (data ?? []) as FriendRequestWithProfiles[];
+  type RawFriendRequestWithProfilesRow = FriendRequest & {
+    sender_profile: SupabaseProfile[] | SupabaseProfile | null;
+    recipient_profile: SupabaseProfile[] | SupabaseProfile | null;
+  };
+  const rows = ((data ?? []) as RawFriendRequestWithProfilesRow[])
+    .map(row => ({
+      ...row,
+      sender_profile: Array.isArray(row.sender_profile) ? row.sender_profile[0] ?? null : row.sender_profile ?? null,
+      recipient_profile: Array.isArray(row.recipient_profile)
+        ? row.recipient_profile[0] ?? null
+        : row.recipient_profile ?? null,
+    })) as FriendRequestWithProfiles[];
   return {
     incoming: rows.filter(r => r.recipient_id === userId),
     outgoing: rows.filter(r => r.sender_id === userId),
