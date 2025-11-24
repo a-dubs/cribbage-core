@@ -10,6 +10,7 @@ export type SupabaseProfile = {
 };
 
 export type LobbyVisibility = 'public' | 'private' | 'friends';
+export type LobbyStatus = 'waiting' | 'in_progress' | 'finished';
 export type FriendRequestStatus = 'pending' | 'accepted' | 'declined';
 export type Friendship = { user_id: string; friend_id: string; created_at: string };
 export type FriendRequest = {
@@ -188,7 +189,7 @@ export type LobbyRecord = {
   host_id: string | null;
   max_players: number;
   current_players: number;
-  status: 'waiting' | 'in_progress' | 'finished';
+  status: LobbyStatus;
   visibility: LobbyVisibility;
   invite_code: string | null;
   is_fixed_size: boolean;
@@ -203,6 +204,14 @@ export type LobbyPlayer = {
 };
 
 export type LobbyPayload = LobbyRecord & { players: LobbyPlayer[] };
+
+async function fetchLobbyRecord(lobbyId: string, client: SupabaseClient): Promise<LobbyRecord | null> {
+  const { data, error } = await client.from('lobbies').select('*').eq('id', lobbyId).maybeSingle();
+  if (error) {
+    throw new Error(error.message);
+  }
+  return (data as LobbyRecord | null) ?? null;
+}
 
 async function fetchLobbyPlayers(lobbyId: string, client: SupabaseClient): Promise<LobbyPlayer[]> {
   const { data, error } = await client
@@ -243,12 +252,21 @@ export async function listLobbies(): Promise<LobbyPayload[]> {
   }
 
   const lobbies = (data ?? []) as LobbyRecord[];
-  const results: LobbyPayload[] = [];
-  for (const lobby of lobbies) {
-    const players = await fetchLobbyPlayers(lobby.id, client);
-    results.push({ ...lobby, players });
-  }
+  const results: LobbyPayload[] = await Promise.all(
+    lobbies.map(async lobby => {
+      const players = await fetchLobbyPlayers(lobby.id, client);
+      return { ...lobby, players };
+    })
+  );
   return results;
+}
+
+export async function getLobbyWithPlayers(lobbyId: string): Promise<LobbyPayload | null> {
+  const client = getServiceClient();
+  const lobby = await fetchLobbyRecord(lobbyId, client);
+  if (!lobby) return null;
+  const players = await fetchLobbyPlayers(lobbyId, client);
+  return { ...lobby, players };
 }
 
 export async function createLobby(params: {
@@ -290,6 +308,17 @@ export async function createLobby(params: {
 
   const players = await fetchLobbyPlayers(data.id, client);
   return { ...(data as LobbyRecord), players };
+}
+
+async function ensureLobbyHost(lobbyId: string, hostId: string, client: SupabaseClient): Promise<LobbyRecord> {
+  const lobby = await fetchLobbyRecord(lobbyId, client);
+  if (!lobby) {
+    throw new Error('LOBBY_NOT_FOUND');
+  }
+  if (lobby.host_id !== hostId) {
+    throw new Error('NOT_HOST');
+  }
+  return lobby;
 }
 
 export async function joinLobby(params: {
@@ -347,16 +376,20 @@ export async function joinLobby(params: {
   return { ...lobbyRecord, players };
 }
 
-export async function leaveLobby(params: { lobbyId: string; playerId: string }): Promise<void> {
+export async function leaveLobby(params: { lobbyId: string; playerId: string }): Promise<LobbyPayload | null> {
   const client = getServiceClient();
-  const { error } = await client
-    .from('lobby_players')
-    .delete()
-    .eq('lobby_id', params.lobbyId)
-    .eq('player_id', params.playerId);
+  const { error } = await client.from('lobby_players').delete().eq('lobby_id', params.lobbyId).eq('player_id', params.playerId);
   if (error) {
     throw new Error(error.message);
   }
+  const lobby = await fetchLobbyRecord(params.lobbyId, client);
+  if (!lobby) return null;
+  if ((lobby.current_players ?? 0) === 0) {
+    await client.from('lobbies').update({ status: 'finished' }).eq('id', params.lobbyId);
+    lobby.status = 'finished';
+  }
+  const players = await fetchLobbyPlayers(params.lobbyId, client);
+  return { ...lobby, players };
 }
 
 export async function listFriends(userId: string): Promise<SupabaseProfile[]> {
@@ -482,6 +515,151 @@ export async function respondToFriendRequest(params: {
 export async function getProfileFromToken(token: string): Promise<SupabaseProfile | null> {
   const { userId } = await verifyAccessToken(token);
   return getProfile(userId);
+}
+
+export async function updateLobbyName(params: { lobbyId: string; hostId: string; name: string }): Promise<LobbyPayload> {
+  const client = getServiceClient();
+  const trimmed = params.name.trim();
+  if (!trimmed) {
+    throw new Error('NAME_REQUIRED');
+  }
+  const lobby = await ensureLobbyHost(params.lobbyId, params.hostId, client);
+  if (lobby.status !== 'waiting') {
+    throw new Error('LOBBY_NOT_WAITING');
+  }
+  const { data, error } = await client
+    .from('lobbies')
+    .update({ name: trimmed })
+    .eq('id', params.lobbyId)
+    .select()
+    .single();
+  if (error || !data) {
+    throw new Error(error?.message ?? 'Failed to update lobby name');
+  }
+  const players = await fetchLobbyPlayers(params.lobbyId, client);
+  return { ...(data as LobbyRecord), players };
+}
+
+export async function updateLobbySize(params: {
+  lobbyId: string;
+  hostId: string;
+  maxPlayers: number;
+  isFixedSize?: boolean;
+}): Promise<LobbyPayload> {
+  const client = getServiceClient();
+  if (params.maxPlayers < 2 || params.maxPlayers > 4) {
+    throw new Error('INVALID_SIZE');
+  }
+  const lobby = await ensureLobbyHost(params.lobbyId, params.hostId, client);
+  if (lobby.status !== 'waiting') {
+    throw new Error('LOBBY_NOT_WAITING');
+  }
+  const currentPlayers = lobby.current_players ?? (await fetchLobbyPlayers(params.lobbyId, client)).length;
+  if (params.maxPlayers < currentPlayers) {
+    throw new Error('SIZE_TOO_SMALL');
+  }
+  const payload: Partial<LobbyRecord> = {
+    max_players: params.maxPlayers,
+  } as Partial<LobbyRecord>;
+  if (params.isFixedSize !== undefined) {
+    (payload as any).is_fixed_size = params.isFixedSize;
+  }
+  const { data, error } = await client
+    .from('lobbies')
+    .update(payload)
+    .eq('id', params.lobbyId)
+    .select()
+    .single();
+  if (error || !data) {
+    throw new Error(error?.message ?? 'Failed to update lobby size');
+  }
+  const players = await fetchLobbyPlayers(params.lobbyId, client);
+  return { ...(data as LobbyRecord), players };
+}
+
+export async function lockLobby(params: { lobbyId: string; hostId: string }): Promise<LobbyPayload> {
+  const client = getServiceClient();
+  const lobby = await ensureLobbyHost(params.lobbyId, params.hostId, client);
+  if (lobby.status !== 'waiting') {
+    throw new Error('LOBBY_NOT_WAITING');
+  }
+  const currentPlayers = lobby.current_players ?? (await fetchLobbyPlayers(params.lobbyId, client)).length;
+  const { data, error } = await client
+    .from('lobbies')
+    .update({
+      max_players: currentPlayers,
+      is_fixed_size: true,
+    })
+    .eq('id', params.lobbyId)
+    .select()
+    .single();
+  if (error || !data) {
+    throw new Error(error?.message ?? 'Failed to lock lobby');
+  }
+  const players = await fetchLobbyPlayers(params.lobbyId, client);
+  return { ...(data as LobbyRecord), players };
+}
+
+export async function startLobby(params: { lobbyId: string; hostId: string }): Promise<LobbyPayload> {
+  const client = getServiceClient();
+  const lobby = await ensureLobbyHost(params.lobbyId, params.hostId, client);
+  if (lobby.status !== 'waiting') {
+    throw new Error('LOBBY_NOT_WAITING');
+  }
+  const currentPlayers = lobby.current_players ?? (await fetchLobbyPlayers(params.lobbyId, client)).length;
+  const updatePayload: Partial<LobbyRecord> = {
+    status: 'in_progress',
+    started_at: new Date().toISOString(),
+  } as Partial<LobbyRecord>;
+  if (!lobby.is_fixed_size) {
+    (updatePayload as any).is_fixed_size = true;
+    (updatePayload as any).max_players = Math.max(lobby.max_players ?? currentPlayers, currentPlayers);
+  }
+  const { data, error } = await client
+    .from('lobbies')
+    .update(updatePayload)
+    .eq('id', params.lobbyId)
+    .select()
+    .single();
+  if (error || !data) {
+    throw new Error(error?.message ?? 'Failed to start lobby');
+  }
+  const players = await fetchLobbyPlayers(params.lobbyId, client);
+  return { ...(data as LobbyRecord), players };
+}
+
+export async function removeLobbyPlayer(params: {
+  lobbyId: string;
+  hostId: string;
+  targetPlayerId: string;
+}): Promise<LobbyPayload> {
+  const client = getServiceClient();
+  const lobby = await ensureLobbyHost(params.lobbyId, params.hostId, client);
+  if (lobby.status !== 'waiting') {
+    throw new Error('LOBBY_NOT_WAITING');
+  }
+  const { error } = await client
+    .from('lobby_players')
+    .delete()
+    .eq('lobby_id', params.lobbyId)
+    .eq('player_id', params.targetPlayerId);
+  if (error) {
+    throw new Error(error.message);
+  }
+  let updated = await fetchLobbyRecord(params.lobbyId, client);
+  if (!updated) {
+    throw new Error('LOBBY_NOT_FOUND');
+  }
+  if ((updated.current_players ?? 0) === 0) {
+    const finish = await client.from('lobbies').update({ status: 'finished' }).eq('id', params.lobbyId).select().single();
+    if (!finish.error && finish.data) {
+      updated = finish.data as LobbyRecord;
+    } else if (finish.error) {
+      throw new Error(finish.error.message);
+    }
+  }
+  const players = await fetchLobbyPlayers(params.lobbyId, client);
+  return { ...updated, players };
 }
 
 type GamePlayerInput = {

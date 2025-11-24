@@ -12,8 +12,13 @@ import {
   listFriends,
   respondToFriendRequest,
   sendFriendRequest,
+  lockLobby,
+  removeLobbyPlayer,
   signInWithEmail,
   signUpWithEmail,
+  startLobby,
+  updateLobbyName,
+  updateLobbySize,
   verifyAccessToken,
   type LobbyPayload,
   type LobbyVisibility,
@@ -25,6 +30,12 @@ type AuthenticatedRequest = Request & { userId?: string; profile?: SupabaseProfi
 
 const SUPABASE_AUTH_ENABLED = process.env.SUPABASE_AUTH_ENABLED === 'true';
 const SUPABASE_LOBBIES_ENABLED = process.env.SUPABASE_LOBBIES_ENABLED === 'true';
+
+type HttpApiHooks = {
+  onLobbyUpdated?: (lobby: LobbyPayload) => void;
+  onLobbyClosed?: (lobbyId: string) => void;
+  onStartLobbyGame?: (lobbyId: string, hostId: string) => Promise<{ lobby?: LobbyPayload; gameId?: string }>;
+};
 
 function requireSupabaseFlag(enabled: boolean, res: Response): boolean {
   if (!enabled) {
@@ -65,7 +76,7 @@ function mapLobbyPayload(lobby: LobbyPayload): LobbyPayload {
   };
 }
 
-export function registerHttpApi(app: express.Express): void {
+export function registerHttpApi(app: express.Express, hooks?: HttpApiHooks): void {
   registerAvatarRoutes(app, authMiddleware);
   app.post('/auth/signup', async (req: Request, res: Response) => {
     if (!requireSupabaseFlag(SUPABASE_AUTH_ENABLED, res)) return;
@@ -137,6 +148,7 @@ export function registerHttpApi(app: express.Express): void {
         visibility: (visibility as LobbyVisibility) ?? 'public',
         settings: settings ?? null,
       });
+      hooks?.onLobbyUpdated?.(lobby);
       res.status(201).json({ lobby: mapLobbyPayload(lobby) });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to create lobby';
@@ -158,6 +170,7 @@ export function registerHttpApi(app: express.Express): void {
         playerId: req.userId,
         inviteCode,
       });
+      hooks?.onLobbyUpdated?.(lobby);
       res.status(200).json({ lobby: mapLobbyPayload(lobby) });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to join lobby';
@@ -178,13 +191,133 @@ export function registerHttpApi(app: express.Express): void {
       return;
     }
     try {
-      await leaveLobby({ lobbyId, playerId: req.userId });
+      const lobby = await leaveLobby({ lobbyId, playerId: req.userId });
+      if (lobby?.status === 'finished' || (lobby?.current_players ?? 0) === 0) {
+        hooks?.onLobbyClosed?.(lobbyId);
+      } else if (lobby) {
+        hooks?.onLobbyUpdated?.(lobby);
+      }
       res.status(204).send();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to leave lobby';
       res.status(400).json({ error: 'LOBBY_LEAVE_FAILED', message });
     }
   });
+
+  app.patch('/lobbies/:lobbyId', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    if (!requireSupabaseFlag(SUPABASE_LOBBIES_ENABLED, res)) return;
+    const { lobbyId } = req.params;
+    const { name, maxPlayers, isFixedSize } = req.body ?? {};
+    if (!req.userId) {
+      res.status(401).json({ error: 'NOT_AUTHORIZED', message: 'Missing user' });
+      return;
+    }
+    if (name === undefined && maxPlayers === undefined) {
+      res.status(400).json({ error: 'VALIDATION_ERROR', message: 'name or maxPlayers is required' });
+      return;
+    }
+    try {
+      let lobby: LobbyPayload | null = null;
+      if (name !== undefined) {
+        lobby = await updateLobbyName({ lobbyId, hostId: req.userId, name });
+      }
+      if (maxPlayers !== undefined) {
+        lobby = await updateLobbySize({
+          lobbyId,
+          hostId: req.userId,
+          maxPlayers: Number(maxPlayers),
+          isFixedSize,
+        });
+      }
+      if (!lobby) {
+        res.status(400).json({ error: 'NO_UPDATE', message: 'No changes applied' });
+        return;
+      }
+      hooks?.onLobbyUpdated?.(lobby);
+      res.json({ lobby: mapLobbyPayload(lobby) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to update lobby';
+      let status = 400;
+      if (message === 'NOT_HOST') status = 403;
+      if (message === 'LOBBY_NOT_WAITING') status = 409;
+      if (message === 'SIZE_TOO_SMALL') status = 409;
+      if (message === 'INVALID_SIZE') status = 400;
+      res.status(status).json({ error: 'LOBBY_UPDATE_FAILED', message });
+    }
+  });
+
+  app.post('/lobbies/:lobbyId/lock', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    if (!requireSupabaseFlag(SUPABASE_LOBBIES_ENABLED, res)) return;
+    const { lobbyId } = req.params;
+    if (!req.userId) {
+      res.status(401).json({ error: 'NOT_AUTHORIZED', message: 'Missing user' });
+      return;
+    }
+    try {
+      const lobby = await lockLobby({ lobbyId, hostId: req.userId });
+      hooks?.onLobbyUpdated?.(lobby);
+      res.json({ lobby: mapLobbyPayload(lobby) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to lock lobby';
+      const status = message === 'NOT_HOST' ? 403 : message === 'LOBBY_NOT_WAITING' ? 409 : 400;
+      res.status(status).json({ error: 'LOBBY_LOCK_FAILED', message });
+    }
+  });
+
+  app.post('/lobbies/:lobbyId/start', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    if (!requireSupabaseFlag(SUPABASE_LOBBIES_ENABLED, res)) return;
+    const { lobbyId } = req.params;
+    if (!req.userId) {
+      res.status(401).json({ error: 'NOT_AUTHORIZED', message: 'Missing user' });
+      return;
+    }
+    try {
+      if (hooks?.onStartLobbyGame) {
+        const result = await hooks.onStartLobbyGame(lobbyId, req.userId);
+        if (result?.lobby) {
+          res.json({ lobby: mapLobbyPayload(result.lobby), gameId: result.gameId });
+          return;
+        }
+      }
+      const lobby = await startLobby({ lobbyId, hostId: req.userId });
+      hooks?.onLobbyUpdated?.(lobby);
+      res.json({ lobby: mapLobbyPayload(lobby) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to start lobby';
+      const status = message === 'NOT_HOST' ? 403 : message === 'LOBBY_NOT_WAITING' ? 409 : 400;
+      res.status(status).json({ error: 'LOBBY_START_FAILED', message });
+    }
+  });
+
+  app.post('/lobbies/:lobbyId/kick', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    if (!requireSupabaseFlag(SUPABASE_LOBBIES_ENABLED, res)) return;
+    const { lobbyId } = req.params;
+    const { targetPlayerId } = req.body ?? {};
+    if (!req.userId) {
+      res.status(401).json({ error: 'NOT_AUTHORIZED', message: 'Missing user' });
+      return;
+    }
+    if (!targetPlayerId) {
+      res.status(400).json({ error: 'VALIDATION_ERROR', message: 'targetPlayerId is required' });
+      return;
+    }
+    try {
+      const lobby = await removeLobbyPlayer({ lobbyId, hostId: req.userId, targetPlayerId });
+      if (lobby.status === 'finished' || lobby.current_players === 0) {
+        hooks?.onLobbyClosed?.(lobbyId);
+      } else {
+        hooks?.onLobbyUpdated?.(lobby);
+      }
+      res.json({ lobby: mapLobbyPayload(lobby) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to kick player';
+      let status = 400;
+      if (message === 'NOT_HOST') status = 403;
+      if (message === 'LOBBY_NOT_WAITING') status = 409;
+      res.status(status).json({ error: 'LOBBY_KICK_FAILED', message });
+    }
+  });
+
 
   app.get('/friends', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     if (!req.userId) {
@@ -297,6 +430,25 @@ export function registerHttpApi(app: express.Express): void {
       const message = error instanceof Error ? error.message : 'Failed to fetch snapshots';
       const status = message === 'NOT_AUTHORIZED' ? 403 : 500;
       res.status(status).json({ error: 'GAME_SNAPSHOTS_FAILED', message });
+    }
+  });
+
+  app.get('/games/:gameId/replay', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.userId) {
+      res.status(401).json({ error: 'NOT_AUTHORIZED', message: 'Missing user' });
+      return;
+    }
+    const { gameId } = req.params;
+    try {
+      const [events, snapshots] = await Promise.all([
+        getGameEventsForUser(gameId, req.userId),
+        getGameSnapshotsForUser(gameId, req.userId),
+      ]);
+      res.json({ events, snapshots });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to fetch replay data';
+      const status = message === 'NOT_AUTHORIZED' ? 403 : 500;
+      res.status(status).json({ error: 'GAME_REPLAY_FAILED', message });
     }
   });
 }
