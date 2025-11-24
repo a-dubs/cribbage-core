@@ -1409,6 +1409,22 @@ function emitConnectedPlayers(): void {
   // }
 }
 
+function emitToLobbyPlayers(lobbyId: string, event: string, payload?: unknown): void {
+  const lobby = lobbiesById.get(lobbyId);
+  if (!lobby) {
+    console.warn(`[emitToLobbyPlayers] Lobby not found for event ${event}: ${lobbyId}`);
+    return;
+  }
+
+  lobby.players.forEach(({ playerId }) => {
+    const socketId = playerIdToSocketId.get(playerId);
+    if (!socketId) {
+      return;
+    }
+    io.to(socketId).emit(event, payload);
+  });
+}
+
 function handleRestartGame(socket: Socket): void {
   const playerId = socketIdToPlayerId.get(socket.id);
   if (!playerId) {
@@ -1432,6 +1448,13 @@ function handleRestartGame(socket: Socket): void {
     return;
   }
 
+  // Only allow the host to restart the game
+  if (playerId !== lobby.hostId) {
+    console.error('Cannot restart game - player is not the host:', playerId, 'host:', lobby.hostId);
+    socket.emit('error', { message: 'Only the host can restart the game' });
+    return;
+  }
+
   // Check if the game is finished (not in progress)
   if (lobby.status !== 'in_progress' && lobby.status !== 'finished') {
     console.error('Cannot restart game - lobby is not in progress:', lobbyId);
@@ -1445,7 +1468,7 @@ function handleRestartGame(socket: Socket): void {
   clearActiveGameArtifacts(lobbyId);
 
   // Emit gameReset to clear client state
-  io.emit('gameReset');
+  emitToLobbyPlayers(lobby.id, 'gameReset');
 
   // Immediately start a new game with the same lobby/players
   // Reuse the logic from handleStartLobbyGame but without the waiting status check
