@@ -21,23 +21,20 @@ import { logger } from './utils/logger';
 import { uniqueNamesGenerator, adjectives, animals } from 'unique-names-generator';
 import { v4 as uuidv4 } from 'uuid';
 import { registerHttpApi } from './httpApi';
+import { getProfile, verifyAccessToken } from './services/supabaseService';
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
 dotenv.config();
 
 const PORT = process.env.PORT || 3002;
 const WEB_APP_ORIGIN = process.env.WEB_APP_ORIGIN || 'http://localhost:3000';
-const WEBSOCKET_AUTH_TOKEN = process.env.WEBSOCKET_AUTH_TOKEN;
 const JSON_DB_DIR = process.env.JSON_DB_DIR || path.join(__dirname, 'json_db');
+const SUPABASE_AUTH_ENABLED = process.env.SUPABASE_AUTH_ENABLED === 'true';
+const SUPABASE_LOBBIES_ENABLED = process.env.SUPABASE_LOBBIES_ENABLED === 'true';
 logger.info('JSON_DB_DIR:', JSON_DB_DIR);
 // create the directory if it does not exist
 if (!fs.existsSync(JSON_DB_DIR)) {
   fs.mkdirSync(JSON_DB_DIR);
-}
-
-if (!WEBSOCKET_AUTH_TOKEN) {
-  logger.error('WEBSOCKET_AUTH_TOKEN is not set');
-  throw new Error('WEBSOCKET_AUTH_TOKEN is not set');
 }
 
 logger.info('PORT:', PORT);
@@ -170,9 +167,7 @@ interface Lobby {
 }
 
 interface LoginData {
-  username: string;
-  name: string;
-  secretKey?: string; // Optional - provided by client if they have one stored
+  accessToken: string;
 }
 
 const GAME_EVENTS_FILE = path.join(JSON_DB_DIR, 'gameEvents.json');
@@ -270,7 +265,6 @@ const endGameInDB = (gameId: string, winnerId: string): void => {
 const connectedPlayers: Map<string, PlayerInfo> = new Map();
 const playerIdToSocketId: Map<string, string> = new Map();
 const socketIdToPlayerId: Map<string, string> = new Map(); // Track socket -> player ID mapping for reconnection
-const usernameToSecretKey: Map<string, string> = new Map(); // Track username -> secret key for authentication
 
 app.get('/ping', (_req, res) => {
   res.status(200).send('pong');
@@ -611,11 +605,6 @@ io.on('connection', socket => {
     logger.info('Received heartbeat from client');
   });
 });
-
-// Generate a secure random secret key
-function generateSecretKey(): string {
-  return `${Date.now()}-${Math.random().toString(36).substring(2, 15)}-${Math.random().toString(36).substring(2, 15)}`;
-}
 
 function handleJoinLobby(socket: Socket, data: { lobbyId: string }, callback?: (response: any) => void): void {
   const playerId = socketIdToPlayerId.get(socket.id);
@@ -1228,191 +1217,111 @@ function handleCreateLobby(socket: Socket, data: { playerCount: number; name?: s
   socket.emit('lobbyCreated', { lobbyId, name: lobbyName });
 }
 
-function handleLogin(socket: Socket, data: LoginData): void {
-  const { username, name, secretKey } = data;
-  let agent: WebSocketAgent;
-  let playerId: string;
-  let newSecretKey: string;
+async function handleLogin(socket: Socket, data: LoginData): Promise<void> {
+  const { accessToken } = data;
 
-  logger.info('Handling login for user:', username, 'socket:', socket.id, 'hasSecretKey:', !!secretKey);
-
-  // Check if this socket already has a player ID (reconnection scenario)
-  const existingPlayerId = socketIdToPlayerId.get(socket.id);
-  
-  if (existingPlayerId) {
-    // This socket already has a player ID - this is a reconnection
-    const oldPlayerInfo = connectedPlayers.get(existingPlayerId);
-    if (oldPlayerInfo && oldPlayerInfo.agent instanceof WebSocketAgent) {
-      logger.info(
-        `Player ${existingPlayerId} (${username}) reconnected. Updating socket for their WebSocketAgent.`
-      );
-      agent = oldPlayerInfo.agent;
-      playerId = existingPlayerId;
-      newSecretKey = usernameToSecretKey.get(username) || generateSecretKey();
-      
-      // Update socket if different
-      if (oldPlayerInfo.agent.socket.id !== socket.id) {
-        logger.info(
-          `Replacing old socket ${oldPlayerInfo.agent.socket.id} with new socket ${socket.id}`
-        );
-        oldPlayerInfo.agent.socket.disconnect(true);
-        agent.updateSocket(socket);
-      }
-      
-      // Update player name if it changed
-      if (oldPlayerInfo.name !== name) {
-        logger.info(`Updating player name from "${oldPlayerInfo.name}" to "${name}"`);
-        oldPlayerInfo.name = name;
-      }
-    } else {
-      // Player ID exists but no player info - create new
-      playerId = existingPlayerId;
-      agent = new WebSocketAgent(socket, playerId);
-      newSecretKey = usernameToSecretKey.get(username) || generateSecretKey();
-      logger.info(`Creating new WebSocketAgent for existing player ID: ${playerId}`);
-    }
-  } else {
-    // New login - check if username is already taken
-    const existingPlayerInfo = connectedPlayers.get(username);
-    const storedSecretKey = usernameToSecretKey.get(username);
-    
-    if (existingPlayerInfo) {
-      // Username is taken - verify secret key
-      if (secretKey && storedSecretKey && secretKey === storedSecretKey) {
-        // Secret key matches - this is the same user (page refresh scenario)
-        logger.info(
-          `Username ${username} is taken but secret key matches. Replacing old socket with new socket ${socket.id}.`
-        );
-        playerId = username;
-        newSecretKey = storedSecretKey; // Keep existing secret key
-        
-        // Clean up old mappings
-        const oldSocketId = playerIdToSocketId.get(username);
-        if (oldSocketId) {
-          socketIdToPlayerId.delete(oldSocketId);
-          const oldSocket = io.sockets.sockets.get(oldSocketId);
-          if (oldSocket) {
-            oldSocket.disconnect(true);
-          }
-        }
-        
-        // Reuse existing agent if it's a WebSocketAgent, otherwise create new
-        if (existingPlayerInfo.agent instanceof WebSocketAgent) {
-          agent = existingPlayerInfo.agent;
-          // Update socket reference
-          agent.updateSocket(socket);
-        } else {
-          agent = new WebSocketAgent(socket, playerId);
-        }
-      } else {
-        // Secret key doesn't match or is missing - reject login
-        logger.info(
-          `Username ${username} is already taken and secret key doesn't match. Rejecting login.`
-        );
-        socket.emit('loginRejected', {
-          reason: 'ALREADY_LOGGED_IN',
-          message: 'Cannot login. Already logged in somewhere else.',
-        });
-        return;
-      }
-    } else {
-      // Username is available - create new user with new secret key
-      playerId = username;
-      newSecretKey = generateSecretKey();
-      agent = new WebSocketAgent(socket, playerId);
-      logger.info(
-        `New player login: ${username} assigned player ID: ${playerId} with new secret key`
-      );
-    }
-  }
-
-  // Store secret key for this username
-  usernameToSecretKey.set(username, newSecretKey);
-
-  const playerInfo: PlayerInfo = { id: playerId, name, agent };
-
-  // Update mappings
-  playerIdToSocketId.set(playerId, socket.id);
-  socketIdToPlayerId.set(socket.id, playerId);
-  connectedPlayers.set(playerId, playerInfo);
-
-  // Restore lobby membership if player was in a lobby before disconnect
-  // Check both lobbyIdByPlayerId (for in-progress games) and search all lobbies (for waiting lobbies)
-  let reconnectLobbyId = lobbyIdByPlayerId.get(playerId);
-  let reconnectLobby = reconnectLobbyId ? lobbiesById.get(reconnectLobbyId) : null;
-  
-  // If not found in lobbyIdByPlayerId, search all lobbies for this player
-  // This handles the case where player was removed from lobbyIdByPlayerId on disconnect
-  // but the lobby still exists (waiting lobbies)
-  if (!reconnectLobby) {
-    for (const [lobbyId, lobby] of lobbiesById.entries()) {
-      if (lobby.players.some(p => p.playerId === playerId)) {
-        reconnectLobbyId = lobbyId;
-        reconnectLobby = lobby;
-        // Restore the mapping
-        lobbyIdByPlayerId.set(playerId, lobbyId);
-        break;
-      }
-    }
-  }
-  
-  if (reconnectLobbyId && reconnectLobby) {
-    // Restore player to lobby if they were disconnected
-    if (reconnectLobby.disconnectedPlayerIds.includes(playerId)) {
-      clearPlayerDisconnectTimer(playerId);
-      reconnectLobby.disconnectedPlayerIds = reconnectLobby.disconnectedPlayerIds.filter(id => id !== playerId);
-    }
-    
-    // Ensure player is in the players array (in case they were removed on disconnect)
-    const playerInLobby = reconnectLobby.players.some(p => p.playerId === playerId);
-    if (!playerInLobby) {
-      reconnectLobby.players.push({
-        playerId,
-        displayName: name,
-      });
-      logger.info(`Restored player ${name} to lobby ${reconnectLobby.name}`);
-    }
-    
-    // Update lobby status if it was marked as finished but now has players again
-    // BUT: Keep it as 'finished' if a game has finished (allows restart)
-    // Only change to 'waiting' if the lobby was empty and now has players (no game was running)
-    const hasActiveGame = gameLoopsByLobbyId.has(reconnectLobbyId);
-    const hasGameSnapshot = mostRecentGameSnapshotByLobbyId.has(reconnectLobbyId);
-    const gameWasFinished = reconnectLobby.status === 'finished' && (hasGameSnapshot || reconnectLobby.finishedAt);
-    
-    if (reconnectLobby.status === 'finished' && reconnectLobby.players.length > 0 && !gameWasFinished) {
-      // Lobby was empty and marked finished, but now has players - restore to waiting
-      reconnectLobby.status = 'waiting';
-      reconnectLobby.finishedAt = null;
-      logger.info(`Restored lobby ${reconnectLobby.name} to waiting status (was empty, now has players)`);
-    } else if (gameWasFinished) {
-      // Game finished - keep status as 'finished' to allow restart
-      logger.info(`Lobby ${reconnectLobby.name} has finished game - keeping 'finished' status to allow restart`);
-    }
-    
-    socket.join(reconnectLobbyId);
-    io.emit('lobbyUpdated', reconnectLobby);
-    io.emit('playerReconnectedToLobby', {
-      lobbyId: reconnectLobbyId,
-      playerId,
+  if (!SUPABASE_AUTH_ENABLED) {
+    socket.emit('loginRejected', {
+      reason: 'AUTH_DISABLED',
+      message: 'Supabase auth is disabled',
     });
+    return;
   }
-  
-  // NOTE: We intentionally retain lobby membership across reconnects so
-  // players in in-progress games can resume seamlessly. handleLogin will
-  // clear any disconnected flags and sync the latest state to the client.
 
-  logger.info('emitting loggedIn event to client:', playerId);
-  const loggedInData: PlayerIdAndName & { secretKey: string } = {
-    id: playerId,
-    name,
-    secretKey: newSecretKey,
-  };
-  socket.emit('loggedIn', loggedInData);
-  emitConnectedPlayers();
-  
-  // if the game loop is running for this player, send the most recent game data to the client
-  sendMostRecentGameData(socket);
+  try {
+    const { userId } = await verifyAccessToken(accessToken);
+    const profile = await getProfile(userId);
+    const displayName = profile?.display_name ?? 'Player';
+    const playerId = userId;
+
+    let agent: WebSocketAgent | null = null;
+    const existingPlayerId = socketIdToPlayerId.get(socket.id);
+
+    if (existingPlayerId) {
+      const oldPlayerInfo = connectedPlayers.get(existingPlayerId);
+      if (oldPlayerInfo && oldPlayerInfo.agent instanceof WebSocketAgent) {
+        agent = oldPlayerInfo.agent;
+        if (oldPlayerInfo.agent.socket.id !== socket.id) {
+          oldPlayerInfo.agent.socket.disconnect(true);
+          oldPlayerInfo.agent.updateSocket(socket);
+        }
+        oldPlayerInfo.name = displayName;
+      }
+    }
+
+    if (!agent) {
+      agent = new WebSocketAgent(socket, playerId);
+    }
+
+    const playerInfo: PlayerInfo = { id: playerId, name: displayName, agent };
+
+    playerIdToSocketId.set(playerId, socket.id);
+    socketIdToPlayerId.set(socket.id, playerId);
+    connectedPlayers.set(playerId, playerInfo);
+
+    let reconnectLobbyId = lobbyIdByPlayerId.get(playerId);
+    let reconnectLobby = reconnectLobbyId ? lobbiesById.get(reconnectLobbyId) : null;
+
+    if (!reconnectLobby) {
+      for (const [lobbyId, lobby] of lobbiesById.entries()) {
+        if (lobby.players.some(p => p.playerId === playerId)) {
+          reconnectLobbyId = lobbyId;
+          reconnectLobby = lobby;
+          lobbyIdByPlayerId.set(playerId, lobbyId);
+          break;
+        }
+      }
+    }
+
+    if (reconnectLobbyId && reconnectLobby) {
+      if (reconnectLobby.disconnectedPlayerIds.includes(playerId)) {
+        clearPlayerDisconnectTimer(playerId);
+        reconnectLobby.disconnectedPlayerIds = reconnectLobby.disconnectedPlayerIds.filter(id => id !== playerId);
+      }
+
+      const playerInLobby = reconnectLobby.players.some(p => p.playerId === playerId);
+      if (!playerInLobby) {
+        reconnectLobby.players.push({
+          playerId,
+          displayName,
+        });
+        logger.info(`Restored player ${displayName} to lobby ${reconnectLobby.name}`);
+      }
+
+      const hasActiveGame = gameLoopsByLobbyId.has(reconnectLobbyId);
+      const hasGameSnapshot = mostRecentGameSnapshotByLobbyId.has(reconnectLobbyId);
+      const gameWasFinished = reconnectLobby.status === 'finished' && (hasGameSnapshot || reconnectLobby.finishedAt);
+
+      if (reconnectLobby.status === 'finished' && reconnectLobby.players.length > 0 && !gameWasFinished) {
+        reconnectLobby.status = 'waiting';
+        reconnectLobby.finishedAt = null;
+        logger.info(`Restored lobby ${reconnectLobby.name} to waiting status (was empty, now has players)`);
+      } else if (gameWasFinished) {
+        logger.info(`Lobby ${reconnectLobby.name} has finished game - keeping 'finished' status to allow restart`);
+      }
+
+      socket.join(reconnectLobbyId);
+      io.emit('lobbyUpdated', reconnectLobby);
+      io.emit('playerReconnectedToLobby', {
+        lobbyId: reconnectLobbyId,
+        playerId,
+      });
+    }
+
+    logger.info('emitting loggedIn event to client:', playerId);
+    const loggedInData: PlayerIdAndName = {
+      id: playerId,
+      name: displayName,
+    };
+    socket.emit('loggedIn', loggedInData);
+    emitConnectedPlayers();
+
+    sendMostRecentGameData(socket);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Login failed';
+    logger.error('Supabase login failed:', message);
+    socket.emit('loginRejected', { reason: 'INVALID_TOKEN', message });
+  }
 }
 
 // create function that emits the current connected players to all clients
