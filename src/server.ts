@@ -137,10 +137,24 @@ const io = new Server(server, {
   },
 });
 
-// Auth middleware (currently disabled for development)
+// Auth middleware (Supabase JWT required when flag enabled)
 io.use((socket, next) => {
-  // TODO: Re-enable auth check when needed
-  next();
+  if (!SUPABASE_AUTH_ENABLED) {
+    return next();
+  }
+  const token = (socket.handshake.auth as { accessToken?: string } | undefined)?.accessToken;
+  if (!token) {
+    return next(new Error('Missing access token'));
+  }
+  verifyAccessToken(token)
+    .then(({ userId }) => {
+      (socket.data as { userId?: string }).userId = userId;
+      next();
+    })
+    .catch(err => {
+      logger.error('Socket auth failed', err);
+      next(new Error('Invalid token'));
+    });
 });
 
 interface PlayerInfo {
@@ -484,6 +498,14 @@ function getUniquePlayerId(username: string, socketId: string): string {
 io.on('connection', socket => {
   const origin = socket.handshake.headers.origin;
   const address = socket.handshake.address;
+  if (SUPABASE_AUTH_ENABLED) {
+    const userId = (socket.data as { userId?: string }).userId;
+    if (!userId) {
+      logger.warn('Connection without userId, disconnecting');
+      socket.disconnect(true);
+      return;
+    }
+  }
   
   // Auth was already checked in middleware, so this socket is authenticated
   logger.info(`[Connection] ✓ Socket connected: ${socket.id} from ${origin || 'proxy'} (${address})`);
@@ -494,7 +516,10 @@ io.on('connection', socket => {
 
   socket.on('login', (data: LoginData) => {
     logger.info('Received login event from socket:', socket.id);
-    handleLogin(socket, data);
+    handleLogin(socket, data).catch(err => {
+      logger.error('Login failed', err);
+      socket.emit('loginRejected', { reason: 'INVALID_TOKEN', message: 'Login failed' });
+    });
   });
 
   socket.on('createLobby', (data: { playerCount: number; name?: string }, callback?: (response: any) => void) => {
