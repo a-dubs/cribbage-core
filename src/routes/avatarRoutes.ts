@@ -2,7 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import sharp from 'sharp';
 import { v4 as uuidv4 } from 'uuid';
-import { getServiceClient } from '../services/supabaseService';
+import { getServiceClient, listPresetAvatars } from '../services/supabaseService';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -12,6 +12,16 @@ const upload = multer({
 type AvatarRequest = express.Request & { file?: Express.Multer.File; userId?: string };
 
 export function registerAvatarRoutes(app: express.Express, authMiddleware: express.RequestHandler): void {
+  app.get('/profile/avatars/presets', authMiddleware, async (_req, res) => {
+    try {
+      const presets = await listPresetAvatars();
+      res.json({ presets });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to list presets';
+      res.status(500).json({ error: 'PRESET_AVATARS_FAILED', message });
+    }
+  });
+
   app.post('/profile/avatar', authMiddleware, upload.single('file'), async (req, res) => {
     const request = req as AvatarRequest;
     if (!request.file) {

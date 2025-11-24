@@ -24,6 +24,7 @@ import {
   updateLobbySize,
   removeFriendship,
   updateProfile,
+  sendLobbyInvite,
   verifyAccessToken,
   type LobbyPayload,
   type LobbyVisibility,
@@ -227,6 +228,30 @@ export function registerHttpApi(app: express.Express, hooks?: HttpApiHooks): voi
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to leave lobby';
       res.status(400).json({ error: 'LOBBY_LEAVE_FAILED', message });
+    }
+  });
+
+  app.post('/lobbies/:lobbyId/invite', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    if (!requireSupabaseFlag(SUPABASE_LOBBIES_ENABLED, res)) return;
+    const { lobbyId } = req.params;
+    const { recipientId } = req.body ?? {};
+    if (!req.userId) {
+      res.status(401).json({ error: 'NOT_AUTHORIZED', message: 'Missing user' });
+      return;
+    }
+    if (!recipientId) {
+      res.status(400).json({ error: 'VALIDATION_ERROR', message: 'recipientId is required' });
+      return;
+    }
+    try {
+      const invitation = await sendLobbyInvite({ lobbyId, senderId: req.userId, recipientId });
+      res.status(201).json({ invitation });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to send invitation';
+      let status = 400;
+      if (message === 'NOT_HOST') status = 403;
+      if (message === 'LOBBY_NOT_FOUND') status = 404;
+      res.status(status).json({ error: 'LOBBY_INVITE_FAILED', message });
     }
   });
 

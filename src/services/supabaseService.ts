@@ -24,6 +24,14 @@ export type FriendRequestWithProfiles = FriendRequest & {
   sender_profile: SupabaseProfile | null;
   recipient_profile: SupabaseProfile | null;
 };
+export type LobbyInvitation = {
+  id: string;
+  lobby_id: string;
+  sender_id: string;
+  recipient_id: string;
+  status: 'pending' | 'accepted' | 'declined' | 'expired';
+  created_at: string;
+};
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -90,6 +98,12 @@ export function generateFriendCode(): string {
 
 function canonicalizeFriendPair(a: string, b: string): { userId: string; friendId: string } {
   return a < b ? { userId: a, friendId: b } : { userId: b, friendId: a };
+}
+
+function publicAvatarUrl(path: string): string {
+  const supabase = getServiceClient();
+  const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+  return data.publicUrl;
 }
 
 export async function verifyAccessToken(token: string): Promise<{ userId: string; email?: string }> {
@@ -400,6 +414,24 @@ export async function leaveLobby(params: { lobbyId: string; playerId: string }):
   return { ...lobby, players };
 }
 
+export async function sendLobbyInvite(params: { lobbyId: string; senderId: string; recipientId: string }): Promise<LobbyInvitation> {
+  const client = getServiceClient();
+  await ensureLobbyHost(params.lobbyId, params.senderId, client);
+  const { data, error } = await client
+    .from('lobby_invitations')
+    .insert({
+      lobby_id: params.lobbyId,
+      sender_id: params.senderId,
+      recipient_id: params.recipientId,
+    })
+    .select('*')
+    .single();
+  if (error || !data) {
+    throw new Error(error?.message ?? 'Failed to create invite');
+  }
+  return data as LobbyInvitation;
+}
+
 export async function listFriends(userId: string): Promise<SupabaseProfile[]> {
   const client = getServiceClient();
   const { data, error } = await client
@@ -610,6 +642,16 @@ export async function searchProfilesByUsername(query: string): Promise<SupabaseP
     throw new Error(error.message);
   }
   return (data ?? []) as SupabaseProfile[];
+}
+
+export async function listPresetAvatars(): Promise<string[]> {
+  const client = getServiceClient();
+  const { data, error } = await client.storage.from('avatars').list('presets', { limit: 100 });
+  if (error) {
+    throw new Error(error.message);
+  }
+  const files = data ?? [];
+  return files.filter(f => f.name).map(file => publicAvatarUrl(`presets/${file.name}`));
 }
 
 export async function getProfileFromToken(token: string): Promise<SupabaseProfile | null> {
