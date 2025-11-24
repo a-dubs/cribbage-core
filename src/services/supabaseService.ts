@@ -9,6 +9,15 @@ export type SupabaseProfile = {
 };
 
 export type LobbyVisibility = 'public' | 'private' | 'friends';
+export type FriendRequestStatus = 'pending' | 'accepted' | 'declined';
+export type Friendship = { user_id: string; friend_id: string; created_at: string };
+export type FriendRequest = {
+  id: string;
+  sender_id: string;
+  recipient_id: string;
+  status: FriendRequestStatus;
+  created_at: string;
+};
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -339,6 +348,126 @@ export async function leaveLobby(params: { lobbyId: string; playerId: string }):
     .eq('player_id', params.playerId);
   if (error) {
     throw new Error(error.message);
+  }
+}
+
+export async function listFriends(userId: string): Promise<SupabaseProfile[]> {
+  const client = getServiceClient();
+  const { data, error } = await client
+    .from('friendships')
+    .select(
+      `
+      user_id,
+      friend_id,
+      friend_profile:profiles!friend_id(id, username, display_name, avatar_url, friend_code),
+      user_profile:profiles!user_id(id, username, display_name, avatar_url, friend_code)
+    `
+    )
+    .or(`user_id.eq.${userId},friend_id.eq.${userId}`);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const rows = (data ?? []) as any[];
+  const profiles: SupabaseProfile[] = [];
+  rows.forEach(row => {
+    const friend =
+      row.friend_id === userId
+        ? row.user_profile
+        : row.friend_profile;
+    if (friend) {
+      profiles.push({
+        id: friend.id,
+        username: friend.username,
+        display_name: friend.display_name,
+        avatar_url: friend.avatar_url,
+        friend_code: friend.friend_code,
+      });
+    }
+  });
+  return profiles;
+}
+
+export async function listFriendRequests(userId: string): Promise<{
+  incoming: FriendRequest[];
+  outgoing: FriendRequest[];
+}> {
+  const client = getServiceClient();
+  const { data, error } = await client
+    .from('friend_requests')
+    .select('*')
+    .or(`sender_id.eq.${userId},recipient_id.eq.${userId}`);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+  const rows = (data ?? []) as FriendRequest[];
+  return {
+    incoming: rows.filter(r => r.recipient_id === userId),
+    outgoing: rows.filter(r => r.sender_id === userId),
+  };
+}
+
+export async function sendFriendRequest(params: {
+  senderId: string;
+  recipientUsername: string;
+}): Promise<FriendRequest> {
+  const client = getServiceClient();
+  const { data: recipientProfile, error: profileError } = await client
+    .from('profiles')
+    .select('id')
+    .eq('username', params.recipientUsername)
+    .maybeSingle();
+  if (profileError) {
+    throw new Error(profileError.message);
+  }
+  if (!recipientProfile?.id) {
+    throw new Error('NOT_FOUND');
+  }
+  const { data, error } = await client
+    .from('friend_requests')
+    .insert({
+      sender_id: params.senderId,
+      recipient_id: recipientProfile.id,
+    })
+    .select('*')
+    .single();
+  if (error || !data) {
+    throw new Error(error?.message ?? 'Failed to send request');
+  }
+  return data as FriendRequest;
+}
+
+export async function respondToFriendRequest(params: {
+  requestId: string;
+  recipientId: string;
+  accept: boolean;
+}): Promise<void> {
+  const client = getServiceClient();
+  const status: FriendRequestStatus = params.accept ? 'accepted' : 'declined';
+  const { error } = await client
+    .from('friend_requests')
+    .update({ status })
+    .eq('id', params.requestId)
+    .eq('recipient_id', params.recipientId);
+  if (error) {
+    throw new Error(error.message);
+  }
+  if (status === 'accepted') {
+    // Create friendship row (canonical ordering handled by trigger)
+    const sender = await client
+      .from('friend_requests')
+      .select('sender_id')
+      .eq('id', params.requestId)
+      .single();
+    if (sender.error || !sender.data?.sender_id) {
+      throw new Error(sender.error?.message ?? 'Failed to lookup sender');
+    }
+    await client.from('friendships').insert({
+      user_id: params.recipientId,
+      friend_id: sender.data.sender_id as string,
+    });
   }
 }
 

@@ -5,6 +5,10 @@ import {
   joinLobby,
   leaveLobby,
   listLobbies,
+  listFriendRequests,
+  listFriends,
+  respondToFriendRequest,
+  sendFriendRequest,
   signInWithEmail,
   signUpWithEmail,
   verifyAccessToken,
@@ -174,6 +178,74 @@ export function registerHttpApi(app: express.Express): void {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to leave lobby';
       res.status(400).json({ error: 'LOBBY_LEAVE_FAILED', message });
+    }
+  });
+
+  app.get('/friends', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.userId) {
+      res.status(401).json({ error: 'NOT_AUTHORIZED', message: 'Missing user' });
+      return;
+    }
+    try {
+      const friends = await listFriends(req.userId);
+      res.json({ friends });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to fetch friends';
+      res.status(500).json({ error: 'FRIENDS_LIST_FAILED', message });
+    }
+  });
+
+  app.get('/friends/requests', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.userId) {
+      res.status(401).json({ error: 'NOT_AUTHORIZED', message: 'Missing user' });
+      return;
+    }
+    try {
+      const requests = await listFriendRequests(req.userId);
+      res.json(requests);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to fetch requests';
+      res.status(500).json({ error: 'FRIEND_REQUESTS_FAILED', message });
+    }
+  });
+
+  app.post('/friends/requests', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.userId) {
+      res.status(401).json({ error: 'NOT_AUTHORIZED', message: 'Missing user' });
+      return;
+    }
+    const { recipientUsername } = req.body ?? {};
+    if (!recipientUsername) {
+      res.status(400).json({ error: 'VALIDATION_ERROR', message: 'recipientUsername is required' });
+      return;
+    }
+    try {
+      const request = await sendFriendRequest({ senderId: req.userId, recipientUsername });
+      res.status(201).json({ request });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to send request';
+      const status = message === 'NOT_FOUND' ? 404 : 400;
+      res.status(status).json({ error: 'FRIEND_REQUEST_FAILED', message });
+    }
+  });
+
+  app.post('/friends/requests/:id/respond', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.userId) {
+      res.status(401).json({ error: 'NOT_AUTHORIZED', message: 'Missing user' });
+      return;
+    }
+    const { id } = req.params;
+    const { accept } = req.body ?? {};
+    if (accept === undefined) {
+      res.status(400).json({ error: 'VALIDATION_ERROR', message: 'accept is required' });
+      return;
+    }
+    try {
+      await respondToFriendRequest({ requestId: id, recipientId: req.userId, accept: Boolean(accept) });
+      res.status(200).json({ success: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to respond';
+      res.status(400).json({ error: 'FRIEND_RESPONSE_FAILED', message });
     }
   });
 }
