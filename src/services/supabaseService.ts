@@ -20,6 +20,10 @@ export type FriendRequest = {
   status: FriendRequestStatus;
   created_at: string;
 };
+export type FriendRequestWithProfiles = FriendRequest & {
+  sender_profile: SupabaseProfile | null;
+  recipient_profile: SupabaseProfile | null;
+};
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -82,6 +86,10 @@ function authClientForToken(token: string): SupabaseClient {
 
 export function generateFriendCode(): string {
   return Math.random().toString(36).slice(2, 10);
+}
+
+function canonicalizeFriendPair(a: string, b: string): { userId: string; friendId: string } {
+  return a < b ? { userId: a, friendId: b } : { userId: b, friendId: a };
 }
 
 export async function verifyAccessToken(token: string): Promise<{ userId: string; email?: string }> {
@@ -450,6 +458,37 @@ export async function listFriendRequests(userId: string): Promise<{
   };
 }
 
+export async function listFriendRequestsWithProfiles(userId: string): Promise<{
+  incoming: FriendRequestWithProfiles[];
+  outgoing: FriendRequestWithProfiles[];
+}> {
+  const client = getServiceClient();
+  const { data, error } = await client
+    .from('friend_requests')
+    .select(
+      `
+      id,
+      sender_id,
+      recipient_id,
+      status,
+      created_at,
+      sender_profile:profiles!sender_id(id, username, display_name, avatar_url, friend_code),
+      recipient_profile:profiles!recipient_id(id, username, display_name, avatar_url, friend_code)
+    `
+    )
+    .or(`sender_id.eq.${userId},recipient_id.eq.${userId}`);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const rows = (data ?? []) as FriendRequestWithProfiles[];
+  return {
+    incoming: rows.filter(r => r.recipient_id === userId),
+    outgoing: rows.filter(r => r.sender_id === userId),
+  };
+}
+
 export async function sendFriendRequest(params: {
   senderId: string;
   recipientUsername: string;
@@ -502,19 +541,116 @@ export async function respondToFriendRequest(params: {
       .select('sender_id')
       .eq('id', params.requestId)
       .single();
-    if (sender.error || !sender.data?.sender_id) {
+  if (sender.error || !sender.data?.sender_id) {
       throw new Error(sender.error?.message ?? 'Failed to lookup sender');
     }
+    const { userId, friendId } = canonicalizeFriendPair(params.recipientId, sender.data.sender_id as string);
     await client.from('friendships').insert({
-      user_id: params.recipientId,
-      friend_id: sender.data.sender_id as string,
+      user_id: userId,
+      friend_id: friendId,
     });
   }
+}
+
+export async function removeFriendship(params: { userId: string; friendId: string }): Promise<void> {
+  const client = getServiceClient();
+  const { userId, friendId } = canonicalizeFriendPair(params.userId, params.friendId);
+  const { error } = await client.from('friendships').delete().eq('user_id', userId).eq('friend_id', friendId);
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export async function sendFriendRequestFromLobby(params: {
+  senderId: string;
+  targetUserId: string;
+  lobbyId: string;
+}): Promise<FriendRequest> {
+  const client = getServiceClient();
+  const membershipCheck = await client
+    .from('lobby_players')
+    .select('player_id')
+    .eq('lobby_id', params.lobbyId)
+    .in('player_id', [params.senderId, params.targetUserId]);
+  if (membershipCheck.error) {
+    throw new Error(membershipCheck.error.message);
+  }
+  const players = membershipCheck.data ?? [];
+  const senderInLobby = players.some(p => p.player_id === params.senderId);
+  const targetInLobby = players.some(p => p.player_id === params.targetUserId);
+  if (!senderInLobby || !targetInLobby) {
+    throw new Error('NOT_IN_LOBBY');
+  }
+  const { data, error } = await client
+    .from('friend_requests')
+    .insert({
+      sender_id: params.senderId,
+      recipient_id: params.targetUserId,
+    })
+    .select('*')
+    .single();
+  if (error || !data) {
+    throw new Error(error?.message ?? 'Failed to send request');
+  }
+  return data as FriendRequest;
+}
+
+export async function searchProfilesByUsername(query: string): Promise<SupabaseProfile[]> {
+  const client = getServiceClient();
+  const trimmed = query.trim();
+  if (trimmed.length < 3) {
+    throw new Error('QUERY_TOO_SHORT');
+  }
+  const { data, error } = await client
+    .from('profiles')
+    .select('id, username, display_name, avatar_url, friend_code')
+    .ilike('username', `${trimmed}%`)
+    .limit(20);
+  if (error) {
+    throw new Error(error.message);
+  }
+  return (data ?? []) as SupabaseProfile[];
 }
 
 export async function getProfileFromToken(token: string): Promise<SupabaseProfile | null> {
   const { userId } = await verifyAccessToken(token);
   return getProfile(userId);
+}
+
+export async function updateProfile(params: {
+  userId: string;
+  displayName?: string;
+  username?: string;
+  avatarUrl?: string | null;
+}): Promise<SupabaseProfile> {
+  const client = getServiceClient();
+  const updates: Record<string, string | null | undefined> = {};
+  if (params.displayName !== undefined) {
+    const trimmed = params.displayName.trim();
+    if (!trimmed) throw new Error('DISPLAY_NAME_REQUIRED');
+    updates.display_name = trimmed;
+  }
+  if (params.username !== undefined) {
+    const trimmed = params.username.trim();
+    if (!trimmed) throw new Error('USERNAME_REQUIRED');
+    updates.username = trimmed;
+  }
+  if (params.avatarUrl !== undefined) {
+    updates.avatar_url = params.avatarUrl;
+  }
+  if (Object.keys(updates).length === 0) {
+    throw new Error('NO_FIELDS');
+  }
+  const { data, error } = await client
+    .from('profiles')
+    .update(updates)
+    .eq('id', params.userId)
+    .select()
+    .single();
+  if (error || !data) {
+    throw new Error(error?.message ?? 'Failed to update profile');
+  }
+  return data as SupabaseProfile;
 }
 
 export async function updateLobbyName(params: { lobbyId: string; hostId: string; name: string }): Promise<LobbyPayload> {

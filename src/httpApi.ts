@@ -6,19 +6,24 @@ import {
   leaveLobby,
   listLobbies,
   listFriendRequests,
+  listFriendRequestsWithProfiles,
   listUserGames,
   getGameEventsForUser,
   getGameSnapshotsForUser,
   listFriends,
   respondToFriendRequest,
   sendFriendRequest,
+  sendFriendRequestFromLobby,
   lockLobby,
   removeLobbyPlayer,
   signInWithEmail,
   signUpWithEmail,
+  searchProfilesByUsername,
   startLobby,
   updateLobbyName,
   updateLobbySize,
+  removeFriendship,
+  updateProfile,
   verifyAccessToken,
   type LobbyPayload,
   type LobbyVisibility,
@@ -115,6 +120,27 @@ export function registerHttpApi(app: express.Express, hooks?: HttpApiHooks): voi
       userId: req.userId,
       profile: req.profile,
     });
+  });
+
+  app.put('/auth/profile', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.userId) {
+      res.status(401).json({ error: 'NOT_AUTHORIZED', message: 'Missing user' });
+      return;
+    }
+    const { displayName, username, avatarUrl } = req.body ?? {};
+    try {
+      const profile = await updateProfile({
+        userId: req.userId,
+        displayName,
+        username,
+        avatarUrl,
+      });
+      res.json({ profile });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to update profile';
+      const status = ['USERNAME_REQUIRED', 'DISPLAY_NAME_REQUIRED', 'NO_FIELDS'].includes(message) ? 400 : 409;
+      res.status(status).json({ error: 'PROFILE_UPDATE_FAILED', message });
+    }
   });
 
   app.get('/lobbies', authMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
@@ -339,7 +365,7 @@ export function registerHttpApi(app: express.Express, hooks?: HttpApiHooks): voi
       return;
     }
     try {
-      const requests = await listFriendRequests(req.userId);
+      const requests = await listFriendRequestsWithProfiles(req.userId);
       res.json(requests);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to fetch requests';
@@ -367,6 +393,26 @@ export function registerHttpApi(app: express.Express, hooks?: HttpApiHooks): voi
     }
   });
 
+  app.post('/friends/requests/from-lobby', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.userId) {
+      res.status(401).json({ error: 'NOT_AUTHORIZED', message: 'Missing user' });
+      return;
+    }
+    const { lobbyId, targetUserId } = req.body ?? {};
+    if (!lobbyId || !targetUserId) {
+      res.status(400).json({ error: 'VALIDATION_ERROR', message: 'lobbyId and targetUserId are required' });
+      return;
+    }
+    try {
+      const request = await sendFriendRequestFromLobby({ senderId: req.userId, targetUserId, lobbyId });
+      res.status(201).json({ request });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to send request from lobby';
+      const status = message === 'NOT_IN_LOBBY' ? 403 : 400;
+      res.status(status).json({ error: 'FRIEND_REQUEST_FAILED', message });
+    }
+  });
+
   app.post('/friends/requests/:id/respond', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     if (!req.userId) {
       res.status(401).json({ error: 'NOT_AUTHORIZED', message: 'Missing user' });
@@ -384,6 +430,37 @@ export function registerHttpApi(app: express.Express, hooks?: HttpApiHooks): voi
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to respond';
       res.status(400).json({ error: 'FRIEND_RESPONSE_FAILED', message });
+    }
+  });
+
+  app.get('/friends/search', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.userId) {
+      res.status(401).json({ error: 'NOT_AUTHORIZED', message: 'Missing user' });
+      return;
+    }
+    const username = (req.query.username as string) ?? '';
+    try {
+      const results = await searchProfilesByUsername(username);
+      res.json({ results });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Search failed';
+      const status = message === 'QUERY_TOO_SHORT' ? 400 : 500;
+      res.status(status).json({ error: 'FRIEND_SEARCH_FAILED', message });
+    }
+  });
+
+  app.post('/friends/:id/remove', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.userId) {
+      res.status(401).json({ error: 'NOT_AUTHORIZED', message: 'Missing user' });
+      return;
+    }
+    const { id } = req.params;
+    try {
+      await removeFriendship({ userId: req.userId, friendId: id });
+      res.status(200).json({ success: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to remove friend';
+      res.status(400).json({ error: 'FRIEND_REMOVE_FAILED', message });
     }
   });
 
