@@ -15,6 +15,9 @@ import { ExhaustiveSimpleAgent } from './agents/ExhaustiveSimpleAgent';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
+import { logger } from './utils/logger';
+import { uniqueNamesGenerator, adjectives, animals } from 'unique-names-generator';
+import { v4 as uuidv4 } from 'uuid';
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
 dotenv.config();
@@ -23,21 +26,21 @@ const PORT = process.env.PORT || 3002;
 const WEB_APP_ORIGIN = process.env.WEB_APP_ORIGIN || 'http://localhost:3000';
 const WEBSOCKET_AUTH_TOKEN = process.env.WEBSOCKET_AUTH_TOKEN;
 const JSON_DB_DIR = process.env.JSON_DB_DIR || path.join(__dirname, 'json_db');
-console.log('JSON_DB_DIR:', JSON_DB_DIR);
+logger.info('JSON_DB_DIR:', JSON_DB_DIR);
 // create the directory if it does not exist
 if (!fs.existsSync(JSON_DB_DIR)) {
   fs.mkdirSync(JSON_DB_DIR);
 }
 
 if (!WEBSOCKET_AUTH_TOKEN) {
-  console.error('WEBSOCKET_AUTH_TOKEN is not set');
+  logger.error('WEBSOCKET_AUTH_TOKEN is not set');
   throw new Error('WEBSOCKET_AUTH_TOKEN is not set');
 }
 
-console.log('PORT:', PORT);
-console.log('WEB_APP_ORIGIN:', WEB_APP_ORIGIN);
+logger.info('PORT:', PORT);
+logger.info('WEB_APP_ORIGIN:', WEB_APP_ORIGIN);
 
-console.log('Cribbage-core server starting...');
+logger.info('Cribbage-core server starting...');
 
 const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/ping') {
@@ -134,53 +137,39 @@ const io = new Server(server, {
   upgradeTimeout: 10000,
   maxHttpBufferSize: 1e6,
   // Allow all handshake requests - auth is checked via middleware
+  // Handshake validation (auth checked in middleware)
   allowRequest: (req, callback) => {
-    const origin = req.headers.origin;
-    const path = req.url;
-    const forwardedFor = req.headers['x-forwarded-for'];
-    const realIp = req.headers['x-real-ip'];
-    
-    console.log(`[Handshake] Origin: ${origin || 'none'}, Path: ${path}, X-Forwarded-For: ${forwardedFor || 'none'}, X-Real-IP: ${realIp || 'none'}`);
-    
-    // Allow all handshakes - auth is checked in middleware after connection
     callback(null, true);
   },
 });
 
-// TEMPORARY: Disable auth to diagnose connection issues
-// TODO: Re-enable after confirming connections work
+// Auth middleware (currently disabled for development)
 io.use((socket, next) => {
-  const token = socket.handshake.auth?.token;
-  const origin = socket.handshake.headers.origin;
-  
-  console.log(`[Middleware] Auth check (DISABLED) for socket ${socket.id}:`, {
-    origin: origin || 'none',
-    hasToken: !!token,
-    authKeys: Object.keys(socket.handshake.auth || {}),
-    query: Object.keys(socket.handshake.query || {})
-  });
-  
-  // TEMPORARILY ALLOW ALL CONNECTIONS
-  console.log(`[Middleware] ✓ ALLOWING connection (auth disabled for testing)`);
+  // TODO: Re-enable auth check when needed
   next();
-  
-  // Original auth check (commented out):
-  // if (token !== WEBSOCKET_AUTH_TOKEN) {
-  //   console.error(`[Middleware] Auth REJECTED for socket ${socket.id}:`, {
-  //     expectedTokenSet: !!WEBSOCKET_AUTH_TOKEN,
-  //     receivedToken: token ? '***' : 'NONE',
-  //     expectedToken: WEBSOCKET_AUTH_TOKEN ? '***' : 'NOT_SET'
-  //   });
-  //   return next(new Error('Authentication failed'));
-  // }
-  // console.log(`[Middleware] ✓ Auth PASSED for socket ${socket.id}`);
-  // next();
 });
 
 interface PlayerInfo {
   id: string;
   name: string;
   agent: GameAgent;
+}
+
+interface PlayerInLobby {
+  playerId: string;
+  displayName: string;
+}
+
+interface Lobby {
+  id: string;
+  name?: string;
+  hostId: string;
+  playerCount: number; // 2–4
+  players: PlayerInLobby[]; // humans only; bots are added when starting game
+  status: 'waiting' | 'in_progress' | 'finished';
+  createdAt: number;
+  finishedAt?: number | null;
+  disconnectedPlayerIds: string[];
 }
 
 interface LoginData {
@@ -277,11 +266,196 @@ const connectedPlayers: Map<string, PlayerInfo> = new Map();
 const playerIdToSocketId: Map<string, string> = new Map();
 const socketIdToPlayerId: Map<string, string> = new Map(); // Track socket -> player ID mapping for reconnection
 const usernameToSecretKey: Map<string, string> = new Map(); // Track username -> secret key for authentication
-const playAgainVotes: Set<string> = new Set();
-let gameLoop: GameLoop | null = null;
-let mostRecentGameSnapshot: GameSnapshot | null = null;
-let currentRoundGameEvents: GameEvent[] = [];
-let requestedPlayerCount: number = 2; // Track requested player count for current game
+
+// In-memory lobby state (foundational data structures for future lobby support)
+const lobbiesById: Map<string, Lobby> = new Map();
+const lobbyIdByPlayerId: Map<string, string> = new Map(); // Each player can be in at most one lobby
+const gameIdByLobbyId: Map<string, string> = new Map();
+
+const gameLoopsByLobbyId: Map<string, GameLoop> = new Map();
+const mostRecentGameSnapshotByLobbyId: Map<string, GameSnapshot> = new Map();
+const currentRoundGameEventsByLobbyId: Map<string, GameEvent[]> = new Map();
+const currentGameBotIdsByLobbyId: Map<string, string[]> = new Map();
+
+const PLAYER_DISCONNECT_GRACE_MS = 60 * 1000; // 1 minute to reconnect before cancelling the game
+const FINISHED_LOBBY_TTL_MS = 60 * 60 * 1000; // 1 hour retention for finished lobbies before cleanup
+const FINISHED_LOBBY_SWEEP_INTERVAL_MS = 5 * 60 * 1000; // Sweep finished lobbies every 5 minutes
+
+// Temporary default lobby ID used until full lobby management is implemented
+const DEFAULT_LOBBY_ID = 'default-lobby';
+
+// Generate a unique lobby name (adjective-animal) that doesn't collide with active lobbies
+function generateUniqueLobbyName(): string {
+  const maxAttempts = 50;
+  for (let i = 0; i < maxAttempts; i++) {
+    const name = uniqueNamesGenerator({
+      dictionaries: [adjectives, animals],
+      separator: ' ',
+      style: 'capital',
+    });
+    // Check if this name is already in use by a waiting or in_progress lobby
+    const nameInUse = Array.from(lobbiesById.values()).some(
+      lobby => lobby.name === name && lobby.status !== 'finished'
+    );
+    if (!nameInUse) {
+      return name;
+    }
+  }
+  // Fallback: append timestamp to guarantee uniqueness
+  return `${uniqueNamesGenerator({
+    dictionaries: [adjectives, animals],
+    separator: ' ',
+    style: 'capital',
+  })} ${Date.now()}`;
+}
+
+const disconnectGraceTimeouts: Map<string, NodeJS.Timeout> = new Map();
+
+/**
+ * Clean up bots from connectedPlayers and related maps
+ */
+function cleanupBots(lobbyId: string): void {
+  const botIds = currentGameBotIdsByLobbyId.get(lobbyId);
+  if (!botIds || botIds.length === 0) {
+    return;
+  }
+  console.log(`Cleaning up ${botIds.length} bots for lobby ${lobbyId}`);
+  botIds.forEach(botId => {
+    connectedPlayers.delete(botId);
+    playerIdToSocketId.delete(botId);
+    socketIdToPlayerId.delete(botId);
+    console.log(`Removed bot: ${botId}`);
+  });
+  currentGameBotIdsByLobbyId.delete(lobbyId);
+  emitConnectedPlayers();
+}
+
+function clearPlayerDisconnectTimer(playerId: string): void {
+  const timeout = disconnectGraceTimeouts.get(playerId);
+  if (timeout) {
+    clearTimeout(timeout);
+    disconnectGraceTimeouts.delete(playerId);
+  }
+}
+
+function clearActiveGameArtifacts(lobbyId: string): Lobby | undefined {
+  const loop = gameLoopsByLobbyId.get(lobbyId);
+  if (loop) {
+    loop.cancel();
+    loop.removeAllListeners();
+    gameLoopsByLobbyId.delete(lobbyId);
+  }
+
+  mostRecentGameSnapshotByLobbyId.delete(lobbyId);
+  currentRoundGameEventsByLobbyId.delete(lobbyId);
+  gameIdByLobbyId.delete(lobbyId);
+  cleanupBots(lobbyId);
+
+  const lobby = lobbiesById.get(lobbyId);
+  if (lobby) {
+    lobby.disconnectedPlayerIds.forEach(clearPlayerDisconnectTimer);
+  }
+
+  return lobby;
+}
+
+function handleDisconnectGracePeriodExpired(playerId: string, lobbyId: string): void {
+  disconnectGraceTimeouts.delete(playerId);
+  const lobby = clearActiveGameArtifacts(lobbyId);
+  if (!lobby) {
+    return;
+  }
+
+  const wasTracked = lobby.disconnectedPlayerIds.includes(playerId);
+  lobby.disconnectedPlayerIds = lobby.disconnectedPlayerIds.filter(id => id !== playerId);
+
+  const playerIndex = lobby.players.findIndex(p => p.playerId === playerId);
+  if (playerIndex !== -1) {
+    lobby.players.splice(playerIndex, 1);
+  }
+  lobbyIdByPlayerId.delete(playerId);
+
+  if (lobby.players.length === 0) {
+    lobby.status = 'finished';
+    lobby.finishedAt = Date.now();
+    console.warn(`[Disconnect] Lobby ${lobbyId} is now empty after grace expiry; closing lobby.`);
+    io.emit('lobbyClosed', { lobbyId });
+    return;
+  }
+
+  if (lobby.hostId === playerId) {
+    lobby.hostId = lobby.players[0].playerId;
+    console.warn(`[Disconnect] Host ${playerId} dropped. Transferring host to ${lobby.hostId} for lobby ${lobbyId}.`);
+  }
+
+  if (wasTracked) {
+    console.warn(`[Disconnect] Grace period expired for player ${playerId} in lobby ${lobbyId}`);
+  }
+
+  lobby.status = 'waiting';
+  lobby.finishedAt = null;
+  io.emit('lobbyUpdated', lobby);
+  io.emit('gameCancelledDueToDisconnect', {
+    lobbyId,
+    playerId,
+    timeoutMs: PLAYER_DISCONNECT_GRACE_MS,
+  });
+}
+
+function schedulePlayerDisconnectTimer(lobbyId: string, playerId: string): void {
+  clearPlayerDisconnectTimer(playerId);
+  const timeout = setTimeout(() => {
+    handleDisconnectGracePeriodExpired(playerId, lobbyId);
+  }, PLAYER_DISCONNECT_GRACE_MS);
+  disconnectGraceTimeouts.set(playerId, timeout);
+}
+
+function handlePlayerInGameDisconnect(lobby: Lobby, playerId: string): void {
+  if (!lobby.disconnectedPlayerIds.includes(playerId)) {
+    lobby.disconnectedPlayerIds.push(playerId);
+  }
+  schedulePlayerDisconnectTimer(lobby.id, playerId);
+  io.emit('lobbyUpdated', lobby);
+  io.emit('playerDisconnectedFromLobby', {
+    lobbyId: lobby.id,
+    playerId,
+    gracePeriodMs: PLAYER_DISCONNECT_GRACE_MS,
+  });
+}
+
+function cleanupFinishedLobbies(): void {
+  const now = Date.now();
+  lobbiesById.forEach((lobby, lobbyId) => {
+    if (lobby.status !== 'finished') {
+      return;
+    }
+
+    const finishedAt = lobby.finishedAt ?? lobby.createdAt;
+    const lobbyIsEmpty = lobby.players.length === 0;
+    if (!lobbyIsEmpty && now - finishedAt < FINISHED_LOBBY_TTL_MS) {
+      return;
+    }
+
+    lobby.players.forEach(player => {
+      if (lobbyIdByPlayerId.get(player.playerId) === lobbyId) {
+        lobbyIdByPlayerId.delete(player.playerId);
+      }
+    });
+
+    lobby.disconnectedPlayerIds.forEach(clearPlayerDisconnectTimer);
+    cleanupBots(lobbyId);
+    gameLoopsByLobbyId.delete(lobbyId);
+    mostRecentGameSnapshotByLobbyId.delete(lobbyId);
+    currentRoundGameEventsByLobbyId.delete(lobbyId);
+    currentGameBotIdsByLobbyId.delete(lobbyId);
+
+    lobbiesById.delete(lobbyId);
+    io.emit('lobbyClosed', { lobbyId });
+    console.log(`[cleanupFinishedLobbies] Removed finished lobby ${lobbyId}`);
+  });
+}
+
+setInterval(cleanupFinishedLobbies, FINISHED_LOBBY_SWEEP_INTERVAL_MS);
 
 // Generate unique player ID from username, handling conflicts
 function getUniquePlayerId(username: string, socketId: string): string {
@@ -312,6 +486,55 @@ io.on('connection', socket => {
     handleLogin(socket, data);
   });
 
+  socket.on('createLobby', (data: { playerCount: number; name?: string }, callback?: (response: any) => void) => {
+    console.log('Received createLobby event from socket:', socket.id, 'playerCount:', data?.playerCount);
+    handleCreateLobby(socket, data, callback);
+  });
+
+  socket.on('joinLobby', (data: { lobbyId: string }, callback?: (response: any) => void) => {
+    console.log('Received joinLobby event from socket:', socket.id, 'lobbyId:', data?.lobbyId);
+    handleJoinLobby(socket, data, callback);
+  });
+
+  socket.on('leaveLobby', (data: { lobbyId: string }, callback?: (response: any) => void) => {
+    console.log('Received leaveLobby event from socket:', socket.id, 'lobbyId:', data?.lobbyId);
+    handleLeaveLobby(socket, data, callback);
+  });
+
+  socket.on('kickPlayer', (data: { lobbyId: string; targetPlayerId: string }, callback?: (response: any) => void) => {
+    console.log('Received kickPlayer event from socket:', socket.id, 'lobbyId:', data?.lobbyId, 'target:', data?.targetPlayerId);
+    handleKickPlayer(socket, data, callback);
+  });
+
+  socket.on('updateLobbySize', (data: { lobbyId: string; playerCount: number }, callback?: (response: any) => void) => {
+    console.log('Received updateLobbySize event from socket:', socket.id, 'lobbyId:', data?.lobbyId, 'playerCount:', data?.playerCount);
+    handleUpdateLobbySize(socket, data, callback);
+  });
+
+  socket.on('updateLobbyName', (data: { lobbyId: string; name: string }, callback?: (response: any) => void) => {
+    console.log('Received updateLobbyName event from socket:', socket.id, 'lobbyId:', data?.lobbyId, 'name:', data?.name);
+    handleUpdateLobbyName(socket, data, callback);
+  });
+
+  socket.on('listLobbies', () => {
+    console.log('Received listLobbies request from socket:', socket.id);
+    handleListLobbies(socket);
+  });
+
+  socket.on('startLobbyGame', (data: { lobbyId: string }, callback?: (response: any) => void) => {
+    console.log('Received startLobbyGame event from socket:', socket.id, 'lobbyId:', data?.lobbyId);
+    handleStartLobbyGame(socket, data, callback).catch(error => {
+      console.error('Error starting lobby game:', error);
+      if (callback) callback({ error: 'Failed to start game' });
+      socket.emit('error', { message: 'Failed to start game' });
+    });
+  });
+
+  socket.on('restartGame', () => {
+    console.log('Received restartGame event from socket:', socket.id);
+    handleRestartGame(socket);
+  });
+
   socket.on('getConnectedPlayers', () => {
     console.log('Received getConnectedPlayers request from socket:', socket.id);
     // Send current connected players to this specific client
@@ -323,70 +546,47 @@ io.on('connection', socket => {
     socket.emit('connectedPlayers', playersIdAndName);
   });
 
-  socket.on('startGame', () => {
-    console.log('Received startGame event from socket:', socket.id);
-    requestedPlayerCount = 2; // Default to 2-player game
-    handleStartGame().catch(error => {
-      console.error('Error starting game:', error);
-    });
-  });
+  // NOTE: Old startGame/startGameWithPlayerCount/restartGame handlers removed.
+  // Use lobby system instead: createLobby -> joinLobby -> startLobbyGame.
 
-  socket.on('startGameWithPlayerCount', (data: { playerCount: number }) => {
-    console.log('Received startGameWithPlayerCount event from socket:', socket.id, 'playerCount:', data?.playerCount);
-    const playerCount = data?.playerCount;
-    if (!playerCount || playerCount < 2 || playerCount > 4) {
-      console.error('Invalid player count:', playerCount);
-      socket.emit('error', { message: 'Player count must be between 2 and 4' });
-      return;
-    }
-    requestedPlayerCount = playerCount;
-    handleStartGame().catch(error => {
-      console.error('Error starting game:', error);
-    });
-  });
-
-  socket.on('restartGame', () => {
-    console.log('Received restartGame event from socket:', socket.id);
-    handleRestartGame().catch(error => {
-      console.error('Error restarting game:', error);
-    });
-  });
-
-  socket.on('playAgain', () => {
-    const playerId = socketIdToPlayerId.get(socket.id);
-    if (!playerId) {
-      console.error('Player ID not found for socket:', socket.id);
-      return;
-    }
-    console.log(`Player ${playerId} voted to play again.`);
-    playAgainVotes.add(playerId);
-
-    if (playAgainVotes.size === connectedPlayers.size) {
-      console.log('All players voted to play again. Starting a new game.');
-      playAgainVotes.clear();
-      handleStartGame().catch(error => {
-        console.error('Error starting new game:', error);
-      });
-    } else {
-      io.emit('playAgainVotes', Array.from(playAgainVotes));
-    }
-  });
+  // NOTE: playAgain handler removed - use lobby system for rematch.
 
   socket.on('disconnect', (reason) => {
     console.log(`A socket disconnected: ${socket.id}, Reason: ${reason}`);
-    // only remove the player if the game loop is not running
-    if (!gameLoop) {
-      const playerId = socketIdToPlayerId.get(socket.id);
-      if (playerId) {
+    const playerId = socketIdToPlayerId.get(socket.id);
+    
+    if (playerId) {
+      // If player is in a lobby, remove them and handle cleanup
+      const lobbyId = lobbyIdByPlayerId.get(playerId);
+      if (lobbyId) {
+        const lobby = lobbiesById.get(lobbyId);
+        if (lobby) {
+          if (lobby.status === 'waiting') {
+            // For waiting lobbies, don't remove players immediately on disconnect
+            // They can reconnect and resume. Only remove if they explicitly leave or are kicked.
+            // Keep the lobbyIdByPlayerId mapping so handleLogin can restore them
+            console.log(`Player ${playerId} disconnected from waiting lobby ${lobby.name} - keeping lobby membership for reconnection`);
+            // Don't remove from lobby or delete mapping - let them reconnect
+          } else if (lobby.status === 'in_progress') {
+            console.log(`Player ${playerId} disconnected during an active game in lobby ${lobby.name}`);
+            handlePlayerInGameDisconnect(lobby, playerId);
+          }
+        }
+      }
+      
+      // Only remove the player if they are not part of an active lobby game
+      const playerLobbyId = lobbyIdByPlayerId.get(playerId);
+      const playerInActiveGame = playerLobbyId ? gameLoopsByLobbyId.has(playerLobbyId) : false;
+      if (!playerInActiveGame) {
         connectedPlayers.delete(playerId);
         playerIdToSocketId.delete(playerId);
         socketIdToPlayerId.delete(socket.id);
         console.log(`Removed player ${playerId} (socket ${socket.id})`);
+        // send updated connected players to all clients
+        emitConnectedPlayers();
+      } else {
+        console.log('Player is part of an active game. Keeping player record for reconnection.');
       }
-      // send updated connected players to all clients
-      emitConnectedPlayers();
-    } else {
-      console.log('Game loop is already running. Not removing player.');
     }
   });
 
@@ -398,6 +598,617 @@ io.on('connection', socket => {
 // Generate a secure random secret key
 function generateSecretKey(): string {
   return `${Date.now()}-${Math.random().toString(36).substring(2, 15)}-${Math.random().toString(36).substring(2, 15)}`;
+}
+
+function handleJoinLobby(socket: Socket, data: { lobbyId: string }, callback?: (response: any) => void): void {
+  const playerId = socketIdToPlayerId.get(socket.id);
+  if (!playerId) {
+    console.error('Player ID not found for socket:', socket.id);
+    const error = { error: 'Not logged in' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Not logged in' });
+    return;
+  }
+
+  const { lobbyId } = data;
+
+  // Check if player is already in a lobby
+  if (lobbyIdByPlayerId.has(playerId)) {
+    console.error('Player already in a lobby:', playerId);
+    const error = { error: 'Already in a lobby' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Already in a lobby' });
+    return;
+  }
+
+  // Check if lobby exists
+  const lobby = lobbiesById.get(lobbyId);
+  if (!lobby) {
+    console.error('Lobby not found:', lobbyId);
+    const error = { error: 'Lobby not found' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Lobby not found' });
+    return;
+  }
+
+  // Check if lobby is waiting
+  if (lobby.status !== 'waiting') {
+    console.error('Lobby not waiting:', lobbyId, 'status:', lobby.status);
+    const error = { error: 'Lobby is not accepting new players' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Lobby is not accepting new players' });
+    return;
+  }
+
+  // Check if lobby is full
+  if (lobby.players.length >= lobby.playerCount) {
+    console.error('Lobby is full:', lobbyId);
+    const error = { error: 'Lobby is full' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Lobby is full' });
+    return;
+  }
+
+  const playerInfo = connectedPlayers.get(playerId);
+  const playerDisplayName = playerInfo?.name || 'Unknown';
+
+  // Add player to lobby
+  lobby.players.push({ playerId, displayName: playerDisplayName });
+  lobbyIdByPlayerId.set(playerId, lobbyId);
+  socket.join(lobbyId);
+  if (lobby.disconnectedPlayerIds.length) {
+    lobby.disconnectedPlayerIds = lobby.disconnectedPlayerIds.filter(id => id !== playerId);
+  }
+
+  console.log(`Player ${playerDisplayName} joined lobby ${lobby.name} (${lobbyId})`);
+
+  // Send callback response
+  if (callback) {
+    callback({ lobby });
+  }
+
+  // Broadcast update to all clients
+  io.emit('lobbyUpdated', lobby);
+}
+
+function handleLeaveLobby(socket: Socket, data: { lobbyId: string }, callback?: (response: any) => void): void {
+  const playerId = socketIdToPlayerId.get(socket.id);
+  if (!playerId) {
+    console.error('Player ID not found for socket:', socket.id);
+    const error = { error: 'Not logged in' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Not logged in' });
+    return;
+  }
+
+  const { lobbyId } = data;
+
+  // Check if lobby exists
+  const lobby = lobbiesById.get(lobbyId);
+  if (!lobby) {
+    console.error('Lobby not found:', lobbyId);
+    const error = { error: 'Lobby not found' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Lobby not found' });
+    return;
+  }
+
+  // Check if player is in this lobby
+  const playerIndex = lobby.players.findIndex(p => p.playerId === playerId);
+  if (playerIndex === -1) {
+    console.error('Player not in lobby:', playerId, lobbyId);
+    const error = { error: 'You are not in this lobby' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'You are not in this lobby' });
+    return;
+  }
+
+  // Remove player from lobby
+  lobby.players.splice(playerIndex, 1);
+  lobbyIdByPlayerId.delete(playerId);
+  lobby.disconnectedPlayerIds = lobby.disconnectedPlayerIds.filter(id => id !== playerId);
+  socket.leave(lobbyId);
+
+  const playerInfo = connectedPlayers.get(playerId);
+  const playerDisplayName = playerInfo?.name || 'Unknown';
+  console.log(`Player ${playerDisplayName} left lobby ${lobby.name} (${lobbyId})`);
+
+  // Send callback response
+  if (callback) {
+    callback({ success: true });
+  }
+
+  // If host left and others remain, transfer host
+  if (playerId === lobby.hostId && lobby.players.length > 0) {
+    const newHostId = lobby.players[0].playerId;
+    lobby.hostId = newHostId;
+    console.log(`Host transferred to ${lobby.players[0].displayName} in lobby ${lobby.name}`);
+  }
+
+  // If lobby is empty, mark as finished
+  if (lobby.players.length === 0) {
+    lobby.status = 'finished';
+    lobby.finishedAt = Date.now();
+    lobby.disconnectedPlayerIds = [];
+    console.log(`Lobby ${lobby.name} is now empty, marking as finished`);
+    io.emit('lobbyClosed', { lobbyId });
+    return;
+  }
+
+  // Broadcast update to all clients
+  io.emit('lobbyUpdated', lobby);
+}
+
+function handleKickPlayer(socket: Socket, data: { lobbyId: string; targetPlayerId: string }, callback?: (response: any) => void): void {
+  const playerId = socketIdToPlayerId.get(socket.id);
+  if (!playerId) {
+    console.error('Player ID not found for socket:', socket.id);
+    const error = { error: 'Not logged in' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Not logged in' });
+    return;
+  }
+
+  const { lobbyId, targetPlayerId } = data;
+
+  // Check if lobby exists
+  const lobby = lobbiesById.get(lobbyId);
+  if (!lobby) {
+    console.error('Lobby not found:', lobbyId);
+    const error = { error: 'Lobby not found' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Lobby not found' });
+    return;
+  }
+
+  // Check if player is host
+  if (playerId !== lobby.hostId) {
+    console.error('Not the host:', playerId, 'actual host:', lobby.hostId);
+    const error = { error: 'Only the host can kick players' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Only the host can kick players' });
+    return;
+  }
+
+  // Check if target is in this lobby
+  const targetIndex = lobby.players.findIndex(p => p.playerId === targetPlayerId);
+  if (targetIndex === -1) {
+    console.error('Target player not in lobby:', targetPlayerId, lobbyId);
+    const error = { error: 'Player not in this lobby' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Player not in this lobby' });
+    return;
+  }
+
+  const targetPlayerName = lobby.players[targetIndex].displayName;
+
+  // Remove target from lobby
+  lobby.players.splice(targetIndex, 1);
+  lobbyIdByPlayerId.delete(targetPlayerId);
+  lobby.disconnectedPlayerIds = lobby.disconnectedPlayerIds.filter(id => id !== targetPlayerId);
+
+  console.log(`Player ${targetPlayerName} was kicked from lobby ${lobby.name} (${lobbyId}) by host ${playerId}`);
+
+  // Send callback response
+  if (callback) {
+    callback({ success: true });
+  }
+
+  // Notify the kicked player
+  const targetSocketId = playerIdToSocketId.get(targetPlayerId);
+  if (targetSocketId) {
+    const targetSocket = io.sockets.sockets.get(targetSocketId);
+    targetSocket?.leave(lobbyId);
+    io.to(targetSocketId).emit('kickedFromLobby', { lobbyId, reason: 'You were kicked by the host' });
+  }
+
+  // If lobby is now empty, mark as finished
+  if (lobby.players.length === 0) {
+    lobby.status = 'finished';
+    lobby.finishedAt = Date.now();
+    lobby.disconnectedPlayerIds = [];
+    console.log(`Lobby ${lobby.name} is now empty, marking as finished`);
+    io.emit('lobbyClosed', { lobbyId });
+    return;
+  }
+
+  // Broadcast update to all clients
+  io.emit('lobbyUpdated', lobby);
+}
+
+function handleUpdateLobbySize(socket: Socket, data: { lobbyId: string; playerCount: number }, callback?: (response: any) => void): void {
+  const playerId = socketIdToPlayerId.get(socket.id);
+  if (!playerId) {
+    console.error('Player ID not found for socket:', socket.id);
+    const error = { error: 'Not logged in' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Not logged in' });
+    return;
+  }
+
+  const { lobbyId, playerCount } = data;
+
+  // Validate player count
+  if (!playerCount || playerCount < 2 || playerCount > 4) {
+    const error = { error: 'Player count must be between 2 and 4' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Player count must be between 2 and 4' });
+    return;
+  }
+
+  // Check if lobby exists
+  const lobby = lobbiesById.get(lobbyId);
+  if (!lobby) {
+    const error = { error: 'Lobby not found' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Lobby not found' });
+    return;
+  }
+
+  // Check if player is host
+  if (playerId !== lobby.hostId) {
+    const error = { error: 'Only the host can change lobby size' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Only the host can change lobby size' });
+    return;
+  }
+
+  // Check if lobby is still waiting
+  if (lobby.status !== 'waiting') {
+    const error = { error: 'Cannot change size after game has started' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Cannot change size after game has started' });
+    return;
+  }
+
+  // Update the player count
+  lobby.playerCount = playerCount;
+  console.log(`Lobby ${lobby.name} size updated to ${playerCount} by host ${playerId}`);
+
+  // Send callback response
+  if (callback) {
+    callback({ lobby });
+  }
+
+  // Broadcast update to all clients
+  io.emit('lobbyUpdated', lobby);
+}
+
+function handleUpdateLobbyName(socket: Socket, data: { lobbyId: string; name: string }, callback?: (response: any) => void): void {
+  const playerId = socketIdToPlayerId.get(socket.id);
+  if (!playerId) {
+    console.error('Player ID not found for socket:', socket.id);
+    const error = { error: 'Not logged in' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Not logged in' });
+    return;
+  }
+
+  const { lobbyId, name } = data;
+
+  // Validate name
+  const trimmedName = name?.trim();
+  if (!trimmedName || trimmedName.length === 0) {
+    const error = { error: 'Lobby name cannot be empty' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Lobby name cannot be empty' });
+    return;
+  }
+
+  if (trimmedName.length > 50) {
+    const error = { error: 'Lobby name must be 50 characters or less' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Lobby name must be 50 characters or less' });
+    return;
+  }
+
+  // Check if lobby exists
+  const lobby = lobbiesById.get(lobbyId);
+  if (!lobby) {
+    const error = { error: 'Lobby not found' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Lobby not found' });
+    return;
+  }
+
+  // Check if player is host
+  if (playerId !== lobby.hostId) {
+    const error = { error: 'Only the host can change lobby name' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Only the host can change lobby name' });
+    return;
+  }
+
+  // Check if lobby is still waiting
+  if (lobby.status !== 'waiting') {
+    const error = { error: 'Cannot change name after game has started' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Cannot change name after game has started' });
+    return;
+  }
+
+  // Update the lobby name
+  lobby.name = trimmedName;
+  console.log(`Lobby ${lobbyId} name updated to "${trimmedName}" by host ${playerId}`);
+
+  // Send callback response
+  if (callback) {
+    callback({ lobby });
+  }
+
+  // Broadcast update to all clients
+  io.emit('lobbyUpdated', lobby);
+}
+
+function handleListLobbies(socket: Socket): void {
+  const waitingLobbies = Array.from(lobbiesById.values())
+    .filter(lobby => lobby.status === 'waiting')
+    .map(lobby => {
+      const hostPlayerInfo = connectedPlayers.get(lobby.hostId);
+      const hostDisplayName = hostPlayerInfo?.name || 'Unknown';
+      return {
+        id: lobby.id,
+        name: lobby.name,
+        hostDisplayName,
+        currentPlayers: lobby.players.length,
+        playerCount: lobby.playerCount,
+        createdAt: lobby.createdAt,
+      };
+    });
+
+  console.log(`Sending ${waitingLobbies.length} waiting lobbies to client`);
+  socket.emit('lobbyList', { lobbies: waitingLobbies });
+}
+
+async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, callback?: (response: any) => void): Promise<void> {
+  const playerId = socketIdToPlayerId.get(socket.id);
+  if (!playerId) {
+    console.error('Player ID not found for socket:', socket.id);
+    const errorMsg = 'Not logged in';
+    socket.emit('error', { message: errorMsg });
+    if (callback) {
+      callback({ error: errorMsg });
+    }
+    return;
+  }
+
+  const { lobbyId } = data;
+
+  // Check if lobby exists
+  const lobby = lobbiesById.get(lobbyId);
+  if (!lobby) {
+    console.error('Lobby not found:', lobbyId);
+    const errorMsg = 'Lobby not found';
+    socket.emit('error', { message: errorMsg });
+    if (callback) {
+      callback({ error: errorMsg });
+    }
+    return;
+  }
+
+  // Check if player is host
+  if (playerId !== lobby.hostId) {
+    console.error('Not the host:', playerId, 'actual host:', lobby.hostId);
+    const errorMsg = 'Only the host can start the game';
+    socket.emit('error', { message: errorMsg });
+    if (callback) {
+      callback({ error: errorMsg });
+    }
+    return;
+  }
+
+  // Check if lobby is waiting
+  if (lobby.status !== 'waiting') {
+    console.error('Lobby not waiting:', lobbyId, 'status:', lobby.status);
+    const errorMsg = 'Lobby is not in waiting state';
+    socket.emit('error', { message: errorMsg });
+    if (callback) {
+      callback({ error: errorMsg });
+    }
+    return;
+  }
+
+  // Check if a game is already running for this lobby
+  if (gameLoopsByLobbyId.has(lobby.id)) {
+    console.error(`Game loop already exists for lobby ${lobby.id}. Cannot start new game.`);
+    const errorMsg = 'A game is already in progress for this lobby';
+    socket.emit('error', { message: errorMsg });
+    if (callback) {
+      callback({ error: errorMsg });
+    }
+    return;
+  }
+
+  // Clean up any existing bots before creating new ones
+  cleanupBots(lobby.id);
+
+  // Build playersInfo from lobby members (humans only, no bots yet)
+  const playersInfo: PlayerIdAndName[] = lobby.players.map(p => ({ id: p.playerId, name: p.displayName }));
+
+  // Calculate bots needed
+  const botsNeeded = Math.max(0, lobby.playerCount - playersInfo.length);
+  console.log(`Starting lobby game: ${lobby.name} with ${playersInfo.length} humans and ${botsNeeded} bots needed`);
+
+  // Create bots
+  const botNames = ['Bot Alex', 'Bot Morgan', 'Bot Jordan'];
+  const newBotIds: string[] = [];
+  for (let i = 0; i < botsNeeded; i++) {
+    const botName = botNames[i] || `Bot ${i + 1}`;
+    const botAgent = new ExhaustiveSimpleAgent();
+    const botId = `${botAgent.playerId}-${Date.now()}-${i}`;
+    playersInfo.push({ id: botId, name: botName });
+    const botPlayerInfo: PlayerInfo = {
+      id: botId,
+      name: botName,
+      agent: botAgent,
+    };
+    connectedPlayers.set(botId, botPlayerInfo);
+    newBotIds.push(botId);
+    console.log(`Added bot: ${botName} (ID: ${botId})`);
+  }
+
+  // Create GameLoop using players from the lobby
+  const agents: Map<string, GameAgent> = new Map();
+  // Populate human agents
+  lobby.players.forEach(p => {
+    const info = connectedPlayers.get(p.playerId);
+    if (info) agents.set(info.id, info.agent);
+  });
+  // Populate bot agents
+  newBotIds.forEach(id => {
+    const info = connectedPlayers.get(id);
+    if (info) agents.set(info.id, info.agent);
+  });
+
+  // Store bot IDs for cleanup after game ends
+  currentGameBotIdsByLobbyId.set(lobby.id, newBotIds);
+
+  const gameLoop = new GameLoop(playersInfo);
+  agents.forEach((agent, id) => gameLoop.addAgent(id, agent));
+  gameLoopsByLobbyId.set(lobby.id, gameLoop);
+  currentRoundGameEventsByLobbyId.set(lobby.id, []);
+
+  // Set up gameSnapshot listener to send redacted snapshots to all clients
+  let firstSnapshotEmitted = false;
+  gameLoop.on('gameSnapshot', (newSnapshot: GameSnapshot) => {
+    mostRecentGameSnapshotByLobbyId.set(lobby.id, newSnapshot);
+    sendGameEventToDB(newSnapshot.gameEvent);
+    const existingEvents = currentRoundGameEventsByLobbyId.get(lobby.id) || [];
+    let updatedEvents = [...existingEvents, newSnapshot.gameEvent];
+    if (newSnapshot.gameEvent.actionType === ActionType.START_ROUND) {
+      updatedEvents = [];
+    }
+    currentRoundGameEventsByLobbyId.set(lobby.id, updatedEvents);
+    
+    // Send redacted snapshots to all players
+    sendRedactedSnapshotToAllPlayers(gameLoop, newSnapshot, updatedEvents, lobby.id);
+    
+    // After the first snapshot, ensure all clients received it by re-emitting
+    // This helps clients that reset state after gameStartedFromLobby
+    if (!firstSnapshotEmitted) {
+      firstSnapshotEmitted = true;
+      // Small delay to ensure clients have processed gameStartedFromLobby and set up listeners
+      setTimeout(() => {
+        const latestSnapshot = mostRecentGameSnapshotByLobbyId.get(lobby.id);
+        const latestEvents = currentRoundGameEventsByLobbyId.get(lobby.id) || [];
+        if (latestSnapshot === newSnapshot) {
+          console.log('Re-emitting first game snapshot to ensure all clients received it');
+          sendRedactedSnapshotToAllPlayers(gameLoop, latestSnapshot, latestEvents, lobby.id);
+        }
+      }, 100);
+    }
+  });
+
+  // Map lobby -> game
+  const gameId = gameLoop.cribbageGame.getGameState().id;
+  gameIdByLobbyId.set(lobby.id, gameId);
+
+  // Update lobby status and broadcast updates
+  lobby.status = 'in_progress';
+  lobby.finishedAt = null;
+  lobby.disconnectedPlayerIds = [];
+  io.emit('lobbyUpdated', lobby);
+
+  // Persist game start info
+  startGameInDB(gameId, playersInfo, lobby.id);
+
+  // Notify lobby members of the game start
+  // Note: Don't emit gameReset here - that's only for restart
+  // Just emit gameStartedFromLobby to notify clients
+  io.emit('gameStartedFromLobby', { lobbyId: lobby.id, gameId, players: playersInfo });
+
+  // Call callback if provided
+  if (callback) {
+    callback({ success: true, gameId });
+  }
+
+  // Start the game loop (this will emit snapshots as the game progresses)
+  // Don't await - let it run in the background
+  startGame(lobby.id).catch(error => {
+    console.error('[handleStartLobbyGame] Error in game loop:', error);
+  });
+}
+
+function handleCreateLobby(socket: Socket, data: { playerCount: number; name?: string }, callback?: (response: any) => void): void {
+  const playerId = socketIdToPlayerId.get(socket.id);
+  console.log(`[handleCreateLobby] Starting for player: ${playerId}, callback present: ${!!callback}`);
+  
+  if (!playerId) {
+    console.error('Player ID not found for socket:', socket.id);
+    const error = { error: 'Not logged in' };
+    if (callback) {
+      console.log('[handleCreateLobby] Sending error callback: Not logged in');
+      callback(error);
+    }
+    socket.emit('error', { message: 'Not logged in' });
+    return;
+  }
+
+  // Check if player is already in a lobby
+  if (lobbyIdByPlayerId.has(playerId)) {
+    const existingLobbyId = lobbyIdByPlayerId.get(playerId);
+    console.error(`[handleCreateLobby] Player ${playerId} already in lobby ${existingLobbyId}`);
+    const error = { error: 'Already in a lobby' };
+    if (callback) {
+      console.log('[handleCreateLobby] Sending error callback: Already in a lobby');
+      callback(error);
+    }
+    socket.emit('error', { message: 'Already in a lobby' });
+    return;
+  }
+
+  const { playerCount, name: customName } = data;
+
+  // Validate player count
+  if (!playerCount || playerCount < 2 || playerCount > 4) {
+    console.error('Invalid player count:', playerCount);
+    const error = { error: 'Player count must be between 2 and 4' };
+    if (callback) callback(error);
+    socket.emit('error', { message: 'Player count must be between 2 and 4' });
+    return;
+  }
+
+  // Get player info for host display name
+  const playerInfo = connectedPlayers.get(playerId);
+  const hostDisplayName = playerInfo?.name || 'Unknown';
+
+  // Generate lobby name (either custom or default to "<host's name>'s lobby")
+  const lobbyName = customName?.trim() || `${hostDisplayName}'s lobby`;
+
+  // Create the lobby
+  const lobbyId = uuidv4();
+
+  const lobby: Lobby = {
+    id: lobbyId,
+    name: lobbyName,
+    hostId: playerId,
+    playerCount,
+    players: [{ playerId, displayName: hostDisplayName }],
+    status: 'waiting',
+    createdAt: Date.now(),
+    finishedAt: null,
+    disconnectedPlayerIds: [],
+  };
+
+  lobbiesById.set(lobbyId, lobby);
+  lobbyIdByPlayerId.set(playerId, lobbyId);
+  socket.join(lobbyId);
+
+  console.log(`[handleCreateLobby] Lobby created: ${lobbyName} (${lobbyId}) by ${hostDisplayName}`);
+
+  // Send callback response with the created lobby
+  if (callback) {
+    console.log('[handleCreateLobby] Sending success callback with lobby:', lobbyId);
+    callback({ lobby });
+  } else {
+    console.error('[handleCreateLobby] WARNING: No callback provided!');
+  }
+
+  // Broadcast the new lobby to all clients
+  io.emit('lobbyUpdated', lobby);
+
+  // Also send direct confirmation to the creator
+  socket.emit('lobbyCreated', { lobbyId, name: lobbyName });
 }
 
 function handleLogin(socket: Socket, data: LoginData): void {
@@ -508,6 +1319,72 @@ function handleLogin(socket: Socket, data: LoginData): void {
   socketIdToPlayerId.set(socket.id, playerId);
   connectedPlayers.set(playerId, playerInfo);
 
+  // Restore lobby membership if player was in a lobby before disconnect
+  // Check both lobbyIdByPlayerId (for in-progress games) and search all lobbies (for waiting lobbies)
+  let reconnectLobbyId = lobbyIdByPlayerId.get(playerId);
+  let reconnectLobby = reconnectLobbyId ? lobbiesById.get(reconnectLobbyId) : null;
+  
+  // If not found in lobbyIdByPlayerId, search all lobbies for this player
+  // This handles the case where player was removed from lobbyIdByPlayerId on disconnect
+  // but the lobby still exists (waiting lobbies)
+  if (!reconnectLobby) {
+    for (const [lobbyId, lobby] of lobbiesById.entries()) {
+      if (lobby.players.some(p => p.playerId === playerId)) {
+        reconnectLobbyId = lobbyId;
+        reconnectLobby = lobby;
+        // Restore the mapping
+        lobbyIdByPlayerId.set(playerId, lobbyId);
+        break;
+      }
+    }
+  }
+  
+  if (reconnectLobbyId && reconnectLobby) {
+    // Restore player to lobby if they were disconnected
+    if (reconnectLobby.disconnectedPlayerIds.includes(playerId)) {
+      clearPlayerDisconnectTimer(playerId);
+      reconnectLobby.disconnectedPlayerIds = reconnectLobby.disconnectedPlayerIds.filter(id => id !== playerId);
+    }
+    
+    // Ensure player is in the players array (in case they were removed on disconnect)
+    const playerInLobby = reconnectLobby.players.some(p => p.playerId === playerId);
+    if (!playerInLobby) {
+      reconnectLobby.players.push({
+        playerId,
+        displayName: name,
+      });
+      console.log(`Restored player ${name} to lobby ${reconnectLobby.name}`);
+    }
+    
+    // Update lobby status if it was marked as finished but now has players again
+    // BUT: Keep it as 'finished' if a game has finished (allows restart)
+    // Only change to 'waiting' if the lobby was empty and now has players (no game was running)
+    const hasActiveGame = gameLoopsByLobbyId.has(reconnectLobbyId);
+    const hasGameSnapshot = mostRecentGameSnapshotByLobbyId.has(reconnectLobbyId);
+    const gameWasFinished = reconnectLobby.status === 'finished' && (hasGameSnapshot || reconnectLobby.finishedAt);
+    
+    if (reconnectLobby.status === 'finished' && reconnectLobby.players.length > 0 && !gameWasFinished) {
+      // Lobby was empty and marked finished, but now has players - restore to waiting
+      reconnectLobby.status = 'waiting';
+      reconnectLobby.finishedAt = null;
+      console.log(`Restored lobby ${reconnectLobby.name} to waiting status (was empty, now has players)`);
+    } else if (gameWasFinished) {
+      // Game finished - keep status as 'finished' to allow restart
+      console.log(`Lobby ${reconnectLobby.name} has finished game - keeping 'finished' status to allow restart`);
+    }
+    
+    socket.join(reconnectLobbyId);
+    io.emit('lobbyUpdated', reconnectLobby);
+    io.emit('playerReconnectedToLobby', {
+      lobbyId: reconnectLobbyId,
+      playerId,
+    });
+  }
+  
+  // NOTE: We intentionally retain lobby membership across reconnects so
+  // players in in-progress games can resume seamlessly. handleLogin will
+  // clear any disconnected flags and sync the latest state to the client.
+
   console.log('emitting loggedIn event to client:', playerId);
   const loggedInData: PlayerIdAndName & { secretKey: string } = {
     id: playerId,
@@ -517,10 +1394,8 @@ function handleLogin(socket: Socket, data: LoginData): void {
   socket.emit('loggedIn', loggedInData);
   emitConnectedPlayers();
   
-  // if the game loop is running, send the most recent game data to the client
-  if (gameLoop) {
-    sendMostRecentGameData(socket);
-  }
+  // if the game loop is running for this player, send the most recent game data to the client
+  sendMostRecentGameData(socket);
 }
 
 // create function that emits the current connected players to all clients
@@ -540,200 +1415,214 @@ function emitConnectedPlayers(): void {
   // }
 }
 
-async function handleStartGame(): Promise<void> {
-  // If gameLoop exists, check if game is over (Phase.END)
-  // If game is over, clear it to allow starting a new game
-  if (gameLoop) {
-    const gameState = gameLoop.cribbageGame.getGameState();
-    if (gameState.currentPhase === Phase.END) {
-      console.log('Game is over. Clearing game loop to start a new game.');
-      gameLoop.removeAllListeners();
-      gameLoop = null;
-    } else {
-      // Game is already running - silently ignore duplicate startGame requests
-      // This can happen during restart when client sends startGame after server already started it
-      console.log('Game loop already running. Ignoring duplicate startGame request.');
-      return;
-    }
-  }
-  
-  console.log(`Starting game... (requested player count: ${requestedPlayerCount})`);
-  
-  // Validate requested player count
-  if (requestedPlayerCount < 2 || requestedPlayerCount > 4) {
-    console.error(`Invalid player count: ${requestedPlayerCount}. Must be between 2 and 4.`);
+function emitToLobbyPlayers(lobbyId: string, event: string, payload?: unknown): void {
+  io.to(lobbyId).emit(event, payload);
+}
+
+function handleRestartGame(socket: Socket): void {
+  const playerId = socketIdToPlayerId.get(socket.id);
+  if (!playerId) {
+    console.error('Player ID not found for socket:', socket.id);
+    socket.emit('error', { message: 'Not logged in' });
     return;
   }
-  
-  // Add bots to fill empty seats
-  const botsNeeded = Math.max(0, requestedPlayerCount - connectedPlayers.size);
-  console.log(`Current players: ${connectedPlayers.size}, Bots needed: ${botsNeeded}`);
-  
-  // Friendly bot names with "Bot " prefix
-  const botNames = [
-    'Bot Alex',
-    'Bot Morgan',
-    'Bot Jordan',
-  ];
-  
+
+  // Get the lobby this player is in
+  const lobbyId = lobbyIdByPlayerId.get(playerId);
+  if (!lobbyId) {
+    console.error('Player not in a lobby:', playerId);
+    socket.emit('error', { message: 'Not in a lobby' });
+    return;
+  }
+
+  const lobby = lobbiesById.get(lobbyId);
+  if (!lobby) {
+    console.error('Lobby not found:', lobbyId);
+    socket.emit('error', { message: 'Lobby not found' });
+    return;
+  }
+
+  // Only allow the host to restart the game
+  if (playerId !== lobby.hostId) {
+    console.error('Cannot restart game - player is not the host:', playerId, 'host:', lobby.hostId);
+    socket.emit('error', { message: 'Only the host can restart the game' });
+    return;
+  }
+
+  // Check if the game is finished (not in progress)
+  if (lobby.status !== 'in_progress' && lobby.status !== 'finished') {
+    console.error('Cannot restart game - lobby is not in progress:', lobbyId);
+    socket.emit('error', { message: 'Game is not in progress' });
+    return;
+  }
+
+  console.log(`Restarting game for lobby: ${lobby.name} (${lobbyId})`);
+
+  // Cancel current game loop and clear artifacts
+  clearActiveGameArtifacts(lobbyId);
+
+  // Emit gameReset to clear client state
+  emitToLobbyPlayers(lobby.id, 'gameReset');
+
+  // Immediately start a new game with the same lobby/players
+  // Reuse the logic from handleStartLobbyGame but without the waiting status check
+  // Clean up any existing bots before creating new ones
+  cleanupBots(lobby.id);
+
+  // Build playersInfo from lobby members (humans only, no bots yet)
+  const playersInfo: PlayerIdAndName[] = lobby.players.map(p => ({ id: p.playerId, name: p.displayName }));
+
+  // Calculate bots needed
+  const botsNeeded = Math.max(0, lobby.playerCount - playersInfo.length);
+  console.log(`Restarting lobby game: ${lobby.name} with ${playersInfo.length} humans and ${botsNeeded} bots needed`);
+
+  // Create bots
+  const botNames = ['Bot Alex', 'Bot Morgan', 'Bot Jordan'];
+  const newBotIds: string[] = [];
   for (let i = 0; i < botsNeeded; i++) {
     const botName = botNames[i] || `Bot ${i + 1}`;
     const botAgent = new ExhaustiveSimpleAgent();
-    // Create unique bot ID by appending timestamp and counter to avoid collisions
     const botId = `${botAgent.playerId}-${Date.now()}-${i}`;
+    playersInfo.push({ id: botId, name: botName });
     const botPlayerInfo: PlayerInfo = {
       id: botId,
       name: botName,
       agent: botAgent,
     };
     connectedPlayers.set(botId, botPlayerInfo);
+    newBotIds.push(botId);
     console.log(`Added bot: ${botName} (ID: ${botId})`);
   }
 
-  if (connectedPlayers.size < requestedPlayerCount) {
-    console.log(`Not enough players to start the game. Expected ${requestedPlayerCount}, got ${connectedPlayers.size}.`);
-    return;
-  }
-  
-  if (connectedPlayers.size > requestedPlayerCount) {
-    console.log(`Warning: More players than requested. Expected ${requestedPlayerCount}, got ${connectedPlayers.size}. Game will proceed with all players.`);
-  }
-
-  const playersIdAndName: PlayerIdAndName[] = [];
+  // Create GameLoop using players from the lobby
   const agents: Map<string, GameAgent> = new Map();
-
-  connectedPlayers.forEach(playerInfo => {
-    playersIdAndName.push({ id: playerInfo.id, name: playerInfo.name });
-    agents.set(playerInfo.id, playerInfo.agent);
+  // Populate human agents
+  lobby.players.forEach(p => {
+    const info = connectedPlayers.get(p.playerId);
+    if (info) agents.set(info.id, info.agent);
+  });
+  // Populate bot agents
+  newBotIds.forEach(id => {
+    const info = connectedPlayers.get(id);
+    if (info) agents.set(info.id, info.agent);
   });
 
-  gameLoop = new GameLoop(playersIdAndName);
+  // Store bot IDs for cleanup after game ends
+  currentGameBotIdsByLobbyId.set(lobby.id, newBotIds);
 
-  agents.forEach((agent, id) => {
-    if (gameLoop) {
-      gameLoop.addAgent(id, agent);
-    } else {
-      console.error(
-        '[handleStartGame()] Game loop not initialized. Cannot add agent and start game.'
-      );
-      throw new Error('Game loop not initialized');
-    }
-  });
+  const gameLoop = new GameLoop(playersInfo);
+  agents.forEach((agent, id) => gameLoop.addAgent(id, agent));
+  gameLoopsByLobbyId.set(lobby.id, gameLoop);
+  currentRoundGameEventsByLobbyId.set(lobby.id, []);
 
-  // Emit game state changes with redaction per player
+  // Set up gameSnapshot listener to send redacted snapshots to all clients
+  let firstSnapshotEmitted = false;
   gameLoop.on('gameSnapshot', (newSnapshot: GameSnapshot) => {
-    const snapshotReceivedTime = Date.now();
-    const actionType = newSnapshot.gameEvent.actionType;
-    const pendingRequests = newSnapshot.pendingDecisionRequests || [];
-    const readyForCountingRequests = pendingRequests.filter(r => r.decisionType === 'READY_FOR_COUNTING' || r.decisionType === 'READY_FOR_NEXT_ROUND');
-    
-    if (readyForCountingRequests.length > 0) {
-      console.log(`[TIMING] Server received gameSnapshot event at ${snapshotReceivedTime}ms with ${readyForCountingRequests.length} acknowledgment requests`);
-    }
-    
-    // Store the full snapshot for internal use (agents, database, etc.)
-    mostRecentGameSnapshot = newSnapshot;
+    mostRecentGameSnapshotByLobbyId.set(lobby.id, newSnapshot);
     sendGameEventToDB(newSnapshot.gameEvent);
-    currentRoundGameEvents.push(newSnapshot.gameEvent);
+    const existingEvents = currentRoundGameEventsByLobbyId.get(lobby.id) || [];
+    let updatedEvents = [...existingEvents, newSnapshot.gameEvent];
     if (newSnapshot.gameEvent.actionType === ActionType.START_ROUND) {
-      currentRoundGameEvents = [];
+      updatedEvents = [];
     }
-
-    // Update WebSocketAgents with the latest snapshot
-    connectedPlayers.forEach(playerInfo => {
-      if (playerInfo.agent instanceof WebSocketAgent) {
-        playerInfo.agent.updateGameSnapshot(newSnapshot);
-      }
-    });
-
-    // Send redacted GameSnapshot to each player
-    // Each player only sees their own cards, opponents' cards are 'UNKNOWN'
-    connectedPlayers.forEach(playerInfo => {
-      const socketId = playerIdToSocketId.get(playerInfo.id);
-      if (socketId) {
-        const redactStartTime = Date.now();
-        const redactedGameState = gameLoop!.cribbageGame.getRedactedGameState(
-          playerInfo.id
-        );
-        const redactedGameEvent = gameLoop!.cribbageGame.getRedactedGameEvent(
-          newSnapshot.gameEvent,
-          playerInfo.id
-        );
-        const redactEndTime = Date.now();
-        
-        if (readyForCountingRequests.length > 0) {
-          console.log(`[TIMING] Server redacted snapshot for player ${playerInfo.id} at ${redactEndTime}ms (redaction took ${redactEndTime - redactStartTime}ms)`);
+    currentRoundGameEventsByLobbyId.set(lobby.id, updatedEvents);
+    
+    // Send redacted snapshots to all players
+    sendRedactedSnapshotToAllPlayers(gameLoop, newSnapshot, updatedEvents, lobby.id);
+    
+    // After the first snapshot, ensure all clients received it by re-emitting
+    if (!firstSnapshotEmitted) {
+      firstSnapshotEmitted = true;
+      setTimeout(() => {
+        const latestSnapshot = mostRecentGameSnapshotByLobbyId.get(lobby.id);
+        const latestEvents = currentRoundGameEventsByLobbyId.get(lobby.id) || [];
+        if (latestSnapshot === newSnapshot) {
+          console.log('Re-emitting first game snapshot to ensure all clients received it');
+          sendRedactedSnapshotToAllPlayers(gameLoop, latestSnapshot, latestEvents, lobby.id);
         }
-        
-        const redactedSnapshot: GameSnapshot = {
-          gameState: redactedGameState,
-          gameEvent: redactedGameEvent,
-          pendingDecisionRequests: newSnapshot.pendingDecisionRequests, // Include pending requests
-        };
-        
-        const emitStartTime = Date.now();
-        io.to(socketId).emit('gameSnapshot', redactedSnapshot);
-        const emitEndTime = Date.now();
-        
-        if (readyForCountingRequests.length > 0) {
-          console.log(`[TIMING] Server emitted gameSnapshot to player ${playerInfo.id} at ${emitEndTime}ms (emit took ${emitEndTime - emitStartTime}ms, total from receive: ${emitEndTime - snapshotReceivedTime}ms)`);
-        }
-
-        // Also send redacted current round game events to this player
-        const redactedRoundEvents = currentRoundGameEvents.map(event =>
-          gameLoop!.cribbageGame.getRedactedGameEvent(event, playerInfo.id)
-        );
-        io.to(socketId).emit('currentRoundGameEvents', redactedRoundEvents);
-      }
-    });
+      }, 100);
+    }
   });
-  // send the connected players to the clients
-  emitConnectedPlayers();
 
-  // Start the game in the database
+  // Map lobby -> game
   const gameId = gameLoop.cribbageGame.getGameState().id;
-  const lobbyId = 'lobbyId'; // TODO: replace with actual lobby ID once lobbies are implemented
-  startGameInDB(gameId, playersIdAndName, lobbyId);
+  gameIdByLobbyId.set(lobby.id, gameId);
 
-  // send gameStart event to all clients
-  io.emit('gameStart', {
-    gameId,
-    players: playersIdAndName,
+  // Update lobby status (keep as in_progress, don't reset to waiting)
+  lobby.status = 'in_progress';
+  lobby.finishedAt = null;
+  lobby.disconnectedPlayerIds = [];
+  io.emit('lobbyUpdated', lobby);
+
+  // Persist game start info
+  startGameInDB(gameId, playersInfo, lobby.id);
+
+  // Notify lobby members of the game restart (same as game start)
+  // Small delay to ensure clients have processed gameReset
+  setTimeout(() => {
+    io.emit('gameStartedFromLobby', { lobbyId: lobby.id, gameId, players: playersInfo });
+  }, 50);
+
+  // Start the game loop (this will emit snapshots as the game progresses)
+  startGame(lobby.id).catch(error => {
+    console.error('[handleRestartGame] Error in game loop:', error);
   });
 
-  // Start the game
-  await startGame();
+  console.log(`Game restarted. New game started for lobby ${lobby.name}.`);
 }
 
-async function handleRestartGame(): Promise<void> {
-  console.log('Restarting game...');
+/**
+ * Send redacted game snapshot and events to all players in a game
+ */
+function sendRedactedSnapshotToAllPlayers(
+  gameLoop: GameLoop,
+  snapshot: GameSnapshot,
+  roundEvents: GameEvent[],
+  lobbyId: string,
+): void {
+  const gameState = gameLoop.cribbageGame.getGameState();
   
-  // Check if restart is enabled (development only)
-  const RESTART_ENABLED = process.env.ENABLE_RESTART_GAME === 'true';
-  if (!RESTART_ENABLED) {
-    console.log('Restart game is disabled. Set ENABLE_RESTART_GAME=true to enable.');
-    return;
-  }
-
-  // Clear current game state
-  if (gameLoop) {
-    console.log('Clearing current game loop...');
-    // Remove all listeners to prevent memory leaks
-    gameLoop.removeAllListeners();
-    gameLoop = null;
-  }
-
-  // Reset state
-  playAgainVotes.clear();
-  mostRecentGameSnapshot = null;
-  currentRoundGameEvents = [];
-
-  // Emit game reset event to all clients
-  io.emit('gameReset');
-
-  // Start a new game with the same player count
-  console.log(`Restarting with ${requestedPlayerCount} players`);
-  await handleStartGame();
+  // Send redacted snapshot to each player
+  gameState.players.forEach(player => {
+    const socketId = playerIdToSocketId.get(player.id);
+    if (!socketId) {
+      // Player might be a bot or disconnected - skip
+      return;
+    }
+    
+    const socket = io.sockets.sockets.get(socketId);
+    if (!socket) {
+      // Socket not found - skip
+      return;
+    }
+    
+    // Update WebSocketAgent with the latest snapshot if this is a human player
+    const playerInfo = connectedPlayers.get(player.id);
+    if (playerInfo && playerInfo.agent instanceof WebSocketAgent) {
+      playerInfo.agent.updateGameSnapshot(snapshot);
+    }
+    
+    // Get redacted state and event for this player
+    const redactedGameState = gameLoop.cribbageGame.getRedactedGameState(player.id);
+    const redactedGameEvent = gameLoop.cribbageGame.getRedactedGameEvent(
+      snapshot.gameEvent,
+      player.id
+    );
+    const redactedSnapshot: GameSnapshot = {
+      gameState: redactedGameState,
+      gameEvent: redactedGameEvent,
+      pendingDecisionRequests: snapshot.pendingDecisionRequests,
+    };
+    
+    // Send redacted snapshot
+    socket.emit('gameSnapshot', redactedSnapshot);
+    
+    // Send redacted round events
+    const redactedRoundEvents = roundEvents.map(event =>
+      gameLoop.cribbageGame.getRedactedGameEvent(event, player.id)
+    );
+    socket.emit('currentRoundGameEvents', redactedRoundEvents);
+  });
 }
 
 function sendMostRecentGameData(socket: Socket): void {
@@ -747,105 +1636,138 @@ function sendMostRecentGameData(socket: Socket): void {
     return;
   }
 
-  // Send redacted GameSnapshot for this specific player
-  if (mostRecentGameSnapshot && gameLoop) {
-    // Check if player exists in the game before trying to get redacted state
-    const currentGameState = gameLoop.cribbageGame.getGameState();
-    const playerExistsInGame = currentGameState.players.some(
-      p => p.id === playerId
-    );
-    
-    if (!playerExistsInGame) {
-      console.log(
-        `Player ${playerId} not found in game. Skipping game state send.`
-      );
-      // Still send empty arrays for consistency
-      socket.emit('currentRoundGameEvents', []);
-      socket.emit('playAgainVotes', []);
-      return;
-    }
-
-    // Update WebSocketAgent with the latest snapshot
-    const playerInfo = connectedPlayers.get(playerId);
-    if (playerInfo && playerInfo.agent instanceof WebSocketAgent) {
-      playerInfo.agent.updateGameSnapshot(mostRecentGameSnapshot);
-    }
-
-    const redactedGameState = gameLoop.cribbageGame.getRedactedGameState(
-      playerId
-    );
-    const redactedGameEvent = gameLoop.cribbageGame.getRedactedGameEvent(
-      mostRecentGameSnapshot.gameEvent,
-      playerId
-    );
-    const redactedSnapshot: GameSnapshot = {
-      gameState: redactedGameState,
-      gameEvent: redactedGameEvent,
-      pendingDecisionRequests: mostRecentGameSnapshot.pendingDecisionRequests, // Include pending requests
-    };
-    socket.emit('gameSnapshot', redactedSnapshot);
-  } else {
-    console.log('no mostRecentGameSnapshot to send...');
+  const lobbyId = lobbyIdByPlayerId.get(playerId);
+  if (!lobbyId) {
+    console.warn(`Player ${playerId} is not in a lobby; skipping game state send.`);
+    socket.emit('currentRoundGameEvents', []);
+    return;
   }
-  
-  // Send redacted current round game events
-  if (gameLoop && mostRecentGameSnapshot) {
-    // Check if player exists in game before redacting events
-    const currentGameState = gameLoop.cribbageGame.getGameState();
-    const playerExistsInGame = currentGameState.players.some(
-      p => p.id === playerId
-    );
-    
-    if (playerExistsInGame) {
-      const redactedRoundEvents = currentRoundGameEvents.map(event =>
-        gameLoop!.cribbageGame.getRedactedGameEvent(event, playerId)
-      );
-      socket.emit('currentRoundGameEvents', redactedRoundEvents);
-    } else {
-      socket.emit('currentRoundGameEvents', []);
-    }
-  } else {
-    socket.emit('currentRoundGameEvents', currentRoundGameEvents);
+
+  const activeGameLoop = gameLoopsByLobbyId.get(lobbyId);
+  const mostRecentGameSnapshot = mostRecentGameSnapshotByLobbyId.get(lobbyId);
+  const roundEvents = currentRoundGameEventsByLobbyId.get(lobbyId) || [];
+
+  if (!activeGameLoop || !mostRecentGameSnapshot) {
+    console.warn(`No active game loop or snapshot for lobby ${lobbyId} when attempting to send game data`);
+    socket.emit('currentRoundGameEvents', []);
+    return;
   }
-  socket.emit('playAgainVotes', Array.from(playAgainVotes));
+
+  // Check if player exists in the game before trying to get redacted state
+  const currentGameState = activeGameLoop.cribbageGame.getGameState();
+  const playerExistsInGame = currentGameState.players.some(
+    p => p.id === playerId
+  );
+
+  if (!playerExistsInGame) {
+    console.log(
+      `Player ${playerId} not found in game for lobby ${lobbyId}. Skipping game state send.`
+    );
+    // Still send empty arrays for consistency
+    socket.emit('currentRoundGameEvents', []);
+    return;
+  }
+
+  // Update WebSocketAgent with the latest snapshot
+  const playerInfo = connectedPlayers.get(playerId);
+  if (playerInfo && playerInfo.agent instanceof WebSocketAgent) {
+    playerInfo.agent.updateGameSnapshot(mostRecentGameSnapshot);
+  }
+
+  const redactedGameState = activeGameLoop.cribbageGame.getRedactedGameState(playerId);
+  const redactedGameEvent = activeGameLoop.cribbageGame.getRedactedGameEvent(
+    mostRecentGameSnapshot.gameEvent,
+    playerId
+  );
+  const redactedSnapshot: GameSnapshot = {
+    gameState: redactedGameState,
+    gameEvent: redactedGameEvent,
+    pendingDecisionRequests: mostRecentGameSnapshot.pendingDecisionRequests, // Include pending requests
+  };
+  socket.emit('gameSnapshot', redactedSnapshot);
+
+  const redactedRoundEvents = roundEvents.map(event =>
+    activeGameLoop.cribbageGame.getRedactedGameEvent(event, playerId)
+  );
+  socket.emit('currentRoundGameEvents', redactedRoundEvents);
 }
 
-async function startGame(): Promise<void> {
+async function startGame(lobbyId: string): Promise<void> {
+  const gameLoop = gameLoopsByLobbyId.get(lobbyId);
   if (!gameLoop) {
     console.error(
-      '[startGame()] Game loop not initialized. Cannot start game.'
+      `[startGame()] Game loop not initialized for lobby ${lobbyId}. Cannot start game.`
     );
     return;
   }
-  console.log('Starting game loop...');
-  const winner = await gameLoop.playGame();
-  endGameInDB(gameLoop.cribbageGame.getGameState().id, winner);
-
-  // Wait a brief moment to ensure the final snapshot with Phase.END is sent to all clients
-  // The endGame() call emits a gameSnapshot event which needs to be processed and sent
-  await new Promise(resolve => setTimeout(resolve, 100));
-
-  // Clear gameLoop after game ends so a new game can be started
-  console.log('Game ended. Clearing game loop to allow new game.');
-  gameLoop.removeAllListeners();
-  gameLoop = null;
-
-  // Reset play again votes and automatically add bots
-  playAgainVotes.clear();
-
-  // Add all bot players to play again votes automatically
-  connectedPlayers.forEach(playerInfo => {
-    if (playerInfo.agent instanceof ExhaustiveSimpleAgent) {
-      playAgainVotes.add(playerInfo.id);
-      console.log(
-        `Bot player ${playerInfo.id} automatically voted to play again.`
-      );
+  
+  // Store reference to current game loop to check if it was cancelled or replaced
+  const currentGameLoop = gameLoop;
+  
+  try {
+    console.log('Starting game loop...');
+    const winner = await currentGameLoop.playGame();
+    
+    // Check if this game loop was cancelled (replaced by a new one)
+    if (gameLoopsByLobbyId.get(lobbyId) !== currentGameLoop) {
+      console.log('[startGame()] Game loop was replaced, ignoring completion');
+      return;
     }
-  });
+    
+    endGameInDB(currentGameLoop.cribbageGame.getGameState().id, winner);
 
-  // Emit updated play again votes to all clients
-  io.emit('playAgainVotes', Array.from(playAgainVotes));
-  io.emit('gameOver', winner);
+    // Wait a brief moment to ensure the final snapshot with Phase.END is sent to all clients
+    // The endGame() call emits a gameSnapshot event which needs to be processed and sent
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Check again if game loop was replaced during the wait
+    if (gameLoopsByLobbyId.get(lobbyId) !== currentGameLoop) {
+      console.log('[startGame()] Game loop was replaced during wait, ignoring completion');
+      return;
+    }
+
+    // Clear gameLoop after game ends so a new game can be started
+    // Only clear if this is still the current game loop (hasn't been replaced)
+    if (gameLoopsByLobbyId.get(lobbyId) === currentGameLoop) {
+      console.log('Game ended. Clearing game loop to allow new game.');
+      currentGameLoop.removeAllListeners();
+      gameLoopsByLobbyId.delete(lobbyId);
+    } else {
+      console.log('[startGame()] Game loop was replaced, not clearing (new game already started)');
+    }
+
+    // Clean up bots that were created for this game
+    cleanupBots(lobbyId);
+
+    gameIdByLobbyId.delete(lobbyId);
+
+    const completedLobby = lobbiesById.get(lobbyId);
+    if (completedLobby) {
+      completedLobby.status = 'finished';
+      completedLobby.finishedAt = Date.now();
+      completedLobby.disconnectedPlayerIds = [];
+      io.emit('lobbyUpdated', completedLobby);
+    }
+
+    io.emit('gameOver', winner);
+  } catch (error) {
+    // If game loop was cancelled, that's expected - just log and return
+    if (error instanceof Error && error.message === 'Game loop was cancelled') {
+      console.log('[startGame()] Game loop was cancelled, cleaning up');
+      // Clean up bots even if cancelled
+      if (gameLoopsByLobbyId.get(lobbyId) === currentGameLoop) {
+        cleanupBots(lobbyId);
+        gameLoopsByLobbyId.delete(lobbyId);
+      }
+      gameIdByLobbyId.delete(lobbyId);
+      currentRoundGameEventsByLobbyId.delete(lobbyId);
+      mostRecentGameSnapshotByLobbyId.delete(lobbyId);
+      return;
+    }
+    // Otherwise, rethrow the error
+    console.error('[startGame()] Error during game:', error);
+    throw error;
+  }
 }
 
 // Start the server

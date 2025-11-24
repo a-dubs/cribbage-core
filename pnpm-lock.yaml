@@ -32,6 +32,9 @@ importers:
       socket.io-client:
         specifier: ^4.8.1
         version: 4.8.1
+      unique-names-generator:
+        specifier: ^4.7.1
+        version: 4.7.1
       uuid:
         specifier: ^11.0.5
         version: 11.1.0
@@ -3364,6 +3367,10 @@ packages:
   unicorn-magic@0.3.0:
     resolution: {integrity: sha512-+QBBXBCvifc56fsbuxZQ6Sic3wqqc3WWaqxs58gvJrcOuN83HGTCwz3oS5phzU9LthRNE9VrJCFCLUgHeeFnfA==}
     engines: {node: '>=18'}
+
+  unique-names-generator@4.7.1:
+    resolution: {integrity: sha512-lMx9dX+KRmG8sq6gulYYpKWZc9RlGsgBR6aoO8Qsm3qvkSJ+3rAymr+TnV8EDMrIrwuFJ4kruzMWM/OpYzPoow==}
+    engines: {node: '>=8'}
 
   unique-string@3.0.0:
     resolution: {integrity: sha512-VGXBUVwxKMBUznyffQweQABPRRW1vHZAbadFZud4pLFAqRGvv/96vafgjWFqzourzr8YonlQiPgH0YCJfawoGQ==}
@@ -7303,6 +7310,8 @@ snapshots:
     optional: true
 
   unicorn-magic@0.3.0: {}
+
+  unique-names-generator@4.7.1: {}
 
   unique-string@3.0.0:
     dependencies:

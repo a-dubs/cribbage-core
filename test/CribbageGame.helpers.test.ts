@@ -280,6 +280,7 @@ describe('CribbageGame Helper Methods', () => {
       expect(() => {
         game.getRedactedGameState('non-existent-player');
       }).toThrow('Player non-existent-player not found');
+    });
   });
 });
 

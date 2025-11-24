@@ -23,6 +23,7 @@ import { displayCard, parseCard, suitToEmoji } from '../core/scoring';
 import EventEmitter from 'eventemitter3';
 import dotenv from 'dotenv';
 import { getPlayerCountConfig } from './rules';
+import { logger } from '../utils/logger';
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
 dotenv.config();
@@ -35,6 +36,7 @@ const ENABLE_READY_FOR_COUNTING = process.env.ENABLE_READY_FOR_COUNTING === 'tru
 export class GameLoop extends EventEmitter {
   public cribbageGame: CribbageGame;
   private agents: Record<string, GameAgent> = {};
+  private cancelled: boolean = false;
 
   constructor(playersInfo: PlayerIdAndName[]) {
     super();
@@ -48,6 +50,14 @@ export class GameLoop extends EventEmitter {
     this.cribbageGame.on('gameSnapshot', (newGameSnapshot: GameSnapshot) => {
       this.emit('gameSnapshot', newGameSnapshot);
     });
+  }
+
+  /**
+   * Cancel the game loop - stops all pending decision requests
+   */
+  public cancel(): void {
+    this.cancelled = true;
+    this.removeAllListeners();
   }
 
   public addAgent(playerId: string, agent: GameAgent): void {
@@ -161,6 +171,11 @@ export class GameLoop extends EventEmitter {
    * @returns The response from the agent
    */
   private async waitForDecision(request: DecisionRequest): Promise<any> {
+    // Check if game loop was cancelled
+    if (this.cancelled) {
+      throw new Error('Game loop was cancelled');
+    }
+
     const agent = this.agents[request.playerId];
     if (!agent) throw new Error(`No agent for player ${request.playerId}`);
 
@@ -171,23 +186,33 @@ export class GameLoop extends EventEmitter {
       request.playerId
     );
 
+    // Check again after getting snapshot (in case cancelled during async operation)
+    if (this.cancelled) {
+      throw new Error('Game loop was cancelled');
+    }
+
     switch (request.decisionType) {
       case AgentDecisionType.PLAY_CARD: {
+        const playerName = this.cribbageGame.getGameState().players.find(p => p.id === request.playerId)?.name || request.playerId;
+        const moveStartTime = Date.now();
         const card = await agent.makeMove(redactedSnapshot, request.playerId);
+        const moveEndTime = Date.now();
+        logger.logAgentDuration('MOVE', playerName, moveEndTime - moveStartTime);
         this.cribbageGame.removeDecisionRequest(request.requestId);
-        console.log(`[waitForDecision] PLAY_CARD resolved for player ${request.playerId}`);
         return card;
       }
 
       case AgentDecisionType.DISCARD: {
         const data = request.requestData as DiscardRequestData;
-        console.log(`[waitForDecision] Calling agent.discard() for player ${request.playerId} (${agent.human ? 'human' : 'bot'})`);
+        const playerName = this.cribbageGame.getGameState().players.find(p => p.id === request.playerId)?.name || request.playerId;
+        const discardStartTime = Date.now();
         const discards = await agent.discard(
           redactedSnapshot,
           request.playerId,
           data.numberOfCardsToDiscard
         );
-        console.log(`[waitForDecision] DISCARD resolved for player ${request.playerId}, got ${discards.length} cards`);
+        const discardEndTime = Date.now();
+        logger.logAgentDuration('DISCARD', playerName, discardEndTime - discardStartTime);
         this.cribbageGame.removeDecisionRequest(request.requestId);
         return discards;
       }
@@ -405,15 +430,13 @@ export class GameLoop extends EventEmitter {
         return Promise.resolve(currentPlayerId);
       }
 
-      // // if player is out of cards now, add them to the list of players done
-      // if (this.game.getPlayer(currentPlayer).peggingHand.length === 0) {
-      //   playersDone.push(currentPlayer);
-      // }
+      // if player is out of cards now, add them to the list of players done
+      if (player.peggingHand.length === 0 && !playersDone.includes(currentPlayerId)) {
+        playersDone.push(currentPlayerId);
+      }
 
       // if the round is over, start next round with the person following the last person to play a card
       if (roundOverLastPlayer) {
-        currentPlayerId =
-          this.cribbageGame.getFollowingPlayerId(roundOverLastPlayer);
         // update the list of players done - check all players to see if they are out of cards
         for (const player of this.cribbageGame.getGameState().players) {
           if (
@@ -423,11 +446,49 @@ export class GameLoop extends EventEmitter {
             playersDone.push(player.id);
           }
         }
+        // Check if all players are done before continuing
+        if (playersDone.length >= this.cribbageGame.getGameState().players.length) {
+          break;
+        }
+        currentPlayerId =
+          this.cribbageGame.getFollowingPlayerId(roundOverLastPlayer);
+        // Skip players who are done, but prevent infinite loop
+        const startPlayerId = currentPlayerId;
+        let iterations = 0;
+        while (playersDone.includes(currentPlayerId) && iterations < this.cribbageGame.getGameState().players.length) {
+          currentPlayerId =
+            this.cribbageGame.getFollowingPlayerId(currentPlayerId);
+          iterations++;
+          // If we've cycled back to start, all remaining players are done
+          if (currentPlayerId === startPlayerId) {
+            break;
+          }
+        }
+        // If all remaining players are done, exit
+        if (playersDone.includes(currentPlayerId)) {
+          break;
+        }
       }
       // if the round is not over, continue with the next player
       else {
         currentPlayerId =
           this.cribbageGame.getFollowingPlayerId(currentPlayerId);
+        // Skip players who are done, but prevent infinite loop
+        const startPlayerId = currentPlayerId;
+        let iterations = 0;
+        while (playersDone.includes(currentPlayerId) && iterations < this.cribbageGame.getGameState().players.length) {
+          currentPlayerId =
+            this.cribbageGame.getFollowingPlayerId(currentPlayerId);
+          iterations++;
+          // If we've cycled back to start, all remaining players are done
+          if (currentPlayerId === startPlayerId) {
+            break;
+          }
+        }
+        // If all remaining players are done, exit
+        if (playersDone.includes(currentPlayerId)) {
+          break;
+        }
       }
     }
     // if all players are out of cards, pegging is over
@@ -752,17 +813,35 @@ export class GameLoop extends EventEmitter {
    * @returns the ID of the winning player
    */
   public async playGame(): Promise<string> {
-    // Handle dealer selection before first round
-    await this.doDealerSelection();
+    try {
+      // Handle dealer selection before first round
+      await this.doDealerSelection();
 
-    let winner: string | null = null;
+      let winner: string | null = null;
 
-    while (!winner) {
-      winner = await this.doRound();
+      while (!winner && !this.cancelled) {
+        winner = await this.doRound();
+      }
+
+      if (this.cancelled) {
+        throw new Error('Game loop was cancelled');
+      }
+
+      // At this point, winner must be non-null (loop exits when winner is set)
+      if (!winner) {
+        throw new Error('Game ended without a winner');
+      }
+
+      this.cribbageGame.endGame(winner);
+
+      return Promise.resolve(winner);
+    } catch (error) {
+      // If cancelled, don't end the game - just throw
+      if (this.cancelled) {
+        throw error;
+      }
+      // Otherwise rethrow the error
+      throw error;
     }
-
-    this.cribbageGame.endGame(winner);
-
-    return Promise.resolve(winner);
   }
 }
