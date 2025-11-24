@@ -6,6 +6,9 @@ import {
   leaveLobby,
   listLobbies,
   listFriendRequests,
+  listUserGames,
+  getGameEventsForUser,
+  getGameSnapshotsForUser,
   listFriends,
   respondToFriendRequest,
   sendFriendRequest,
@@ -248,6 +251,52 @@ export function registerHttpApi(app: express.Express): void {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to respond';
       res.status(400).json({ error: 'FRIEND_RESPONSE_FAILED', message });
+    }
+  });
+
+  app.get('/games', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.userId) {
+      res.status(401).json({ error: 'NOT_AUTHORIZED', message: 'Missing user' });
+      return;
+    }
+    try {
+      const games = await listUserGames(req.userId);
+      res.json({ games });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to fetch games';
+      res.status(500).json({ error: 'GAMES_FETCH_FAILED', message });
+    }
+  });
+
+  app.get('/games/:gameId/events', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.userId) {
+      res.status(401).json({ error: 'NOT_AUTHORIZED', message: 'Missing user' });
+      return;
+    }
+    const { gameId } = req.params;
+    try {
+      const events = await getGameEventsForUser(gameId, req.userId);
+      res.json({ events });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to fetch events';
+      const status = message === 'NOT_AUTHORIZED' ? 403 : 500;
+      res.status(status).json({ error: 'GAME_EVENTS_FAILED', message });
+    }
+  });
+
+  app.get('/games/:gameId/snapshots', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.userId) {
+      res.status(401).json({ error: 'NOT_AUTHORIZED', message: 'Missing user' });
+      return;
+    }
+    const { gameId } = req.params;
+    try {
+      const snapshots = await getGameSnapshotsForUser(gameId, req.userId);
+      res.json({ snapshots });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to fetch snapshots';
+      const status = message === 'NOT_AUTHORIZED' ? 403 : 500;
+      res.status(status).json({ error: 'GAME_SNAPSHOTS_FAILED', message });
     }
   });
 }

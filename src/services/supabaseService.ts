@@ -495,6 +495,16 @@ type PersistedEvent = {
   storeSnapshot?: boolean;
 };
 
+export type GameListRow = {
+  game: any;
+  player: {
+    player_id: string;
+    player_name: string;
+    final_score: number;
+    is_winner: boolean;
+  };
+};
+
 export async function createGameRecord(params: {
   lobbyId?: string | null;
   players: GamePlayerInput[];
@@ -616,4 +626,78 @@ export async function completeGameRecord(params: {
       }
     }
   }
+}
+
+async function ensureGameMembership(gameId: string, userId: string): Promise<void> {
+  const client = getServiceClient();
+  const membership = await client
+    .from('game_players')
+    .select('id')
+    .eq('game_id', gameId)
+    .eq('player_id', userId)
+    .maybeSingle();
+  if (membership.error) {
+    throw new Error(membership.error.message);
+  }
+  if (!membership.data) {
+    throw new Error('NOT_AUTHORIZED');
+  }
+}
+
+export async function listUserGames(userId: string): Promise<GameListRow[]> {
+  const client = getServiceClient();
+  const { data, error } = await client
+    .from('game_players')
+    .select(
+      `
+        player_id,
+        player_name,
+        final_score,
+        is_winner,
+        game:games (*)
+      `
+    )
+    .eq('player_id', userId)
+    .order('created_at', { ascending: false });
+  if (error) {
+    throw new Error(error.message);
+  }
+  const rows = (data ?? []) as any[];
+  return rows.map(row => ({
+    game: row.game,
+    player: {
+      player_id: row.player_id,
+      player_name: row.player_name,
+      final_score: row.final_score,
+      is_winner: row.is_winner,
+    },
+  }));
+}
+
+export async function getGameEventsForUser(gameId: string, userId: string): Promise<any[]> {
+  await ensureGameMembership(gameId, userId);
+  const client = getServiceClient();
+  const { data, error } = await client
+    .from('game_events')
+    .select('*')
+    .eq('game_id', gameId)
+    .order('snapshot_id', { ascending: true });
+  if (error) {
+    throw new Error(error.message);
+  }
+  return data ?? [];
+}
+
+export async function getGameSnapshotsForUser(gameId: string, userId: string): Promise<any[]> {
+  await ensureGameMembership(gameId, userId);
+  const client = getServiceClient();
+  const { data, error } = await client
+    .from('game_snapshots')
+    .select('*')
+    .eq('game_id', gameId)
+    .order('snapshot_id', { ascending: true });
+  if (error) {
+    throw new Error(error.message);
+  }
+  return data ?? [];
 }
