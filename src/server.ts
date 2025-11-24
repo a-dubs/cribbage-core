@@ -1,4 +1,6 @@
 import http from 'http';
+import express from 'express';
+import cors from 'cors';
 import { Server, Socket } from 'socket.io';
 import { GameLoop } from './gameplay/GameLoop';
 import {
@@ -18,6 +20,7 @@ import path from 'path';
 import { logger } from './utils/logger';
 import { uniqueNamesGenerator, adjectives, animals } from 'unique-names-generator';
 import { v4 as uuidv4 } from 'uuid';
+import { registerHttpApi } from './httpApi';
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
 dotenv.config();
@@ -41,26 +44,6 @@ logger.info('PORT:', PORT);
 logger.info('WEB_APP_ORIGIN:', WEB_APP_ORIGIN);
 
 logger.info('Cribbage-core server starting...');
-
-const server = http.createServer((req, res) => {
-  if (req.method === 'GET' && req.url === '/ping') {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('pong');
-    return;
-  }
-  if (req.method === 'GET' && req.url === '/connected-players') {
-    const playersIdAndName: PlayerIdAndName[] = [];
-    connectedPlayers.forEach(playerInfo => {
-      playersIdAndName.push({ id: playerInfo.id, name: playerInfo.name });
-    });
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(playersIdAndName));
-    return;
-  }
-  // fallback for other routes
-  res.writeHead(404, { 'Content-Type': 'text/plain' });
-  res.end('Not found');
-});
 
 // Support multiple origins or wildcard for development
 // Also automatically supports both HTTP and HTTPS versions of origins
@@ -123,9 +106,23 @@ const getAllowedOrigins = (): string | string[] | ((origin: string | undefined, 
   };
 };
 
+const allowedOrigins = getAllowedOrigins();
+const app = express();
+app.use(
+  cors({
+    origin: allowedOrigins as any,
+    credentials: true,
+  })
+);
+app.use(express.json({ limit: '2mb' }));
+
+registerHttpApi(app);
+
+const server = http.createServer(app);
+
 const io = new Server(server, {
   cors: {
-    origin: getAllowedOrigins(),
+    origin: allowedOrigins,
     methods: ['GET', 'POST'],
     credentials: true,
   },
@@ -274,6 +271,18 @@ const connectedPlayers: Map<string, PlayerInfo> = new Map();
 const playerIdToSocketId: Map<string, string> = new Map();
 const socketIdToPlayerId: Map<string, string> = new Map(); // Track socket -> player ID mapping for reconnection
 const usernameToSecretKey: Map<string, string> = new Map(); // Track username -> secret key for authentication
+
+app.get('/ping', (_req, res) => {
+  res.status(200).send('pong');
+});
+
+app.get('/connected-players', (_req, res) => {
+  const playersIdAndName: PlayerIdAndName[] = [];
+  connectedPlayers.forEach(playerInfo => {
+    playersIdAndName.push({ id: playerInfo.id, name: playerInfo.name });
+  });
+  res.status(200).json(playersIdAndName);
+});
 
 // In-memory lobby state (foundational data structures for future lobby support)
 const lobbiesById: Map<string, Lobby> = new Map();

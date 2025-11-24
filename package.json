@@ -53,6 +53,7 @@
   "devDependencies": {
     "@ryansonshine/commitizen": "^4.2.8",
     "@ryansonshine/cz-conventional-changelog": "^3.3.4",
+    "@types/cors": "^2.8.19",
     "@types/express": "^5.0.0",
     "@types/jest": "^27.5.2",
     "@types/node": "^12.20.55",
@@ -129,6 +130,7 @@
   },
   "dependencies": {
     "@babel/runtime": "^7.27.0",
+    "@supabase/supabase-js": "^2.49.0",
     "@types/socket.io": "^3.0.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
