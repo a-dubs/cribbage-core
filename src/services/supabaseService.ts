@@ -32,6 +32,9 @@ export type LobbyInvitation = {
   status: 'pending' | 'accepted' | 'declined' | 'expired';
   created_at: string;
 };
+export type LobbyInvitationWithLobby = LobbyInvitation & {
+  lobbies: LobbyRecord;
+};
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -430,6 +433,87 @@ export async function sendLobbyInvite(params: { lobbyId: string; senderId: strin
     throw new Error(error?.message ?? 'Failed to create invite');
   }
   return data as LobbyInvitation;
+}
+
+export async function listLobbyInvitations(userId: string): Promise<{
+  incoming: LobbyInvitationWithLobby[];
+  outgoing: LobbyInvitationWithLobby[];
+}> {
+  const client = getServiceClient();
+  const { data, error } = await client
+    .from('lobby_invitations')
+    .select(
+      `
+      id,
+      lobby_id,
+      sender_id,
+      recipient_id,
+      status,
+      created_at,
+      lobbies!inner(id, name, host_id, max_players, current_players, status, invite_code, is_fixed_size, visibility)
+    `
+    )
+    .or(`sender_id.eq.${userId},recipient_id.eq.${userId}`);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+  const rows = (data ?? []) as LobbyInvitationWithLobby[];
+  return {
+    incoming: rows.filter(row => row.recipient_id === userId),
+    outgoing: rows.filter(row => row.sender_id === userId),
+  };
+}
+
+export async function respondToLobbyInvitation(params: {
+  invitationId: string;
+  recipientId: string;
+  accept: boolean;
+}): Promise<{ invitation: LobbyInvitation; lobby?: LobbyPayload }> {
+  const client = getServiceClient();
+  const { data: invitation, error: invitationError } = await client
+    .from('lobby_invitations')
+    .select(
+      `
+      id,
+      lobby_id,
+      sender_id,
+      recipient_id,
+      status,
+      created_at,
+      lobbies(id, invite_code)
+    `
+    )
+    .eq('id', params.invitationId)
+    .single();
+  if (invitationError || !invitation) {
+    throw new Error(invitationError?.message ?? 'INVITE_NOT_FOUND');
+  }
+  if (invitation.recipient_id !== params.recipientId) {
+    throw new Error('NOT_AUTHORIZED');
+  }
+  const status: 'accepted' | 'declined' = params.accept ? 'accepted' : 'declined';
+  const { error: updateError } = await client
+    .from('lobby_invitations')
+    .update({ status })
+    .eq('id', params.invitationId)
+    .eq('recipient_id', params.recipientId);
+  if (updateError) {
+    throw new Error(updateError.message);
+  }
+  if (!params.accept) {
+    return { invitation: { ...(invitation as LobbyInvitation), status } };
+  }
+  const lobbyId = invitation.lobby_id as string;
+  const lobby = await joinLobby({
+    lobbyId,
+    playerId: params.recipientId,
+    inviteCode: (invitation as any).lobbies?.invite_code ?? undefined,
+  });
+  return {
+    invitation: { ...(invitation as LobbyInvitation), status: 'accepted' },
+    lobby,
+  };
 }
 
 export async function listFriends(userId: string): Promise<SupabaseProfile[]> {

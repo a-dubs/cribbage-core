@@ -25,6 +25,8 @@ import {
   removeFriendship,
   updateProfile,
   sendLobbyInvite,
+  listLobbyInvitations,
+  respondToLobbyInvitation,
   verifyAccessToken,
   type LobbyPayload,
   type LobbyVisibility,
@@ -252,6 +254,52 @@ export function registerHttpApi(app: express.Express, hooks?: HttpApiHooks): voi
       if (message === 'NOT_HOST') status = 403;
       if (message === 'LOBBY_NOT_FOUND') status = 404;
       res.status(status).json({ error: 'LOBBY_INVITE_FAILED', message });
+    }
+  });
+
+  app.get('/lobbies/invitations', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    if (!requireSupabaseFlag(SUPABASE_LOBBIES_ENABLED, res)) return;
+    if (!req.userId) {
+      res.status(401).json({ error: 'NOT_AUTHORIZED', message: 'Missing user' });
+      return;
+    }
+    try {
+      const invites = await listLobbyInvitations(req.userId);
+      res.json(invites);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to fetch invitations';
+      res.status(500).json({ error: 'LOBBY_INVITES_FAILED', message });
+    }
+  });
+
+  app.post('/lobbies/invitations/:id/respond', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    if (!requireSupabaseFlag(SUPABASE_LOBBIES_ENABLED, res)) return;
+    if (!req.userId) {
+      res.status(401).json({ error: 'NOT_AUTHORIZED', message: 'Missing user' });
+      return;
+    }
+    const { id } = req.params;
+    const { accept } = req.body ?? {};
+    if (accept === undefined) {
+      res.status(400).json({ error: 'VALIDATION_ERROR', message: 'accept is required' });
+      return;
+    }
+    try {
+      const result = await respondToLobbyInvitation({
+        invitationId: id,
+        recipientId: req.userId,
+        accept: Boolean(accept),
+      });
+      if (result.lobby) {
+        hooks?.onLobbyUpdated?.(result.lobby);
+      }
+      res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to respond to invitation';
+      let status = 400;
+      if (message === 'INVITE_NOT_FOUND') status = 404;
+      if (message === 'NOT_AUTHORIZED') status = 403;
+      res.status(status).json({ error: 'LOBBY_INVITE_RESPONSE_FAILED', message });
     }
   });
 
