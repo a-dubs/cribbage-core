@@ -655,6 +655,7 @@ function handleJoinLobby(socket: Socket, data: { lobbyId: string }, callback?: (
   // Add player to lobby
   lobby.players.push({ playerId, displayName: playerDisplayName });
   lobbyIdByPlayerId.set(playerId, lobbyId);
+  socket.join(lobbyId);
   if (lobby.disconnectedPlayerIds.length) {
     lobby.disconnectedPlayerIds = lobby.disconnectedPlayerIds.filter(id => id !== playerId);
   }
@@ -706,6 +707,7 @@ function handleLeaveLobby(socket: Socket, data: { lobbyId: string }, callback?: 
   lobby.players.splice(playerIndex, 1);
   lobbyIdByPlayerId.delete(playerId);
   lobby.disconnectedPlayerIds = lobby.disconnectedPlayerIds.filter(id => id !== playerId);
+  socket.leave(lobbyId);
 
   const playerInfo = connectedPlayers.get(playerId);
   const playerDisplayName = playerInfo?.name || 'Unknown';
@@ -795,6 +797,8 @@ function handleKickPlayer(socket: Socket, data: { lobbyId: string; targetPlayerI
   // Notify the kicked player
   const targetSocketId = playerIdToSocketId.get(targetPlayerId);
   if (targetSocketId) {
+    const targetSocket = io.sockets.sockets.get(targetSocketId);
+    targetSocket?.leave(lobbyId);
     io.to(targetSocketId).emit('kickedFromLobby', { lobbyId, reason: 'You were kicked by the host' });
   }
 
@@ -1188,6 +1192,7 @@ function handleCreateLobby(socket: Socket, data: { playerCount: number; name?: s
 
   lobbiesById.set(lobbyId, lobby);
   lobbyIdByPlayerId.set(playerId, lobbyId);
+  socket.join(lobbyId);
 
   console.log(`[handleCreateLobby] Lobby created: ${lobbyName} (${lobbyId}) by ${hostDisplayName}`);
 
@@ -1368,6 +1373,7 @@ function handleLogin(socket: Socket, data: LoginData): void {
       console.log(`Lobby ${reconnectLobby.name} has finished game - keeping 'finished' status to allow restart`);
     }
     
+    socket.join(reconnectLobbyId);
     io.emit('lobbyUpdated', reconnectLobby);
     io.emit('playerReconnectedToLobby', {
       lobbyId: reconnectLobbyId,
@@ -1410,19 +1416,7 @@ function emitConnectedPlayers(): void {
 }
 
 function emitToLobbyPlayers(lobbyId: string, event: string, payload?: unknown): void {
-  const lobby = lobbiesById.get(lobbyId);
-  if (!lobby) {
-    console.warn(`[emitToLobbyPlayers] Lobby not found for event ${event}: ${lobbyId}`);
-    return;
-  }
-
-  lobby.players.forEach(({ playerId }) => {
-    const socketId = playerIdToSocketId.get(playerId);
-    if (!socketId) {
-      return;
-    }
-    io.to(socketId).emit(event, payload);
-  });
+  io.to(lobbyId).emit(event, payload);
 }
 
 function handleRestartGame(socket: Socket): void {
