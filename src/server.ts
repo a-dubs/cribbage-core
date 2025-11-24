@@ -8,34 +8,32 @@ import {
   GameAgent,
   GameEvent,
   PlayerIdAndName,
-  GameInfo,
   GameSnapshot,
   Phase,
 } from './types';
 import { WebSocketAgent } from './agents/WebSocketAgent';
 import { ExhaustiveSimpleAgent } from './agents/ExhaustiveSimpleAgent';
 import dotenv from 'dotenv';
-import fs from 'fs';
-import path from 'path';
 import { logger } from './utils/logger';
 import { uniqueNamesGenerator, adjectives, animals } from 'unique-names-generator';
 import { v4 as uuidv4 } from 'uuid';
 import { registerHttpApi } from './httpApi';
-import { getProfile, verifyAccessToken } from './services/supabaseService';
+import {
+  completeGameRecord,
+  createGameRecord,
+  getProfile,
+  persistGameEvents,
+  toUuidOrNull,
+  verifyAccessToken,
+} from './services/supabaseService';
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
 dotenv.config();
 
 const PORT = process.env.PORT || 3002;
 const WEB_APP_ORIGIN = process.env.WEB_APP_ORIGIN || 'http://localhost:3000';
-const JSON_DB_DIR = process.env.JSON_DB_DIR || path.join(__dirname, 'json_db');
 const SUPABASE_AUTH_ENABLED = process.env.SUPABASE_AUTH_ENABLED === 'true';
 const SUPABASE_LOBBIES_ENABLED = process.env.SUPABASE_LOBBIES_ENABLED === 'true';
-logger.info('JSON_DB_DIR:', JSON_DB_DIR);
-// create the directory if it does not exist
-if (!fs.existsSync(JSON_DB_DIR)) {
-  fs.mkdirSync(JSON_DB_DIR);
-}
 
 logger.info('PORT:', PORT);
 logger.info('WEB_APP_ORIGIN:', WEB_APP_ORIGIN);
@@ -184,98 +182,6 @@ interface LoginData {
   accessToken: string;
 }
 
-const GAME_EVENTS_FILE = path.join(JSON_DB_DIR, 'gameEvents.json');
-const GAME_INFO_FILE = path.join(JSON_DB_DIR, 'gameInfo.json');
-
-// TODO: convert this to store gamestate and game events since game events alone are not sufficient
-// just write to json file for now (append to list of game events)
-const sendGameEventToDB = (gameEvent: GameEvent): void => {
-  try {
-    const gameEvents: GameEvent[] = fs.existsSync(GAME_EVENTS_FILE)
-      ? (JSON.parse(fs.readFileSync(GAME_EVENTS_FILE, 'utf-8')) as GameEvent[])
-      : [];
-    gameEvents.push(gameEvent);
-    fs.writeFileSync(GAME_EVENTS_FILE, JSON.stringify(gameEvents, null, 2));
-    logger.logGameEvent(
-      gameEvent.playerId ?? 'unknown',
-      gameEvent.actionType,
-      gameEvent.scoreChange ?? 0
-    );
-    logger.logGameState(
-      // roundNumber not present on GameEvent; using snapshotId as proxy for progression
-      Number.isFinite(gameEvent.snapshotId) ? gameEvent.snapshotId : 0,
-      gameEvent.phase,
-      String(gameEvent.snapshotId)
-    );
-    logger.logPendingRequests([]);
-  } catch (error) {
-    logger.error('Error writing game event to DB', error);
-  }
-};
-
-// function that writes GameInfo to a json file
-const startGameInDB = (
-  gameId: string,
-  players: PlayerIdAndName[],
-  lobbyId: string
-): void => {
-  try {
-    // if the file does not exist, create it
-    if (!fs.existsSync(GAME_INFO_FILE)) {
-      fs.writeFileSync(GAME_INFO_FILE, JSON.stringify([], null, 2));
-    }
-    // if gameInfo with matching id already exists, throw error
-    const existingGamesInfo: GameInfo[] = JSON.parse(
-      fs.readFileSync(GAME_INFO_FILE, 'utf-8')
-    ) as GameInfo[];
-    // make sure the existingGamesInfo is an array and not null
-    if (!Array.isArray(existingGamesInfo)) {
-      logger.error('Existing game info is not an array', existingGamesInfo);
-      throw new Error('Existing game info is not an array');
-    }
-    const gameInfoExists = existingGamesInfo.some(game => game.id === gameId);
-    if (gameInfoExists) {
-      logger.error('Game info with this ID already exists', { gameId });
-      throw new Error('Game info with this ID already exists');
-    }
-    // fs.writeFileSync(GAME_INFO_FILE, JSON.stringify(gameInfo, null, 2));
-    existingGamesInfo.push({
-      id: gameId,
-      playerIds: players.map(player => player.id),
-      startTime: new Date(),
-      endTime: null,
-      lobbyId,
-      gameWinner: null,
-    });
-    fs.writeFileSync(
-      GAME_INFO_FILE,
-      JSON.stringify(existingGamesInfo, null, 2)
-    );
-    logger.info('Game info saved to DB', existingGamesInfo[existingGamesInfo.length - 1]);
-  } catch (error) {
-    logger.error('Error writing game info to DB', error);
-  }
-};
-
-const endGameInDB = (gameId: string, winnerId: string): void => {
-  try {
-    const gameInfo: GameInfo[] = JSON.parse(
-      fs.readFileSync(GAME_INFO_FILE, 'utf-8')
-    );
-    const gameInfoIndex = gameInfo.findIndex(game => game.id === gameId);
-    if (gameInfoIndex === -1) {
-      logger.error('Game info with this ID does not exist', { gameId });
-      throw new Error('Game info with this ID does not exist');
-    }
-    gameInfo[gameInfoIndex].endTime = new Date();
-    gameInfo[gameInfoIndex].gameWinner = winnerId;
-    fs.writeFileSync(GAME_INFO_FILE, JSON.stringify(gameInfo, null, 2));
-    logger.info('Game info updated in DB', gameInfo[gameInfoIndex]);
-  } catch (error) {
-    logger.error('Error updating game info in DB', error);
-  }
-};
-
 const connectedPlayers: Map<string, PlayerInfo> = new Map();
 const playerIdToSocketId: Map<string, string> = new Map();
 const socketIdToPlayerId: Map<string, string> = new Map(); // Track socket -> player ID mapping for reconnection
@@ -300,7 +206,75 @@ const gameIdByLobbyId: Map<string, string> = new Map();
 const gameLoopsByLobbyId: Map<string, GameLoop> = new Map();
 const mostRecentGameSnapshotByLobbyId: Map<string, GameSnapshot> = new Map();
 const currentRoundGameEventsByLobbyId: Map<string, GameEvent[]> = new Map();
+const roundStartSnapshotByLobbyId: Map<string, GameSnapshot> = new Map();
+const supabaseGameIdByLobbyId: Map<string, string> = new Map();
 const currentGameBotIdsByLobbyId: Map<string, string[]> = new Map();
+
+function mapPlayersForGameRecord(players: PlayerIdAndName[]): Array<{ playerId: string | null; playerName: string }> {
+  return players.map(player => ({
+    playerId: toUuidOrNull(player.id),
+    playerName: player.name,
+  }));
+}
+
+async function createSupabaseGameForLobby(lobby: Lobby, playersInfo: PlayerIdAndName[], gameLoop: GameLoop): Promise<string | null> {
+  if (!SUPABASE_AUTH_ENABLED) return null;
+  try {
+    const gameId = await createGameRecord({
+      lobbyId: lobby.id,
+      players: mapPlayersForGameRecord(playersInfo),
+      initialState: gameLoop.cribbageGame.getGameState(),
+      startedAt: new Date(),
+    });
+    supabaseGameIdByLobbyId.set(lobby.id, gameId);
+    return gameId;
+  } catch (error) {
+    logger.error('[Supabase] Failed to create game record', error);
+    return null;
+  }
+}
+
+function shouldStoreSnapshotForEvent(event: GameEvent): boolean {
+  return (
+    event.actionType === ActionType.START_ROUND ||
+    event.actionType === ActionType.READY_FOR_NEXT_ROUND ||
+    event.actionType === ActionType.WIN
+  );
+}
+
+function snapshotForEvent(event: GameEvent, latestSnapshot: GameSnapshot, roundStartSnapshot?: GameSnapshot): GameSnapshot | undefined {
+  if (event.actionType === ActionType.START_ROUND) {
+    return roundStartSnapshot ?? latestSnapshot;
+  }
+  if (event.actionType === ActionType.READY_FOR_NEXT_ROUND || event.actionType === ActionType.WIN) {
+    return latestSnapshot;
+  }
+  return undefined;
+}
+
+async function persistRoundHistory(lobbyId: string, latestSnapshot: GameSnapshot): Promise<void> {
+  const supabaseGameId = supabaseGameIdByLobbyId.get(lobbyId);
+  if (!SUPABASE_AUTH_ENABLED || !supabaseGameId) return;
+  const roundEvents = currentRoundGameEventsByLobbyId.get(lobbyId) ?? [];
+  if (roundEvents.length === 0) return;
+
+  const roundStartSnapshot = roundStartSnapshotByLobbyId.get(lobbyId);
+  const eventsWithSnapshots = roundEvents.map(event => {
+    const snapshot = snapshotForEvent(event, latestSnapshot, roundStartSnapshot);
+    return {
+      event,
+      snapshot,
+      storeSnapshot: snapshot ? shouldStoreSnapshotForEvent(event) : false,
+    };
+  });
+
+  try {
+    await persistGameEvents({ gameId: supabaseGameId, events: eventsWithSnapshots });
+    currentRoundGameEventsByLobbyId.set(lobbyId, []);
+  } catch (error) {
+    logger.error('[Supabase] Failed to persist round history', error);
+  }
+}
 
 const PLAYER_DISCONNECT_GRACE_MS = 60 * 1000; // 1 minute to reconnect before cancelling the game
 const FINISHED_LOBBY_TTL_MS = 60 * 60 * 1000; // 1 hour retention for finished lobbies before cleanup
@@ -373,6 +347,8 @@ function clearActiveGameArtifacts(lobbyId: string): Lobby | undefined {
 
   mostRecentGameSnapshotByLobbyId.delete(lobbyId);
   currentRoundGameEventsByLobbyId.delete(lobbyId);
+  roundStartSnapshotByLobbyId.delete(lobbyId);
+  supabaseGameIdByLobbyId.delete(lobbyId);
   gameIdByLobbyId.delete(lobbyId);
   cleanupBots(lobbyId);
 
@@ -472,6 +448,8 @@ function cleanupFinishedLobbies(): void {
     gameLoopsByLobbyId.delete(lobbyId);
     mostRecentGameSnapshotByLobbyId.delete(lobbyId);
     currentRoundGameEventsByLobbyId.delete(lobbyId);
+    roundStartSnapshotByLobbyId.delete(lobbyId);
+    supabaseGameIdByLobbyId.delete(lobbyId);
     currentGameBotIdsByLobbyId.delete(lobbyId);
 
     lobbiesById.delete(lobbyId);
@@ -568,7 +546,10 @@ io.on('connection', socket => {
 
   socket.on('restartGame', () => {
     logger.info('Received restartGame event from socket:', socket.id);
-    handleRestartGame(socket);
+    handleRestartGame(socket).catch(error => {
+      logger.error('Error restarting game:', error);
+      socket.emit('error', { message: 'Failed to restart game' });
+    });
   });
 
   socket.on('getConnectedPlayers', () => {
@@ -1098,21 +1079,29 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, c
   agents.forEach((agent, id) => gameLoop.addAgent(id, agent));
   gameLoopsByLobbyId.set(lobby.id, gameLoop);
   currentRoundGameEventsByLobbyId.set(lobby.id, []);
+  await createSupabaseGameForLobby(lobby, playersInfo, gameLoop);
 
   // Set up gameSnapshot listener to send redacted snapshots to all clients
   let firstSnapshotEmitted = false;
   gameLoop.on('gameSnapshot', (newSnapshot: GameSnapshot) => {
     mostRecentGameSnapshotByLobbyId.set(lobby.id, newSnapshot);
-    sendGameEventToDB(newSnapshot.gameEvent);
     const existingEvents = currentRoundGameEventsByLobbyId.get(lobby.id) || [];
-    let updatedEvents = [...existingEvents, newSnapshot.gameEvent];
-    if (newSnapshot.gameEvent.actionType === ActionType.START_ROUND) {
-      updatedEvents = [];
+    const updatedEvents = [...existingEvents, newSnapshot.gameEvent];
+    const isStartRound = newSnapshot.gameEvent.actionType === ActionType.START_ROUND;
+    const roundEvents = isStartRound ? [newSnapshot.gameEvent] : updatedEvents;
+    if (isStartRound) {
+      roundStartSnapshotByLobbyId.set(lobby.id, newSnapshot);
+      currentRoundGameEventsByLobbyId.set(lobby.id, roundEvents);
+    } else {
+      currentRoundGameEventsByLobbyId.set(lobby.id, updatedEvents);
     }
-    currentRoundGameEventsByLobbyId.set(lobby.id, updatedEvents);
+
+    if (newSnapshot.gameEvent.actionType === ActionType.READY_FOR_NEXT_ROUND || newSnapshot.gameEvent.actionType === ActionType.WIN) {
+      void persistRoundHistory(lobby.id, newSnapshot);
+    }
     
     // Send redacted snapshots to all players
-    sendRedactedSnapshotToAllPlayers(gameLoop, newSnapshot, updatedEvents, lobby.id);
+    sendRedactedSnapshotToAllPlayers(gameLoop, newSnapshot, roundEvents, lobby.id);
     
     // After the first snapshot, ensure all clients received it by re-emitting
     // This helps clients that reset state after gameStartedFromLobby
@@ -1141,8 +1130,6 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, c
   io.emit('lobbyUpdated', lobby);
 
   // Persist game start info
-  startGameInDB(gameId, playersInfo, lobby.id);
-
   // Notify lobby members of the game start
   // Note: Don't emit gameReset here - that's only for restart
   // Just emit gameStartedFromLobby to notify clients
@@ -1370,7 +1357,7 @@ function emitToLobbyPlayers(lobbyId: string, event: string, payload?: unknown): 
   io.to(lobbyId).emit(event, payload);
 }
 
-function handleRestartGame(socket: Socket): void {
+async function handleRestartGame(socket: Socket): Promise<void> {
   const playerId = socketIdToPlayerId.get(socket.id);
   if (!playerId) {
     logger.error('Player ID not found for socket:', socket.id);
@@ -1465,21 +1452,29 @@ function handleRestartGame(socket: Socket): void {
   agents.forEach((agent, id) => gameLoop.addAgent(id, agent));
   gameLoopsByLobbyId.set(lobby.id, gameLoop);
   currentRoundGameEventsByLobbyId.set(lobby.id, []);
+  await createSupabaseGameForLobby(lobby, playersInfo, gameLoop);
 
   // Set up gameSnapshot listener to send redacted snapshots to all clients
   let firstSnapshotEmitted = false;
   gameLoop.on('gameSnapshot', (newSnapshot: GameSnapshot) => {
     mostRecentGameSnapshotByLobbyId.set(lobby.id, newSnapshot);
-    sendGameEventToDB(newSnapshot.gameEvent);
     const existingEvents = currentRoundGameEventsByLobbyId.get(lobby.id) || [];
-    let updatedEvents = [...existingEvents, newSnapshot.gameEvent];
-    if (newSnapshot.gameEvent.actionType === ActionType.START_ROUND) {
-      updatedEvents = [];
+    const updatedEvents = [...existingEvents, newSnapshot.gameEvent];
+    const isStartRound = newSnapshot.gameEvent.actionType === ActionType.START_ROUND;
+    const roundEvents = isStartRound ? [newSnapshot.gameEvent] : updatedEvents;
+    if (isStartRound) {
+      roundStartSnapshotByLobbyId.set(lobby.id, newSnapshot);
+      currentRoundGameEventsByLobbyId.set(lobby.id, roundEvents);
+    } else {
+      currentRoundGameEventsByLobbyId.set(lobby.id, updatedEvents);
     }
-    currentRoundGameEventsByLobbyId.set(lobby.id, updatedEvents);
+
+    if (newSnapshot.gameEvent.actionType === ActionType.READY_FOR_NEXT_ROUND || newSnapshot.gameEvent.actionType === ActionType.WIN) {
+      void persistRoundHistory(lobby.id, newSnapshot);
+    }
     
     // Send redacted snapshots to all players
-    sendRedactedSnapshotToAllPlayers(gameLoop, newSnapshot, updatedEvents, lobby.id);
+    sendRedactedSnapshotToAllPlayers(gameLoop, newSnapshot, roundEvents, lobby.id);
     
     // After the first snapshot, ensure all clients received it by re-emitting
     if (!firstSnapshotEmitted) {
@@ -1504,9 +1499,6 @@ function handleRestartGame(socket: Socket): void {
   lobby.finishedAt = null;
   lobby.disconnectedPlayerIds = [];
   io.emit('lobbyUpdated', lobby);
-
-  // Persist game start info
-  startGameInDB(gameId, playersInfo, lobby.id);
 
   // Notify lobby members of the game restart (same as game start)
   // Small delay to ensure clients have processed gameReset
@@ -1665,7 +1657,28 @@ async function startGame(lobbyId: string): Promise<void> {
       return;
     }
     
-    endGameInDB(currentGameLoop.cribbageGame.getGameState().id, winner);
+    const supabaseGameId = supabaseGameIdByLobbyId.get(lobbyId);
+    if (supabaseGameId) {
+      const latestSnapshot = mostRecentGameSnapshotByLobbyId.get(lobbyId);
+      if (latestSnapshot) {
+        await persistRoundHistory(lobbyId, latestSnapshot);
+      }
+      const finalState = currentGameLoop.cribbageGame.getGameState();
+      const finalScores = finalState.players.map(player => ({
+        playerId: toUuidOrNull(player.id),
+        playerName: player.name,
+        score: player.score,
+        isWinner: winner ? player.id === winner : false,
+      }));
+      await completeGameRecord({
+        gameId: supabaseGameId,
+        winnerId: toUuidOrNull(winner),
+        finalState,
+        finalScores,
+        roundCount: finalState.roundNumber,
+        endedAt: new Date(),
+      });
+    }
 
     // Wait a brief moment to ensure the final snapshot with Phase.END is sent to all clients
     // The endGame() call emits a gameSnapshot event which needs to be processed and sent
@@ -1691,6 +1704,8 @@ async function startGame(lobbyId: string): Promise<void> {
     cleanupBots(lobbyId);
 
     gameIdByLobbyId.delete(lobbyId);
+    supabaseGameIdByLobbyId.delete(lobbyId);
+    roundStartSnapshotByLobbyId.delete(lobbyId);
 
     const completedLobby = lobbiesById.get(lobbyId);
     if (completedLobby) {
@@ -1711,6 +1726,8 @@ async function startGame(lobbyId: string): Promise<void> {
         gameLoopsByLobbyId.delete(lobbyId);
       }
       gameIdByLobbyId.delete(lobbyId);
+      supabaseGameIdByLobbyId.delete(lobbyId);
+      roundStartSnapshotByLobbyId.delete(lobbyId);
       currentRoundGameEventsByLobbyId.delete(lobbyId);
       mostRecentGameSnapshotByLobbyId.delete(lobbyId);
       return;

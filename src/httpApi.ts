@@ -16,6 +16,7 @@ import {
   type LobbyVisibility,
   type SupabaseProfile,
 } from './services/supabaseService';
+import { registerAvatarRoutes } from './routes/avatarRoutes';
 
 type AuthenticatedRequest = Request & { userId?: string; profile?: SupabaseProfile | null };
 
@@ -62,6 +63,7 @@ function mapLobbyPayload(lobby: LobbyPayload): LobbyPayload {
 }
 
 export function registerHttpApi(app: express.Express): void {
+  registerAvatarRoutes(app, authMiddleware);
   app.post('/auth/signup', async (req: Request, res: Response) => {
     if (!requireSupabaseFlag(SUPABASE_AUTH_ENABLED, res)) return;
     const { email, password, username, displayName } = req.body ?? {};

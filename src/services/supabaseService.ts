@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { type GameEvent, type GameSnapshot, type GameState } from '../types';
 
 export type SupabaseProfile = {
   id: string;
@@ -26,13 +27,20 @@ const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 let serviceClient: SupabaseClient | null = null;
 let anonClient: SupabaseClient | null = null;
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 function ensureEnv(): void {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
     throw new Error('Supabase environment is not fully configured');
   }
 }
 
-function getServiceClient(): SupabaseClient {
+export function toUuidOrNull(value: string | null | undefined): string | null {
+  if (!value) return null;
+  return UUID_REGEX.test(value) ? value : null;
+}
+
+export function getServiceClient(): SupabaseClient {
   ensureEnv();
   if (!serviceClient) {
     serviceClient = createClient(SUPABASE_URL as string, SUPABASE_SERVICE_ROLE_KEY as string, {
@@ -474,4 +482,138 @@ export async function respondToFriendRequest(params: {
 export async function getProfileFromToken(token: string): Promise<SupabaseProfile | null> {
   const { userId } = await verifyAccessToken(token);
   return getProfile(userId);
+}
+
+type GamePlayerInput = {
+  playerId: string | null;
+  playerName: string;
+};
+
+type PersistedEvent = {
+  event: GameEvent;
+  snapshot?: GameSnapshot;
+  storeSnapshot?: boolean;
+};
+
+export async function createGameRecord(params: {
+  lobbyId?: string | null;
+  players: GamePlayerInput[];
+  initialState?: GameState | null;
+  startedAt?: Date;
+}): Promise<string> {
+  const client = getServiceClient();
+  const { data, error } = await client
+    .from('games')
+    .insert({
+      lobby_id: params.lobbyId ?? null,
+      started_at: (params.startedAt ?? new Date()).toISOString(),
+      game_state: params.initialState ?? null,
+    })
+    .select('id')
+    .single();
+
+  if (error || !data?.id) {
+    throw new Error(error?.message ?? 'Failed to create game record');
+  }
+
+  if (params.players.length > 0) {
+    const payload = params.players.map(player => ({
+      game_id: data.id,
+      player_id: toUuidOrNull(player.playerId),
+      player_name: player.playerName,
+    }));
+    const { error: playerError } = await client.from('game_players').insert(payload);
+    if (playerError) {
+      throw new Error(playerError.message);
+    }
+  }
+
+  return data.id as string;
+}
+
+export async function persistGameEvents(params: {
+  gameId: string;
+  events: PersistedEvent[];
+}): Promise<void> {
+  if (!params.events.length) return;
+  const client = getServiceClient();
+  const rows = params.events.map(({ event }) => ({
+    game_id: params.gameId,
+    snapshot_id: event.snapshotId,
+    phase: event.phase,
+    action_type: event.actionType,
+    player_id: toUuidOrNull(event.playerId ?? undefined),
+    cards: event.cards ?? null,
+    score_change: event.scoreChange ?? 0,
+    score_breakdown: event.scoreBreakdown ?? null,
+    timestamp: event.timestamp instanceof Date ? event.timestamp.toISOString() : new Date(event.timestamp).toISOString(),
+  }));
+
+  const { data, error } = await client.from('game_events').insert(rows).select('id, snapshot_id');
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const snapshotsPayload: Array<{ game_id: string; snapshot_id: number; game_state: GameState; game_event_id: string }> = [];
+  if (data) {
+    data.forEach((insertedRow: any, index: number) => {
+      const config = params.events[index];
+      if (!config?.storeSnapshot || !config.snapshot) return;
+      snapshotsPayload.push({
+        game_id: params.gameId,
+        snapshot_id: insertedRow.snapshot_id ?? config.event.snapshotId,
+        game_state: config.snapshot.gameState,
+        game_event_id: insertedRow.id as string,
+      });
+    });
+  }
+
+  if (snapshotsPayload.length > 0) {
+    const { error: snapError } = await client.from('game_snapshots').insert(snapshotsPayload);
+    if (snapError) {
+      throw new Error(snapError.message);
+    }
+  }
+}
+
+export async function completeGameRecord(params: {
+  gameId: string;
+  winnerId?: string | null;
+  finalState?: GameState | null;
+  finalScores?: Array<{ playerId: string | null; playerName: string; score: number; isWinner?: boolean }>;
+  roundCount?: number;
+  endedAt?: Date;
+}): Promise<void> {
+  const client = getServiceClient();
+  const { error } = await client
+    .from('games')
+    .update({
+      ended_at: (params.endedAt ?? new Date()).toISOString(),
+      winner_id: toUuidOrNull(params.winnerId ?? undefined),
+      round_count: params.roundCount ?? null,
+      final_scores: params.finalScores ?? null,
+      game_state: params.finalState ?? null,
+    })
+    .eq('id', params.gameId);
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (params.finalScores?.length) {
+    for (const score of params.finalScores) {
+      const matchFilter = toUuidOrNull(score.playerId ?? undefined)
+        ? { game_id: params.gameId, player_id: toUuidOrNull(score.playerId ?? undefined) }
+        : { game_id: params.gameId, player_name: score.playerName };
+      const { error: updateError } = await client
+        .from('game_players')
+        .update({
+          final_score: score.score,
+          is_winner: Boolean(score.isWinner),
+        })
+        .match(matchFilter);
+      if (updateError) {
+        throw new Error(updateError.message);
+      }
+    }
+  }
 }
