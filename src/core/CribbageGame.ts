@@ -22,6 +22,7 @@ import { ScoreBreakdownItem } from '../types';
 import EventEmitter from 'eventemitter3';
 import { isValidDiscard } from './utils';
 import { validatePlayerCount, getPlayerCountConfig, getExpectedCribSize } from '../gameplay/rules';
+import { logger } from '../utils/logger';
 
 export class CribbageGame extends EventEmitter {
   private gameState: GameState;
@@ -183,7 +184,7 @@ export class CribbageGame extends EventEmitter {
         autoCribCards,
         0
       );
-      console.log(`Auto-dealt ${autoCribCards.length} card(s) to crib: ${autoCribCards.join(', ')}`);
+      logger.info(`Auto-dealt ${autoCribCards.length} card(s) to crib: ${autoCribCards.join(', ')}`);
     }
   }
 
@@ -245,8 +246,8 @@ export class CribbageGame extends EventEmitter {
       throw new Error('Invalid cards to discard.');
     }
     if (playerId === this.gameState.players[1].id) {
-      // console.log(`Player ${playerId} hand: ${player.hand.join(', ')}`);
-      // console.log(`Player ${playerId} discards: ${cards.join(', ')}`);
+      // logger.info(`Player ${playerId} hand: ${player.hand.join(', ')}`);
+      // logger.info(`Player ${playerId} discards: ${cards.join(', ')}`);
     }
     // Remove cards from player's hand and add to the crib
     player.hand = player.hand.filter((card: Card) => !cards.includes(card));
@@ -464,7 +465,7 @@ export class CribbageGame extends EventEmitter {
       player.isDealer = player.id === dealerId;
     });
 
-    console.log(`Dealer determined: Player ${dealerId} selected ${dealerCard} (lowest card)`);
+    logger.info(`Dealer determined: Player ${dealerId} selected ${dealerCard} (lowest card)`);
 
     // Transition to DEALING phase
     // NOTE: Do NOT clear dealerSelectionCards here - they need to remain visible
@@ -504,7 +505,7 @@ export class CribbageGame extends EventEmitter {
     this.gameState.peggingTotal = 0;
     const lastCardPlayer = this.gameState.peggingLastCardPlayer;
     this.gameState.peggingLastCardPlayer = null;
-    console.log('PEGGING ROUND OVER; last card player:', lastCardPlayer, '\n');
+    logger.info('PEGGING ROUND OVER; last card player:', lastCardPlayer, '\n');
     this.recordGameEvent(ActionType.START_PEGGING_ROUND, null, null, 0);
     return lastCardPlayer;
   }
@@ -535,7 +536,7 @@ export class CribbageGame extends EventEmitter {
         this.gameState.peggingLastCardPlayer === playerId
       ) {
         // call resetPeggingRound to reset the pegging round and return the ID of last card player
-        console.log(`Player ${playerId} got the last card! and scored 1 point`);
+        logger.info(`Player ${playerId} got the last card! and scored 1 point`);
         // Capture pegging stack BEFORE calling startNewPeggingRound() which clears it
         const peggingStackForBreakdown = [...this.gameState.peggingStack];
         const lastPlayer = this.startNewPeggingRound();
@@ -566,7 +567,7 @@ export class CribbageGame extends EventEmitter {
         this.gameState.peggingGoPlayers.push(playerId);
         this.recordGameEvent(ActionType.GO, playerId, null, 0);
       }
-      console.log(`Player ${playerId} said "Go"`);
+      logger.info(`Player ${playerId} said "Go"`);
       return null;
     }
 
@@ -626,19 +627,19 @@ export class CribbageGame extends EventEmitter {
         lastCardBreakdown
       );
       // call resetPeggingRound to reset the pegging round and return the ID of last card player
-      console.log(`Player ${playerId} played the last card and scored 1 point`);
+      logger.info(`Player ${playerId} played the last card and scored 1 point`);
       return this.startNewPeggingRound();
     }
 
     // if the sum of cards in the pegging stack is 31, end the pegging round
     if (sumOfPeggingStack(this.gameState.peggingStack) === 31) {
       // call resetPeggingRound to reset the pegging round and return the ID of last card player
-      console.log(
+      logger.info(
         `Player ${playerId} played ${card} and got 31 for ${total} points`
       );
       return this.startNewPeggingRound();
     }
-    console.log(
+    logger.info(
       `Player ${playerId} played ${card} for ${total} points - ${sumOfPeggingStack(
         this.gameState.peggingStack
       )}`
