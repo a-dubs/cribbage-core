@@ -95,10 +95,10 @@ export class RandomAgent implements GameAgent {
     playerId: string
   ): Promise<void> {
     const startTime = Date.now();
-    console.log(`[TIMING] RandomAgent.acknowledgeReadyForGameStart START for player ${playerId} at ${startTime}ms`);
+    logger.info(`[TIMING] RandomAgent.acknowledgeReadyForGameStart START for player ${playerId} at ${startTime}ms`);
     // Bots automatically acknowledge - no need to wait
     const endTime = Date.now();
-    console.log(`[TIMING] RandomAgent.acknowledgeReadyForGameStart END for player ${playerId} at ${endTime}ms (took ${endTime - startTime}ms)`);
+    logger.info(`[TIMING] RandomAgent.acknowledgeReadyForGameStart END for player ${playerId} at ${endTime}ms (took ${endTime - startTime}ms)`);
     return Promise.resolve();
   }
 
@@ -107,10 +107,10 @@ export class RandomAgent implements GameAgent {
     playerId: string
   ): Promise<void> {
     const startTime = Date.now();
-    console.log(`[TIMING] RandomAgent.acknowledgeReadyForCounting START for player ${playerId} at ${startTime}ms`);
+    logger.info(`[TIMING] RandomAgent.acknowledgeReadyForCounting START for player ${playerId} at ${startTime}ms`);
     // Bots automatically acknowledge - no need to wait
     const endTime = Date.now();
-    console.log(`[TIMING] RandomAgent.acknowledgeReadyForCounting END for player ${playerId} at ${endTime}ms (took ${endTime - startTime}ms)`);
+    logger.info(`[TIMING] RandomAgent.acknowledgeReadyForCounting END for player ${playerId} at ${endTime}ms (took ${endTime - startTime}ms)`);
     return Promise.resolve();
   }
 
@@ -119,10 +119,10 @@ export class RandomAgent implements GameAgent {
     playerId: string
   ): Promise<void> {
     const startTime = Date.now();
-    console.log(`[TIMING] RandomAgent.acknowledgeReadyForNextRound START for player ${playerId} at ${startTime}ms`);
+    logger.info(`[TIMING] RandomAgent.acknowledgeReadyForNextRound START for player ${playerId} at ${startTime}ms`);
     // Bots automatically acknowledge - no need to wait
     const endTime = Date.now();
-    console.log(`[TIMING] RandomAgent.acknowledgeReadyForNextRound END for player ${playerId} at ${endTime}ms (took ${endTime - startTime}ms)`);
+    logger.info(`[TIMING] RandomAgent.acknowledgeReadyForNextRound END for player ${playerId} at ${endTime}ms (took ${endTime - startTime}ms)`);
     return Promise.resolve();
   }
 }

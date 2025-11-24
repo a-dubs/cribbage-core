@@ -16,7 +16,7 @@ export function isValidPeggingPlay(
 ): boolean {
   const currentSum = sumOfPeggingStack(game.peggingStack);
   if (card === null) {
-    console.log('Trying to say "Go"');
+    logger.info('Trying to say "Go"');
     const validCards = [];
     // Filter out UNKNOWN cards (redacted cards) before checking
     const knownCards = player.peggingHand.filter(c => c !== 'UNKNOWN');
@@ -25,11 +25,11 @@ export function isValidPeggingPlay(
         validCards.push(c);
       }
     }
-    console.log('Valid cards are: ', validCards);
-    console.log('length of valid cards: ', validCards.length);
-    console.log('Current sum is: ', currentSum);
+    logger.info('Valid cards are: ', validCards);
+    logger.info('length of valid cards: ', validCards.length);
+    logger.info('Current sum is: ', currentSum);
     if (validCards.length === 0) {
-      console.log("Not allowed to say 'Go'. Valid cards are: ", validCards);
+      logger.info("Not allowed to say 'Go'. Valid cards are: ", validCards);
     }
     return validCards.length === 0;
   }

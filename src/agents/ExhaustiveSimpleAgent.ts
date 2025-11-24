@@ -2,6 +2,7 @@ import { CribbageGame } from '../core/CribbageGame';
 import { parseCard, scoreHand, scorePegging } from '../core/scoring';
 import { GameSnapshot, Card } from '../types';
 import { RandomAgent } from './RandomAgent';
+import { logger } from '../utils/logger';
 
 const AGENT_ID = 'exhaustive-simple-bot-v1.0';
 const DEBUG_TIMING = process.env.DEBUG_SIMPLE_AGENT_TIMING === 'true';
@@ -50,7 +51,10 @@ export class ExhaustiveSimpleAgent extends RandomAgent {
 
     if (DEBUG_TIMING) {
       const duration = Date.now() - startTime;
-      console.log(`[ExhaustiveSimpleAgent.getBestHand] ${duration}ms for hand of ${hand.length} cards, discarding ${numberOfCardsToDiscard}`);
+      logger.info(
+        '[ExhaustiveSimpleAgent.getBestHand]',
+        `${duration}ms for hand of ${hand.length} cards, discarding ${numberOfCardsToDiscard}`
+      );
     }
     return bestHand;
   }
@@ -90,7 +94,7 @@ export class ExhaustiveSimpleAgent extends RandomAgent {
     
     if (DEBUG_TIMING) {
       const duration = Date.now() - startTime;
-      console.log(`[ExhaustiveSimpleAgent.discard] ${duration}ms for player ${playerId}`);
+      logger.info('[ExhaustiveSimpleAgent.discard]', `${duration}ms for player ${playerId}`);
     }
     
     return Promise.resolve(discards);
@@ -187,8 +191,14 @@ export class ExhaustiveSimpleAgent extends RandomAgent {
     
     if (DEBUG_TIMING) {
       const totalDuration = Date.now() - startTime;
-      console.log(`[ExhaustiveSimpleAgent.makeMove] ${totalDuration}ms total (parse: ${parseDuration}ms, filter: ${filterDuration}ms, scoring: ${scoringDuration}ms, select: ${selectDuration}ms)`);
-      console.log(`  - Valid cards: ${validPlayedCards.length}, Possible remaining: ${possibleRemainingCards.length}`);
+      logger.info(
+        '[ExhaustiveSimpleAgent.makeMove]',
+        `${totalDuration}ms total (parse: ${parseDuration}ms, filter: ${filterDuration}ms, scoring: ${scoringDuration}ms, select: ${selectDuration}ms)`
+      );
+      logger.debug(
+        '[ExhaustiveSimpleAgent.makeMove]',
+        `Valid cards: ${validPlayedCards.length}, Possible remaining: ${possibleRemainingCards.length}`
+      );
     }
     
     return Promise.resolve(bestCard.card);

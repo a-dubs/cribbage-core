@@ -67,7 +67,7 @@ const server = http.createServer((req, res) => {
 const getAllowedOrigins = (): string | string[] | ((origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => void) => {
   if (!WEB_APP_ORIGIN) {
     // If no origin specified, allow all (development only)
-    console.warn('WEB_APP_ORIGIN not set - allowing all origins (development only)');
+    logger.warn('WEB_APP_ORIGIN not set - allowing all origins (development only)');
     // Return a function that always allows
     return (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
       callback(null, true);
@@ -190,9 +190,20 @@ const sendGameEventToDB = (gameEvent: GameEvent): void => {
       : [];
     gameEvents.push(gameEvent);
     fs.writeFileSync(GAME_EVENTS_FILE, JSON.stringify(gameEvents, null, 2));
-    console.log('Game event saved to DB:', gameEvent);
+    logger.logGameEvent(
+      gameEvent.playerId ?? 'unknown',
+      gameEvent.actionType,
+      gameEvent.scoreChange ?? 0
+    );
+    logger.logGameState(
+      // roundNumber not present on GameEvent; using snapshotId as proxy for progression
+      Number.isFinite(gameEvent.snapshotId) ? gameEvent.snapshotId : 0,
+      gameEvent.phase,
+      String(gameEvent.snapshotId)
+    );
+    logger.logPendingRequests([]);
   } catch (error) {
-    console.error('Error writing game event to DB:', error);
+    logger.error('Error writing game event to DB', error);
   }
 };
 
@@ -213,12 +224,12 @@ const startGameInDB = (
     ) as GameInfo[];
     // make sure the existingGamesInfo is an array and not null
     if (!Array.isArray(existingGamesInfo)) {
-      console.error('Existing game info is not an array:', existingGamesInfo);
+      logger.error('Existing game info is not an array', existingGamesInfo);
       throw new Error('Existing game info is not an array');
     }
     const gameInfoExists = existingGamesInfo.some(game => game.id === gameId);
     if (gameInfoExists) {
-      console.error('Game info with this ID already exists:', gameId);
+      logger.error('Game info with this ID already exists', { gameId });
       throw new Error('Game info with this ID already exists');
     }
     // fs.writeFileSync(GAME_INFO_FILE, JSON.stringify(gameInfo, null, 2));
@@ -234,12 +245,9 @@ const startGameInDB = (
       GAME_INFO_FILE,
       JSON.stringify(existingGamesInfo, null, 2)
     );
-    console.log(
-      'Game info saved to DB:',
-      existingGamesInfo[existingGamesInfo.length - 1]
-    );
+    logger.info('Game info saved to DB', existingGamesInfo[existingGamesInfo.length - 1]);
   } catch (error) {
-    console.error('Error writing game info to DB:', error);
+    logger.error('Error writing game info to DB', error);
   }
 };
 
@@ -250,15 +258,15 @@ const endGameInDB = (gameId: string, winnerId: string): void => {
     );
     const gameInfoIndex = gameInfo.findIndex(game => game.id === gameId);
     if (gameInfoIndex === -1) {
-      console.error('Game info with this ID does not exist:', gameId);
+      logger.error('Game info with this ID does not exist', { gameId });
       throw new Error('Game info with this ID does not exist');
     }
     gameInfo[gameInfoIndex].endTime = new Date();
     gameInfo[gameInfoIndex].gameWinner = winnerId;
     fs.writeFileSync(GAME_INFO_FILE, JSON.stringify(gameInfo, null, 2));
-    console.log('Game info updated in DB:', gameInfo[gameInfoIndex]);
+    logger.info('Game info updated in DB', gameInfo[gameInfoIndex]);
   } catch (error) {
-    console.error('Error updating game info in DB:', error);
+    logger.error('Error updating game info in DB', error);
   }
 };
 
@@ -319,12 +327,12 @@ function cleanupBots(lobbyId: string): void {
   if (!botIds || botIds.length === 0) {
     return;
   }
-  console.log(`Cleaning up ${botIds.length} bots for lobby ${lobbyId}`);
+  logger.info(`Cleaning up ${botIds.length} bots for lobby ${lobbyId}`);
   botIds.forEach(botId => {
     connectedPlayers.delete(botId);
     playerIdToSocketId.delete(botId);
     socketIdToPlayerId.delete(botId);
-    console.log(`Removed bot: ${botId}`);
+    logger.info(`Removed bot: ${botId}`);
   });
   currentGameBotIdsByLobbyId.delete(lobbyId);
   emitConnectedPlayers();
@@ -378,18 +386,18 @@ function handleDisconnectGracePeriodExpired(playerId: string, lobbyId: string): 
   if (lobby.players.length === 0) {
     lobby.status = 'finished';
     lobby.finishedAt = Date.now();
-    console.warn(`[Disconnect] Lobby ${lobbyId} is now empty after grace expiry; closing lobby.`);
+    logger.warn(`[Disconnect] Lobby ${lobbyId} is now empty after grace expiry; closing lobby.`);
     io.emit('lobbyClosed', { lobbyId });
     return;
   }
 
   if (lobby.hostId === playerId) {
     lobby.hostId = lobby.players[0].playerId;
-    console.warn(`[Disconnect] Host ${playerId} dropped. Transferring host to ${lobby.hostId} for lobby ${lobbyId}.`);
+    logger.warn(`[Disconnect] Host ${playerId} dropped. Transferring host to ${lobby.hostId} for lobby ${lobbyId}.`);
   }
 
   if (wasTracked) {
-    console.warn(`[Disconnect] Grace period expired for player ${playerId} in lobby ${lobbyId}`);
+    logger.warn(`[Disconnect] Grace period expired for player ${playerId} in lobby ${lobbyId}`);
   }
 
   lobby.status = 'waiting';
@@ -451,7 +459,7 @@ function cleanupFinishedLobbies(): void {
 
     lobbiesById.delete(lobbyId);
     io.emit('lobbyClosed', { lobbyId });
-    console.log(`[cleanupFinishedLobbies] Removed finished lobby ${lobbyId}`);
+    logger.info(`[cleanupFinishedLobbies] Removed finished lobby ${lobbyId}`);
   });
 }
 
@@ -475,74 +483,74 @@ io.on('connection', socket => {
   const address = socket.handshake.address;
   
   // Auth was already checked in middleware, so this socket is authenticated
-  console.log(`[Connection] ✓ Socket connected: ${socket.id} from ${origin || 'proxy'} (${address})`);
+  logger.info(`[Connection] ✓ Socket connected: ${socket.id} from ${origin || 'proxy'} (${address})`);
 
   // send the connected players to the clients even before login
   // so they can see who is already connected
   emitConnectedPlayers();
 
   socket.on('login', (data: LoginData) => {
-    console.log('Received login event from socket:', socket.id);
+    logger.info('Received login event from socket:', socket.id);
     handleLogin(socket, data);
   });
 
   socket.on('createLobby', (data: { playerCount: number; name?: string }, callback?: (response: any) => void) => {
-    console.log('Received createLobby event from socket:', socket.id, 'playerCount:', data?.playerCount);
+    logger.info('Received createLobby event from socket:', socket.id, 'playerCount:', data?.playerCount);
     handleCreateLobby(socket, data, callback);
   });
 
   socket.on('joinLobby', (data: { lobbyId: string }, callback?: (response: any) => void) => {
-    console.log('Received joinLobby event from socket:', socket.id, 'lobbyId:', data?.lobbyId);
+    logger.info('Received joinLobby event from socket:', socket.id, 'lobbyId:', data?.lobbyId);
     handleJoinLobby(socket, data, callback);
   });
 
   socket.on('leaveLobby', (data: { lobbyId: string }, callback?: (response: any) => void) => {
-    console.log('Received leaveLobby event from socket:', socket.id, 'lobbyId:', data?.lobbyId);
+    logger.info('Received leaveLobby event from socket:', socket.id, 'lobbyId:', data?.lobbyId);
     handleLeaveLobby(socket, data, callback);
   });
 
   socket.on('kickPlayer', (data: { lobbyId: string; targetPlayerId: string }, callback?: (response: any) => void) => {
-    console.log('Received kickPlayer event from socket:', socket.id, 'lobbyId:', data?.lobbyId, 'target:', data?.targetPlayerId);
+    logger.info('Received kickPlayer event from socket:', socket.id, 'lobbyId:', data?.lobbyId, 'target:', data?.targetPlayerId);
     handleKickPlayer(socket, data, callback);
   });
 
   socket.on('updateLobbySize', (data: { lobbyId: string; playerCount: number }, callback?: (response: any) => void) => {
-    console.log('Received updateLobbySize event from socket:', socket.id, 'lobbyId:', data?.lobbyId, 'playerCount:', data?.playerCount);
+    logger.info('Received updateLobbySize event from socket:', socket.id, 'lobbyId:', data?.lobbyId, 'playerCount:', data?.playerCount);
     handleUpdateLobbySize(socket, data, callback);
   });
 
   socket.on('updateLobbyName', (data: { lobbyId: string; name: string }, callback?: (response: any) => void) => {
-    console.log('Received updateLobbyName event from socket:', socket.id, 'lobbyId:', data?.lobbyId, 'name:', data?.name);
+    logger.info('Received updateLobbyName event from socket:', socket.id, 'lobbyId:', data?.lobbyId, 'name:', data?.name);
     handleUpdateLobbyName(socket, data, callback);
   });
 
   socket.on('listLobbies', () => {
-    console.log('Received listLobbies request from socket:', socket.id);
+    logger.info('Received listLobbies request from socket:', socket.id);
     handleListLobbies(socket);
   });
 
   socket.on('startLobbyGame', (data: { lobbyId: string }, callback?: (response: any) => void) => {
-    console.log('Received startLobbyGame event from socket:', socket.id, 'lobbyId:', data?.lobbyId);
+    logger.info('Received startLobbyGame event from socket:', socket.id, 'lobbyId:', data?.lobbyId);
     handleStartLobbyGame(socket, data, callback).catch(error => {
-      console.error('Error starting lobby game:', error);
+      logger.error('Error starting lobby game:', error);
       if (callback) callback({ error: 'Failed to start game' });
       socket.emit('error', { message: 'Failed to start game' });
     });
   });
 
   socket.on('restartGame', () => {
-    console.log('Received restartGame event from socket:', socket.id);
+    logger.info('Received restartGame event from socket:', socket.id);
     handleRestartGame(socket);
   });
 
   socket.on('getConnectedPlayers', () => {
-    console.log('Received getConnectedPlayers request from socket:', socket.id);
+    logger.info('Received getConnectedPlayers request from socket:', socket.id);
     // Send current connected players to this specific client
     const playersIdAndName: PlayerIdAndName[] = [];
     connectedPlayers.forEach(playerInfo => {
       playersIdAndName.push({ id: playerInfo.id, name: playerInfo.name });
     });
-    console.log('Sending connected players to requesting client:', playersIdAndName);
+    logger.info('Sending connected players to requesting client:', playersIdAndName);
     socket.emit('connectedPlayers', playersIdAndName);
   });
 
@@ -552,7 +560,7 @@ io.on('connection', socket => {
   // NOTE: playAgain handler removed - use lobby system for rematch.
 
   socket.on('disconnect', (reason) => {
-    console.log(`A socket disconnected: ${socket.id}, Reason: ${reason}`);
+    logger.info(`A socket disconnected: ${socket.id}, Reason: ${reason}`);
     const playerId = socketIdToPlayerId.get(socket.id);
     
     if (playerId) {
@@ -565,10 +573,10 @@ io.on('connection', socket => {
             // For waiting lobbies, don't remove players immediately on disconnect
             // They can reconnect and resume. Only remove if they explicitly leave or are kicked.
             // Keep the lobbyIdByPlayerId mapping so handleLogin can restore them
-            console.log(`Player ${playerId} disconnected from waiting lobby ${lobby.name} - keeping lobby membership for reconnection`);
+            logger.info(`Player ${playerId} disconnected from waiting lobby ${lobby.name} - keeping lobby membership for reconnection`);
             // Don't remove from lobby or delete mapping - let them reconnect
           } else if (lobby.status === 'in_progress') {
-            console.log(`Player ${playerId} disconnected during an active game in lobby ${lobby.name}`);
+            logger.info(`Player ${playerId} disconnected during an active game in lobby ${lobby.name}`);
             handlePlayerInGameDisconnect(lobby, playerId);
           }
         }
@@ -581,17 +589,17 @@ io.on('connection', socket => {
         connectedPlayers.delete(playerId);
         playerIdToSocketId.delete(playerId);
         socketIdToPlayerId.delete(socket.id);
-        console.log(`Removed player ${playerId} (socket ${socket.id})`);
+        logger.info(`Removed player ${playerId} (socket ${socket.id})`);
         // send updated connected players to all clients
         emitConnectedPlayers();
       } else {
-        console.log('Player is part of an active game. Keeping player record for reconnection.');
+        logger.info('Player is part of an active game. Keeping player record for reconnection.');
       }
     }
   });
 
   socket.on('heartbeat', () => {
-    console.log('Received heartbeat from client');
+    logger.info('Received heartbeat from client');
   });
 });
 
@@ -603,7 +611,7 @@ function generateSecretKey(): string {
 function handleJoinLobby(socket: Socket, data: { lobbyId: string }, callback?: (response: any) => void): void {
   const playerId = socketIdToPlayerId.get(socket.id);
   if (!playerId) {
-    console.error('Player ID not found for socket:', socket.id);
+    logger.error('Player ID not found for socket:', socket.id);
     const error = { error: 'Not logged in' };
     if (callback) callback(error);
     socket.emit('error', { message: 'Not logged in' });
@@ -614,7 +622,7 @@ function handleJoinLobby(socket: Socket, data: { lobbyId: string }, callback?: (
 
   // Check if player is already in a lobby
   if (lobbyIdByPlayerId.has(playerId)) {
-    console.error('Player already in a lobby:', playerId);
+    logger.error('Player already in a lobby:', playerId);
     const error = { error: 'Already in a lobby' };
     if (callback) callback(error);
     socket.emit('error', { message: 'Already in a lobby' });
@@ -624,7 +632,7 @@ function handleJoinLobby(socket: Socket, data: { lobbyId: string }, callback?: (
   // Check if lobby exists
   const lobby = lobbiesById.get(lobbyId);
   if (!lobby) {
-    console.error('Lobby not found:', lobbyId);
+    logger.error('Lobby not found:', lobbyId);
     const error = { error: 'Lobby not found' };
     if (callback) callback(error);
     socket.emit('error', { message: 'Lobby not found' });
@@ -633,7 +641,7 @@ function handleJoinLobby(socket: Socket, data: { lobbyId: string }, callback?: (
 
   // Check if lobby is waiting
   if (lobby.status !== 'waiting') {
-    console.error('Lobby not waiting:', lobbyId, 'status:', lobby.status);
+    logger.error('Lobby not waiting:', lobbyId, 'status:', lobby.status);
     const error = { error: 'Lobby is not accepting new players' };
     if (callback) callback(error);
     socket.emit('error', { message: 'Lobby is not accepting new players' });
@@ -642,7 +650,7 @@ function handleJoinLobby(socket: Socket, data: { lobbyId: string }, callback?: (
 
   // Check if lobby is full
   if (lobby.players.length >= lobby.playerCount) {
-    console.error('Lobby is full:', lobbyId);
+    logger.error('Lobby is full:', lobbyId);
     const error = { error: 'Lobby is full' };
     if (callback) callback(error);
     socket.emit('error', { message: 'Lobby is full' });
@@ -660,7 +668,7 @@ function handleJoinLobby(socket: Socket, data: { lobbyId: string }, callback?: (
     lobby.disconnectedPlayerIds = lobby.disconnectedPlayerIds.filter(id => id !== playerId);
   }
 
-  console.log(`Player ${playerDisplayName} joined lobby ${lobby.name} (${lobbyId})`);
+  logger.info(`Player ${playerDisplayName} joined lobby ${lobby.name} (${lobbyId})`);
 
   // Send callback response
   if (callback) {
@@ -674,7 +682,7 @@ function handleJoinLobby(socket: Socket, data: { lobbyId: string }, callback?: (
 function handleLeaveLobby(socket: Socket, data: { lobbyId: string }, callback?: (response: any) => void): void {
   const playerId = socketIdToPlayerId.get(socket.id);
   if (!playerId) {
-    console.error('Player ID not found for socket:', socket.id);
+    logger.error('Player ID not found for socket:', socket.id);
     const error = { error: 'Not logged in' };
     if (callback) callback(error);
     socket.emit('error', { message: 'Not logged in' });
@@ -686,7 +694,7 @@ function handleLeaveLobby(socket: Socket, data: { lobbyId: string }, callback?: 
   // Check if lobby exists
   const lobby = lobbiesById.get(lobbyId);
   if (!lobby) {
-    console.error('Lobby not found:', lobbyId);
+    logger.error('Lobby not found:', lobbyId);
     const error = { error: 'Lobby not found' };
     if (callback) callback(error);
     socket.emit('error', { message: 'Lobby not found' });
@@ -696,7 +704,7 @@ function handleLeaveLobby(socket: Socket, data: { lobbyId: string }, callback?: 
   // Check if player is in this lobby
   const playerIndex = lobby.players.findIndex(p => p.playerId === playerId);
   if (playerIndex === -1) {
-    console.error('Player not in lobby:', playerId, lobbyId);
+    logger.error('Player not in lobby:', playerId, lobbyId);
     const error = { error: 'You are not in this lobby' };
     if (callback) callback(error);
     socket.emit('error', { message: 'You are not in this lobby' });
@@ -711,7 +719,7 @@ function handleLeaveLobby(socket: Socket, data: { lobbyId: string }, callback?: 
 
   const playerInfo = connectedPlayers.get(playerId);
   const playerDisplayName = playerInfo?.name || 'Unknown';
-  console.log(`Player ${playerDisplayName} left lobby ${lobby.name} (${lobbyId})`);
+  logger.info(`Player ${playerDisplayName} left lobby ${lobby.name} (${lobbyId})`);
 
   // Send callback response
   if (callback) {
@@ -722,7 +730,7 @@ function handleLeaveLobby(socket: Socket, data: { lobbyId: string }, callback?: 
   if (playerId === lobby.hostId && lobby.players.length > 0) {
     const newHostId = lobby.players[0].playerId;
     lobby.hostId = newHostId;
-    console.log(`Host transferred to ${lobby.players[0].displayName} in lobby ${lobby.name}`);
+    logger.info(`Host transferred to ${lobby.players[0].displayName} in lobby ${lobby.name}`);
   }
 
   // If lobby is empty, mark as finished
@@ -730,7 +738,7 @@ function handleLeaveLobby(socket: Socket, data: { lobbyId: string }, callback?: 
     lobby.status = 'finished';
     lobby.finishedAt = Date.now();
     lobby.disconnectedPlayerIds = [];
-    console.log(`Lobby ${lobby.name} is now empty, marking as finished`);
+    logger.info(`Lobby ${lobby.name} is now empty, marking as finished`);
     io.emit('lobbyClosed', { lobbyId });
     return;
   }
@@ -742,7 +750,7 @@ function handleLeaveLobby(socket: Socket, data: { lobbyId: string }, callback?: 
 function handleKickPlayer(socket: Socket, data: { lobbyId: string; targetPlayerId: string }, callback?: (response: any) => void): void {
   const playerId = socketIdToPlayerId.get(socket.id);
   if (!playerId) {
-    console.error('Player ID not found for socket:', socket.id);
+    logger.error('Player ID not found for socket:', socket.id);
     const error = { error: 'Not logged in' };
     if (callback) callback(error);
     socket.emit('error', { message: 'Not logged in' });
@@ -754,7 +762,7 @@ function handleKickPlayer(socket: Socket, data: { lobbyId: string; targetPlayerI
   // Check if lobby exists
   const lobby = lobbiesById.get(lobbyId);
   if (!lobby) {
-    console.error('Lobby not found:', lobbyId);
+    logger.error('Lobby not found:', lobbyId);
     const error = { error: 'Lobby not found' };
     if (callback) callback(error);
     socket.emit('error', { message: 'Lobby not found' });
@@ -763,7 +771,7 @@ function handleKickPlayer(socket: Socket, data: { lobbyId: string; targetPlayerI
 
   // Check if player is host
   if (playerId !== lobby.hostId) {
-    console.error('Not the host:', playerId, 'actual host:', lobby.hostId);
+    logger.error('Not the host:', playerId, 'actual host:', lobby.hostId);
     const error = { error: 'Only the host can kick players' };
     if (callback) callback(error);
     socket.emit('error', { message: 'Only the host can kick players' });
@@ -773,7 +781,7 @@ function handleKickPlayer(socket: Socket, data: { lobbyId: string; targetPlayerI
   // Check if target is in this lobby
   const targetIndex = lobby.players.findIndex(p => p.playerId === targetPlayerId);
   if (targetIndex === -1) {
-    console.error('Target player not in lobby:', targetPlayerId, lobbyId);
+    logger.error('Target player not in lobby:', targetPlayerId, lobbyId);
     const error = { error: 'Player not in this lobby' };
     if (callback) callback(error);
     socket.emit('error', { message: 'Player not in this lobby' });
@@ -787,7 +795,7 @@ function handleKickPlayer(socket: Socket, data: { lobbyId: string; targetPlayerI
   lobbyIdByPlayerId.delete(targetPlayerId);
   lobby.disconnectedPlayerIds = lobby.disconnectedPlayerIds.filter(id => id !== targetPlayerId);
 
-  console.log(`Player ${targetPlayerName} was kicked from lobby ${lobby.name} (${lobbyId}) by host ${playerId}`);
+  logger.info(`Player ${targetPlayerName} was kicked from lobby ${lobby.name} (${lobbyId}) by host ${playerId}`);
 
   // Send callback response
   if (callback) {
@@ -807,7 +815,7 @@ function handleKickPlayer(socket: Socket, data: { lobbyId: string; targetPlayerI
     lobby.status = 'finished';
     lobby.finishedAt = Date.now();
     lobby.disconnectedPlayerIds = [];
-    console.log(`Lobby ${lobby.name} is now empty, marking as finished`);
+    logger.info(`Lobby ${lobby.name} is now empty, marking as finished`);
     io.emit('lobbyClosed', { lobbyId });
     return;
   }
@@ -819,7 +827,7 @@ function handleKickPlayer(socket: Socket, data: { lobbyId: string; targetPlayerI
 function handleUpdateLobbySize(socket: Socket, data: { lobbyId: string; playerCount: number }, callback?: (response: any) => void): void {
   const playerId = socketIdToPlayerId.get(socket.id);
   if (!playerId) {
-    console.error('Player ID not found for socket:', socket.id);
+    logger.error('Player ID not found for socket:', socket.id);
     const error = { error: 'Not logged in' };
     if (callback) callback(error);
     socket.emit('error', { message: 'Not logged in' });
@@ -863,7 +871,7 @@ function handleUpdateLobbySize(socket: Socket, data: { lobbyId: string; playerCo
 
   // Update the player count
   lobby.playerCount = playerCount;
-  console.log(`Lobby ${lobby.name} size updated to ${playerCount} by host ${playerId}`);
+  logger.info(`Lobby ${lobby.name} size updated to ${playerCount} by host ${playerId}`);
 
   // Send callback response
   if (callback) {
@@ -877,7 +885,7 @@ function handleUpdateLobbySize(socket: Socket, data: { lobbyId: string; playerCo
 function handleUpdateLobbyName(socket: Socket, data: { lobbyId: string; name: string }, callback?: (response: any) => void): void {
   const playerId = socketIdToPlayerId.get(socket.id);
   if (!playerId) {
-    console.error('Player ID not found for socket:', socket.id);
+    logger.error('Player ID not found for socket:', socket.id);
     const error = { error: 'Not logged in' };
     if (callback) callback(error);
     socket.emit('error', { message: 'Not logged in' });
@@ -929,7 +937,7 @@ function handleUpdateLobbyName(socket: Socket, data: { lobbyId: string; name: st
 
   // Update the lobby name
   lobby.name = trimmedName;
-  console.log(`Lobby ${lobbyId} name updated to "${trimmedName}" by host ${playerId}`);
+  logger.info(`Lobby ${lobbyId} name updated to "${trimmedName}" by host ${playerId}`);
 
   // Send callback response
   if (callback) {
@@ -956,14 +964,14 @@ function handleListLobbies(socket: Socket): void {
       };
     });
 
-  console.log(`Sending ${waitingLobbies.length} waiting lobbies to client`);
+  logger.info(`Sending ${waitingLobbies.length} waiting lobbies to client`);
   socket.emit('lobbyList', { lobbies: waitingLobbies });
 }
 
 async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, callback?: (response: any) => void): Promise<void> {
   const playerId = socketIdToPlayerId.get(socket.id);
   if (!playerId) {
-    console.error('Player ID not found for socket:', socket.id);
+    logger.error('Player ID not found for socket:', socket.id);
     const errorMsg = 'Not logged in';
     socket.emit('error', { message: errorMsg });
     if (callback) {
@@ -977,7 +985,7 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, c
   // Check if lobby exists
   const lobby = lobbiesById.get(lobbyId);
   if (!lobby) {
-    console.error('Lobby not found:', lobbyId);
+    logger.error('Lobby not found:', lobbyId);
     const errorMsg = 'Lobby not found';
     socket.emit('error', { message: errorMsg });
     if (callback) {
@@ -988,7 +996,7 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, c
 
   // Check if player is host
   if (playerId !== lobby.hostId) {
-    console.error('Not the host:', playerId, 'actual host:', lobby.hostId);
+    logger.error('Not the host:', playerId, 'actual host:', lobby.hostId);
     const errorMsg = 'Only the host can start the game';
     socket.emit('error', { message: errorMsg });
     if (callback) {
@@ -999,7 +1007,7 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, c
 
   // Check if lobby is waiting
   if (lobby.status !== 'waiting') {
-    console.error('Lobby not waiting:', lobbyId, 'status:', lobby.status);
+    logger.error('Lobby not waiting:', lobbyId, 'status:', lobby.status);
     const errorMsg = 'Lobby is not in waiting state';
     socket.emit('error', { message: errorMsg });
     if (callback) {
@@ -1010,7 +1018,7 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, c
 
   // Check if a game is already running for this lobby
   if (gameLoopsByLobbyId.has(lobby.id)) {
-    console.error(`Game loop already exists for lobby ${lobby.id}. Cannot start new game.`);
+    logger.error(`Game loop already exists for lobby ${lobby.id}. Cannot start new game.`);
     const errorMsg = 'A game is already in progress for this lobby';
     socket.emit('error', { message: errorMsg });
     if (callback) {
@@ -1027,7 +1035,7 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, c
 
   // Calculate bots needed
   const botsNeeded = Math.max(0, lobby.playerCount - playersInfo.length);
-  console.log(`Starting lobby game: ${lobby.name} with ${playersInfo.length} humans and ${botsNeeded} bots needed`);
+  logger.info(`Starting lobby game: ${lobby.name} with ${playersInfo.length} humans and ${botsNeeded} bots needed`);
 
   // Create bots
   const botNames = ['Bot Alex', 'Bot Morgan', 'Bot Jordan'];
@@ -1044,7 +1052,7 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, c
     };
     connectedPlayers.set(botId, botPlayerInfo);
     newBotIds.push(botId);
-    console.log(`Added bot: ${botName} (ID: ${botId})`);
+    logger.info(`Added bot: ${botName} (ID: ${botId})`);
   }
 
   // Create GameLoop using players from the lobby
@@ -1092,7 +1100,7 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, c
         const latestSnapshot = mostRecentGameSnapshotByLobbyId.get(lobby.id);
         const latestEvents = currentRoundGameEventsByLobbyId.get(lobby.id) || [];
         if (latestSnapshot === newSnapshot) {
-          console.log('Re-emitting first game snapshot to ensure all clients received it');
+          logger.info('Re-emitting first game snapshot to ensure all clients received it');
           sendRedactedSnapshotToAllPlayers(gameLoop, latestSnapshot, latestEvents, lobby.id);
         }
       }, 100);
@@ -1125,19 +1133,19 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, c
   // Start the game loop (this will emit snapshots as the game progresses)
   // Don't await - let it run in the background
   startGame(lobby.id).catch(error => {
-    console.error('[handleStartLobbyGame] Error in game loop:', error);
+    logger.error('[handleStartLobbyGame] Error in game loop:', error);
   });
 }
 
 function handleCreateLobby(socket: Socket, data: { playerCount: number; name?: string }, callback?: (response: any) => void): void {
   const playerId = socketIdToPlayerId.get(socket.id);
-  console.log(`[handleCreateLobby] Starting for player: ${playerId}, callback present: ${!!callback}`);
+  logger.info(`[handleCreateLobby] Starting for player: ${playerId}, callback present: ${!!callback}`);
   
   if (!playerId) {
-    console.error('Player ID not found for socket:', socket.id);
+    logger.error('Player ID not found for socket:', socket.id);
     const error = { error: 'Not logged in' };
     if (callback) {
-      console.log('[handleCreateLobby] Sending error callback: Not logged in');
+      logger.info('[handleCreateLobby] Sending error callback: Not logged in');
       callback(error);
     }
     socket.emit('error', { message: 'Not logged in' });
@@ -1147,10 +1155,10 @@ function handleCreateLobby(socket: Socket, data: { playerCount: number; name?: s
   // Check if player is already in a lobby
   if (lobbyIdByPlayerId.has(playerId)) {
     const existingLobbyId = lobbyIdByPlayerId.get(playerId);
-    console.error(`[handleCreateLobby] Player ${playerId} already in lobby ${existingLobbyId}`);
+    logger.error(`[handleCreateLobby] Player ${playerId} already in lobby ${existingLobbyId}`);
     const error = { error: 'Already in a lobby' };
     if (callback) {
-      console.log('[handleCreateLobby] Sending error callback: Already in a lobby');
+      logger.info('[handleCreateLobby] Sending error callback: Already in a lobby');
       callback(error);
     }
     socket.emit('error', { message: 'Already in a lobby' });
@@ -1161,7 +1169,7 @@ function handleCreateLobby(socket: Socket, data: { playerCount: number; name?: s
 
   // Validate player count
   if (!playerCount || playerCount < 2 || playerCount > 4) {
-    console.error('Invalid player count:', playerCount);
+    logger.error('Invalid player count:', playerCount);
     const error = { error: 'Player count must be between 2 and 4' };
     if (callback) callback(error);
     socket.emit('error', { message: 'Player count must be between 2 and 4' });
@@ -1194,14 +1202,14 @@ function handleCreateLobby(socket: Socket, data: { playerCount: number; name?: s
   lobbyIdByPlayerId.set(playerId, lobbyId);
   socket.join(lobbyId);
 
-  console.log(`[handleCreateLobby] Lobby created: ${lobbyName} (${lobbyId}) by ${hostDisplayName}`);
+  logger.info(`[handleCreateLobby] Lobby created: ${lobbyName} (${lobbyId}) by ${hostDisplayName}`);
 
   // Send callback response with the created lobby
   if (callback) {
-    console.log('[handleCreateLobby] Sending success callback with lobby:', lobbyId);
+    logger.info('[handleCreateLobby] Sending success callback with lobby:', lobbyId);
     callback({ lobby });
   } else {
-    console.error('[handleCreateLobby] WARNING: No callback provided!');
+    logger.error('[handleCreateLobby] WARNING: No callback provided!');
   }
 
   // Broadcast the new lobby to all clients
@@ -1217,7 +1225,7 @@ function handleLogin(socket: Socket, data: LoginData): void {
   let playerId: string;
   let newSecretKey: string;
 
-  console.log('Handling login for user:', username, 'socket:', socket.id, 'hasSecretKey:', !!secretKey);
+  logger.info('Handling login for user:', username, 'socket:', socket.id, 'hasSecretKey:', !!secretKey);
 
   // Check if this socket already has a player ID (reconnection scenario)
   const existingPlayerId = socketIdToPlayerId.get(socket.id);
@@ -1226,7 +1234,7 @@ function handleLogin(socket: Socket, data: LoginData): void {
     // This socket already has a player ID - this is a reconnection
     const oldPlayerInfo = connectedPlayers.get(existingPlayerId);
     if (oldPlayerInfo && oldPlayerInfo.agent instanceof WebSocketAgent) {
-      console.log(
+      logger.info(
         `Player ${existingPlayerId} (${username}) reconnected. Updating socket for their WebSocketAgent.`
       );
       agent = oldPlayerInfo.agent;
@@ -1235,7 +1243,7 @@ function handleLogin(socket: Socket, data: LoginData): void {
       
       // Update socket if different
       if (oldPlayerInfo.agent.socket.id !== socket.id) {
-        console.log(
+        logger.info(
           `Replacing old socket ${oldPlayerInfo.agent.socket.id} with new socket ${socket.id}`
         );
         oldPlayerInfo.agent.socket.disconnect(true);
@@ -1244,7 +1252,7 @@ function handleLogin(socket: Socket, data: LoginData): void {
       
       // Update player name if it changed
       if (oldPlayerInfo.name !== name) {
-        console.log(`Updating player name from "${oldPlayerInfo.name}" to "${name}"`);
+        logger.info(`Updating player name from "${oldPlayerInfo.name}" to "${name}"`);
         oldPlayerInfo.name = name;
       }
     } else {
@@ -1252,7 +1260,7 @@ function handleLogin(socket: Socket, data: LoginData): void {
       playerId = existingPlayerId;
       agent = new WebSocketAgent(socket, playerId);
       newSecretKey = usernameToSecretKey.get(username) || generateSecretKey();
-      console.log(`Creating new WebSocketAgent for existing player ID: ${playerId}`);
+      logger.info(`Creating new WebSocketAgent for existing player ID: ${playerId}`);
     }
   } else {
     // New login - check if username is already taken
@@ -1263,7 +1271,7 @@ function handleLogin(socket: Socket, data: LoginData): void {
       // Username is taken - verify secret key
       if (secretKey && storedSecretKey && secretKey === storedSecretKey) {
         // Secret key matches - this is the same user (page refresh scenario)
-        console.log(
+        logger.info(
           `Username ${username} is taken but secret key matches. Replacing old socket with new socket ${socket.id}.`
         );
         playerId = username;
@@ -1289,7 +1297,7 @@ function handleLogin(socket: Socket, data: LoginData): void {
         }
       } else {
         // Secret key doesn't match or is missing - reject login
-        console.log(
+        logger.info(
           `Username ${username} is already taken and secret key doesn't match. Rejecting login.`
         );
         socket.emit('loginRejected', {
@@ -1303,7 +1311,7 @@ function handleLogin(socket: Socket, data: LoginData): void {
       playerId = username;
       newSecretKey = generateSecretKey();
       agent = new WebSocketAgent(socket, playerId);
-      console.log(
+      logger.info(
         `New player login: ${username} assigned player ID: ${playerId} with new secret key`
       );
     }
@@ -1353,7 +1361,7 @@ function handleLogin(socket: Socket, data: LoginData): void {
         playerId,
         displayName: name,
       });
-      console.log(`Restored player ${name} to lobby ${reconnectLobby.name}`);
+      logger.info(`Restored player ${name} to lobby ${reconnectLobby.name}`);
     }
     
     // Update lobby status if it was marked as finished but now has players again
@@ -1367,10 +1375,10 @@ function handleLogin(socket: Socket, data: LoginData): void {
       // Lobby was empty and marked finished, but now has players - restore to waiting
       reconnectLobby.status = 'waiting';
       reconnectLobby.finishedAt = null;
-      console.log(`Restored lobby ${reconnectLobby.name} to waiting status (was empty, now has players)`);
+      logger.info(`Restored lobby ${reconnectLobby.name} to waiting status (was empty, now has players)`);
     } else if (gameWasFinished) {
       // Game finished - keep status as 'finished' to allow restart
-      console.log(`Lobby ${reconnectLobby.name} has finished game - keeping 'finished' status to allow restart`);
+      logger.info(`Lobby ${reconnectLobby.name} has finished game - keeping 'finished' status to allow restart`);
     }
     
     socket.join(reconnectLobbyId);
@@ -1385,7 +1393,7 @@ function handleLogin(socket: Socket, data: LoginData): void {
   // players in in-progress games can resume seamlessly. handleLogin will
   // clear any disconnected flags and sync the latest state to the client.
 
-  console.log('emitting loggedIn event to client:', playerId);
+  logger.info('emitting loggedIn event to client:', playerId);
   const loggedInData: PlayerIdAndName & { secretKey: string } = {
     id: playerId,
     name,
@@ -1404,7 +1412,7 @@ function emitConnectedPlayers(): void {
   connectedPlayers.forEach(playerInfo => {
     playersIdAndName.push({ id: playerInfo.id, name: playerInfo.name });
   });
-  console.log('Emitting connected players to all clients:', playersIdAndName);
+  logger.info('Emitting connected players to all clients:', playersIdAndName);
   io.emit('connectedPlayers', playersIdAndName);
   // for (const [_, playerInfo] of connectedPlayers) {
   //   if (playerInfo.agent instanceof WebSocketAgent) {
@@ -1422,7 +1430,7 @@ function emitToLobbyPlayers(lobbyId: string, event: string, payload?: unknown): 
 function handleRestartGame(socket: Socket): void {
   const playerId = socketIdToPlayerId.get(socket.id);
   if (!playerId) {
-    console.error('Player ID not found for socket:', socket.id);
+    logger.error('Player ID not found for socket:', socket.id);
     socket.emit('error', { message: 'Not logged in' });
     return;
   }
@@ -1430,33 +1438,33 @@ function handleRestartGame(socket: Socket): void {
   // Get the lobby this player is in
   const lobbyId = lobbyIdByPlayerId.get(playerId);
   if (!lobbyId) {
-    console.error('Player not in a lobby:', playerId);
+    logger.error('Player not in a lobby:', playerId);
     socket.emit('error', { message: 'Not in a lobby' });
     return;
   }
 
   const lobby = lobbiesById.get(lobbyId);
   if (!lobby) {
-    console.error('Lobby not found:', lobbyId);
+    logger.error('Lobby not found:', lobbyId);
     socket.emit('error', { message: 'Lobby not found' });
     return;
   }
 
   // Only allow the host to restart the game
   if (playerId !== lobby.hostId) {
-    console.error('Cannot restart game - player is not the host:', playerId, 'host:', lobby.hostId);
+    logger.error('Cannot restart game - player is not the host:', playerId, 'host:', lobby.hostId);
     socket.emit('error', { message: 'Only the host can restart the game' });
     return;
   }
 
   // Check if the game is finished (not in progress)
   if (lobby.status !== 'in_progress' && lobby.status !== 'finished') {
-    console.error('Cannot restart game - lobby is not in progress:', lobbyId);
+    logger.error('Cannot restart game - lobby is not in progress:', lobbyId);
     socket.emit('error', { message: 'Game is not in progress' });
     return;
   }
 
-  console.log(`Restarting game for lobby: ${lobby.name} (${lobbyId})`);
+  logger.info(`Restarting game for lobby: ${lobby.name} (${lobbyId})`);
 
   // Cancel current game loop and clear artifacts
   clearActiveGameArtifacts(lobbyId);
@@ -1474,7 +1482,7 @@ function handleRestartGame(socket: Socket): void {
 
   // Calculate bots needed
   const botsNeeded = Math.max(0, lobby.playerCount - playersInfo.length);
-  console.log(`Restarting lobby game: ${lobby.name} with ${playersInfo.length} humans and ${botsNeeded} bots needed`);
+  logger.info(`Restarting lobby game: ${lobby.name} with ${playersInfo.length} humans and ${botsNeeded} bots needed`);
 
   // Create bots
   const botNames = ['Bot Alex', 'Bot Morgan', 'Bot Jordan'];
@@ -1491,7 +1499,7 @@ function handleRestartGame(socket: Socket): void {
     };
     connectedPlayers.set(botId, botPlayerInfo);
     newBotIds.push(botId);
-    console.log(`Added bot: ${botName} (ID: ${botId})`);
+    logger.info(`Added bot: ${botName} (ID: ${botId})`);
   }
 
   // Create GameLoop using players from the lobby
@@ -1537,7 +1545,7 @@ function handleRestartGame(socket: Socket): void {
         const latestSnapshot = mostRecentGameSnapshotByLobbyId.get(lobby.id);
         const latestEvents = currentRoundGameEventsByLobbyId.get(lobby.id) || [];
         if (latestSnapshot === newSnapshot) {
-          console.log('Re-emitting first game snapshot to ensure all clients received it');
+          logger.info('Re-emitting first game snapshot to ensure all clients received it');
           sendRedactedSnapshotToAllPlayers(gameLoop, latestSnapshot, latestEvents, lobby.id);
         }
       }, 100);
@@ -1565,10 +1573,10 @@ function handleRestartGame(socket: Socket): void {
 
   // Start the game loop (this will emit snapshots as the game progresses)
   startGame(lobby.id).catch(error => {
-    console.error('[handleRestartGame] Error in game loop:', error);
+    logger.error('[handleRestartGame] Error in game loop:', error);
   });
 
-  console.log(`Game restarted. New game started for lobby ${lobby.name}.`);
+  logger.info(`Game restarted. New game started for lobby ${lobby.name}.`);
 }
 
 /**
@@ -1626,19 +1634,19 @@ function sendRedactedSnapshotToAllPlayers(
 }
 
 function sendMostRecentGameData(socket: Socket): void {
-  console.log('Sending most recent game data to client');
+  logger.info('Sending most recent game data to client');
   
   // Find which player this socket belongs to
   const playerId = socketIdToPlayerId.get(socket.id);
 
   if (!playerId) {
-    console.error('Could not find player ID for socket:', socket.id);
+    logger.error('Could not find player ID for socket:', socket.id);
     return;
   }
 
   const lobbyId = lobbyIdByPlayerId.get(playerId);
   if (!lobbyId) {
-    console.warn(`Player ${playerId} is not in a lobby; skipping game state send.`);
+    logger.warn(`Player ${playerId} is not in a lobby; skipping game state send.`);
     socket.emit('currentRoundGameEvents', []);
     return;
   }
@@ -1648,7 +1656,7 @@ function sendMostRecentGameData(socket: Socket): void {
   const roundEvents = currentRoundGameEventsByLobbyId.get(lobbyId) || [];
 
   if (!activeGameLoop || !mostRecentGameSnapshot) {
-    console.warn(`No active game loop or snapshot for lobby ${lobbyId} when attempting to send game data`);
+    logger.warn(`No active game loop or snapshot for lobby ${lobbyId} when attempting to send game data`);
     socket.emit('currentRoundGameEvents', []);
     return;
   }
@@ -1660,7 +1668,7 @@ function sendMostRecentGameData(socket: Socket): void {
   );
 
   if (!playerExistsInGame) {
-    console.log(
+    logger.info(
       `Player ${playerId} not found in game for lobby ${lobbyId}. Skipping game state send.`
     );
     // Still send empty arrays for consistency
@@ -1695,7 +1703,7 @@ function sendMostRecentGameData(socket: Socket): void {
 async function startGame(lobbyId: string): Promise<void> {
   const gameLoop = gameLoopsByLobbyId.get(lobbyId);
   if (!gameLoop) {
-    console.error(
+    logger.error(
       `[startGame()] Game loop not initialized for lobby ${lobbyId}. Cannot start game.`
     );
     return;
@@ -1705,12 +1713,12 @@ async function startGame(lobbyId: string): Promise<void> {
   const currentGameLoop = gameLoop;
   
   try {
-    console.log('Starting game loop...');
+    logger.info('Starting game loop...');
     const winner = await currentGameLoop.playGame();
     
     // Check if this game loop was cancelled (replaced by a new one)
     if (gameLoopsByLobbyId.get(lobbyId) !== currentGameLoop) {
-      console.log('[startGame()] Game loop was replaced, ignoring completion');
+      logger.info('[startGame()] Game loop was replaced, ignoring completion');
       return;
     }
     
@@ -1722,18 +1730,18 @@ async function startGame(lobbyId: string): Promise<void> {
 
     // Check again if game loop was replaced during the wait
     if (gameLoopsByLobbyId.get(lobbyId) !== currentGameLoop) {
-      console.log('[startGame()] Game loop was replaced during wait, ignoring completion');
+      logger.info('[startGame()] Game loop was replaced during wait, ignoring completion');
       return;
     }
 
     // Clear gameLoop after game ends so a new game can be started
     // Only clear if this is still the current game loop (hasn't been replaced)
     if (gameLoopsByLobbyId.get(lobbyId) === currentGameLoop) {
-      console.log('Game ended. Clearing game loop to allow new game.');
+      logger.info('Game ended. Clearing game loop to allow new game.');
       currentGameLoop.removeAllListeners();
       gameLoopsByLobbyId.delete(lobbyId);
     } else {
-      console.log('[startGame()] Game loop was replaced, not clearing (new game already started)');
+      logger.info('[startGame()] Game loop was replaced, not clearing (new game already started)');
     }
 
     // Clean up bots that were created for this game
@@ -1753,7 +1761,7 @@ async function startGame(lobbyId: string): Promise<void> {
   } catch (error) {
     // If game loop was cancelled, that's expected - just log and return
     if (error instanceof Error && error.message === 'Game loop was cancelled') {
-      console.log('[startGame()] Game loop was cancelled, cleaning up');
+      logger.info('[startGame()] Game loop was cancelled, cleaning up');
       // Clean up bots even if cancelled
       if (gameLoopsByLobbyId.get(lobbyId) === currentGameLoop) {
         cleanupBots(lobbyId);
@@ -1765,12 +1773,12 @@ async function startGame(lobbyId: string): Promise<void> {
       return;
     }
     // Otherwise, rethrow the error
-    console.error('[startGame()] Error during game:', error);
+    logger.error('[startGame()] Error during game:', error);
     throw error;
   }
 }
 
 // Start the server
 server.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+  logger.info(`Server is running on port ${PORT}`);
 });

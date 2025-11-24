@@ -108,8 +108,8 @@ export class HeuristicSimpleAgent extends ExhaustiveSimpleAgent {
     
     if (DEBUG_TIMING) {
       const totalDuration = Date.now() - startTime;
-      console.log(`[HeuristicSimpleAgent.makeMove] ${totalDuration}ms total (parse: ${parseDuration}ms, filter: ${filterDuration}ms, scoring: ${scoringDuration}ms, select: ${selectDuration}ms)`);
-      console.log(`  - Valid cards: ${validPlayedCards.length}, Chose: ${bestCard.card} (score: ${bestCard.score}, heuristic: ${bestCard.heuristic})`);
+      logger.info(`[HeuristicSimpleAgent.makeMove] ${totalDuration}ms total (parse: ${parseDuration}ms, filter: ${filterDuration}ms, scoring: ${scoringDuration}ms, select: ${selectDuration}ms)`);
+      logger.info(`  - Valid cards: ${validPlayedCards.length}, Chose: ${bestCard.card} (score: ${bestCard.score}, heuristic: ${bestCard.heuristic})`);
     }
     
     return Promise.resolve(bestCard.card);

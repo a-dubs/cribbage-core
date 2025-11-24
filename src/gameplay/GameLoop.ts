@@ -179,7 +179,7 @@ export class GameLoop extends EventEmitter {
     const agent = this.agents[request.playerId];
     if (!agent) throw new Error(`No agent for player ${request.playerId}`);
 
-    console.log(`[waitForDecision] Starting for player ${request.playerId}, type ${request.decisionType}, agent is ${agent.human ? 'human' : 'bot'}`);
+    logger.info(`[waitForDecision] Starting for player ${request.playerId}, type ${request.decisionType}, agent is ${agent.human ? 'human' : 'bot'}`);
 
     // Get redacted snapshot for this player
     const redactedSnapshot = this.cribbageGame.getRedactedGameSnapshot(
@@ -258,7 +258,7 @@ export class GameLoop extends EventEmitter {
 
       case AgentDecisionType.READY_FOR_COUNTING: {
         const ackStartTime = Date.now();
-        console.log(`[TIMING] READY_FOR_COUNTING: Calling agent.acknowledgeReadyForCounting for player ${request.playerId} at ${ackStartTime}ms`);
+        logger.info(`[TIMING] READY_FOR_COUNTING: Calling agent.acknowledgeReadyForCounting for player ${request.playerId} at ${ackStartTime}ms`);
         
         if (agent.acknowledgeReadyForCounting) {
           const beforeAgentCall = Date.now();
@@ -267,27 +267,27 @@ export class GameLoop extends EventEmitter {
             request.playerId
           );
           const afterAgentCall = Date.now();
-          console.log(`[TIMING] READY_FOR_COUNTING: agent.acknowledgeReadyForCounting returned for player ${request.playerId} at ${afterAgentCall}ms (took ${afterAgentCall - beforeAgentCall}ms)`);
+          logger.info(`[TIMING] READY_FOR_COUNTING: agent.acknowledgeReadyForCounting returned for player ${request.playerId} at ${afterAgentCall}ms (took ${afterAgentCall - beforeAgentCall}ms)`);
         } else {
-          console.log(`[TIMING] READY_FOR_COUNTING: agent.acknowledgeReadyForCounting not available for player ${request.playerId}`);
+          logger.info(`[TIMING] READY_FOR_COUNTING: agent.acknowledgeReadyForCounting not available for player ${request.playerId}`);
         }
         
         const removeStartTime = Date.now();
         this.cribbageGame.removeDecisionRequest(request.requestId);
         const removeEndTime = Date.now();
-        console.log(`[TIMING] READY_FOR_COUNTING: Removed decision request for player ${request.playerId} at ${removeEndTime}ms (took ${removeEndTime - removeStartTime}ms)`);
+        logger.info(`[TIMING] READY_FOR_COUNTING: Removed decision request for player ${request.playerId} at ${removeEndTime}ms (took ${removeEndTime - removeStartTime}ms)`);
         
         // Emit GameSnapshot immediately so app sees the acknowledgment
         const emitStartTime = Date.now();
         this.emitAcknowledgmentSnapshot();
         const emitEndTime = Date.now();
-        console.log(`[TIMING] READY_FOR_COUNTING: Emitted acknowledgment snapshot for player ${request.playerId} at ${emitEndTime}ms (took ${emitEndTime - emitStartTime}ms, total from start: ${emitEndTime - ackStartTime}ms)`);
+        logger.info(`[TIMING] READY_FOR_COUNTING: Emitted acknowledgment snapshot for player ${request.playerId} at ${emitEndTime}ms (took ${emitEndTime - emitStartTime}ms, total from start: ${emitEndTime - ackStartTime}ms)`);
         return;
       }
 
       case AgentDecisionType.READY_FOR_GAME_START: {
         const ackStartTime = Date.now();
-        console.log(`[TIMING] READY_FOR_GAME_START: Calling agent.acknowledgeReadyForGameStart for player ${request.playerId} at ${ackStartTime}ms`);
+        logger.info(`[TIMING] READY_FOR_GAME_START: Calling agent.acknowledgeReadyForGameStart for player ${request.playerId} at ${ackStartTime}ms`);
         
         if (agent.acknowledgeReadyForGameStart) {
           const beforeAgentCall = Date.now();
@@ -296,27 +296,27 @@ export class GameLoop extends EventEmitter {
             request.playerId
           );
           const afterAgentCall = Date.now();
-          console.log(`[TIMING] READY_FOR_GAME_START: agent.acknowledgeReadyForGameStart returned for player ${request.playerId} at ${afterAgentCall}ms (took ${afterAgentCall - beforeAgentCall}ms)`);
+          logger.info(`[TIMING] READY_FOR_GAME_START: agent.acknowledgeReadyForGameStart returned for player ${request.playerId} at ${afterAgentCall}ms (took ${afterAgentCall - beforeAgentCall}ms)`);
         } else {
-          console.log(`[TIMING] READY_FOR_GAME_START: agent.acknowledgeReadyForGameStart not available for player ${request.playerId}`);
+          logger.info(`[TIMING] READY_FOR_GAME_START: agent.acknowledgeReadyForGameStart not available for player ${request.playerId}`);
         }
         
         const removeStartTime = Date.now();
         this.cribbageGame.removeDecisionRequest(request.requestId);
         const removeEndTime = Date.now();
-        console.log(`[TIMING] READY_FOR_GAME_START: Removed decision request for player ${request.playerId} at ${removeEndTime}ms (took ${removeEndTime - removeStartTime}ms)`);
+        logger.info(`[TIMING] READY_FOR_GAME_START: Removed decision request for player ${request.playerId} at ${removeEndTime}ms (took ${removeEndTime - removeStartTime}ms)`);
         
         // Emit GameSnapshot immediately so app sees the acknowledgment
         const emitStartTime = Date.now();
         this.emitAcknowledgmentSnapshot();
         const emitEndTime = Date.now();
-        console.log(`[TIMING] READY_FOR_GAME_START: Emitted acknowledgment snapshot for player ${request.playerId} at ${emitEndTime}ms (took ${emitEndTime - emitStartTime}ms, total from start: ${emitEndTime - ackStartTime}ms)`);
+        logger.info(`[TIMING] READY_FOR_GAME_START: Emitted acknowledgment snapshot for player ${request.playerId} at ${emitEndTime}ms (took ${emitEndTime - emitStartTime}ms, total from start: ${emitEndTime - ackStartTime}ms)`);
         return;
       }
 
       case AgentDecisionType.READY_FOR_NEXT_ROUND: {
         const ackStartTime = Date.now();
-        console.log(`[TIMING] READY_FOR_NEXT_ROUND: Calling agent.acknowledgeReadyForNextRound for player ${request.playerId} at ${ackStartTime}ms`);
+        logger.info(`[TIMING] READY_FOR_NEXT_ROUND: Calling agent.acknowledgeReadyForNextRound for player ${request.playerId} at ${ackStartTime}ms`);
         
         if (agent.acknowledgeReadyForNextRound) {
           const beforeAgentCall = Date.now();
@@ -325,21 +325,21 @@ export class GameLoop extends EventEmitter {
             request.playerId
           );
           const afterAgentCall = Date.now();
-          console.log(`[TIMING] READY_FOR_NEXT_ROUND: agent.acknowledgeReadyForNextRound returned for player ${request.playerId} at ${afterAgentCall}ms (took ${afterAgentCall - beforeAgentCall}ms)`);
+          logger.info(`[TIMING] READY_FOR_NEXT_ROUND: agent.acknowledgeReadyForNextRound returned for player ${request.playerId} at ${afterAgentCall}ms (took ${afterAgentCall - beforeAgentCall}ms)`);
         } else {
-          console.log(`[TIMING] READY_FOR_NEXT_ROUND: agent.acknowledgeReadyForNextRound not available for player ${request.playerId}`);
+          logger.info(`[TIMING] READY_FOR_NEXT_ROUND: agent.acknowledgeReadyForNextRound not available for player ${request.playerId}`);
         }
         
         const removeStartTime = Date.now();
         this.cribbageGame.removeDecisionRequest(request.requestId);
         const removeEndTime = Date.now();
-        console.log(`[TIMING] READY_FOR_NEXT_ROUND: Removed decision request for player ${request.playerId} at ${removeEndTime}ms (took ${removeEndTime - removeStartTime}ms)`);
+        logger.info(`[TIMING] READY_FOR_NEXT_ROUND: Removed decision request for player ${request.playerId} at ${removeEndTime}ms (took ${removeEndTime - removeStartTime}ms)`);
         
         // Emit GameSnapshot immediately so app sees the acknowledgment
         const emitStartTime = Date.now();
         this.emitAcknowledgmentSnapshot();
         const emitEndTime = Date.now();
-        console.log(`[TIMING] READY_FOR_NEXT_ROUND: Emitted acknowledgment snapshot for player ${request.playerId} at ${emitEndTime}ms (took ${emitEndTime - emitStartTime}ms, total from start: ${emitEndTime - ackStartTime}ms)`);
+        logger.info(`[TIMING] READY_FOR_NEXT_ROUND: Emitted acknowledgment snapshot for player ${request.playerId} at ${emitEndTime}ms (took ${emitEndTime - emitStartTime}ms, total from start: ${emitEndTime - ackStartTime}ms)`);
         return;
       }
     }
@@ -368,14 +368,14 @@ export class GameLoop extends EventEmitter {
     ) {
       // if the current player has no cards left to play, move on to the next player
       if (playersDone.includes(currentPlayerId)) {
-        console.log(
+        logger.info(
           `Player ${currentPlayerId} has no cards left to play. Moving on to the next player.`
         );
         currentPlayerId =
           this.cribbageGame.getFollowingPlayerId(currentPlayerId);
         continue;
       } else {
-        console.log(`Player ${currentPlayerId}'s turn to play a card.`);
+        logger.info(`Player ${currentPlayerId}'s turn to play a card.`);
       }
 
       // if the current player has already said "Go", move on to the next player
@@ -409,20 +409,20 @@ export class GameLoop extends EventEmitter {
       );
 
       // Wait for decision
-      console.log(`Calling makeMove for player ${currentPlayerId}`);
+      logger.info(`Calling makeMove for player ${currentPlayerId}`);
       const card = await this.waitForDecision(playCardRequest);
       roundOverLastPlayer = this.cribbageGame.playCard(currentPlayerId, card);
       const parsedStack = this.cribbageGame
         .getGameState()
         .peggingStack.map(parseCard);
-      console.log(
+      logger.info(
         `Full pegging stack: ${parsedStack
           .map(card => `${card.runValue}${suitToEmoji(card.suit)}`)
           .join(', ')}`
       );
       // if current player pegged out, return their ID as winner of game
       if (this.cribbageGame.getPlayer(currentPlayerId).score > 120) {
-        console.log(
+        logger.info(
           `Player ${currentPlayerId} pegged out with score ${
             this.cribbageGame.getPlayer(currentPlayerId).score
           }`
@@ -493,7 +493,7 @@ export class GameLoop extends EventEmitter {
     }
     // if all players are out of cards, pegging is over
     this.cribbageGame.endPegging();
-    console.log('PEGGING OVER\n');
+    logger.info('PEGGING OVER\n');
 
     // if no one has pegged out, return null to indicate no winner
     return Promise.resolve(null);
@@ -523,19 +523,19 @@ export class GameLoop extends EventEmitter {
     }
 
     // Wait for all discards in parallel, but apply each discard immediately when it resolves
-    console.log(`[doCribPhase] Requesting discards from ${discardRequests.length} players in parallel`);
+    logger.info(`[doCribPhase] Requesting discards from ${discardRequests.length} players in parallel`);
     const discardPromises = discardRequests.map(async (request, index) => {
-      console.log(`[doCribPhase] Starting waitForDecision for player ${request.playerId}`);
+      logger.info(`[doCribPhase] Starting waitForDecision for player ${request.playerId}`);
       const discards = await this.waitForDecision(request);
       // Apply discard immediately when it resolves (don't wait for all)
       const player = gameState.players[index];
-      console.log(`[doCribPhase] Applying discard immediately for player ${player.id}, got ${discards.length} cards`);
+      logger.info(`[doCribPhase] Applying discard immediately for player ${player.id}, got ${discards.length} cards`);
       this.cribbageGame.discardToCrib(player.id, discards);
       return discards;
     });
-    console.log(`[doCribPhase] All promises created, waiting for Promise.all()...`);
+    logger.info(`[doCribPhase] All promises created, waiting for Promise.all()...`);
     const allDiscards = await Promise.all(discardPromises);
-    console.log(`[doCribPhase] All discards received:`, allDiscards.map((d, i) => ({ player: discardRequests[i].playerId, count: d.length })));
+    logger.info(`[doCribPhase] All discards received:`, allDiscards.map((d, i) => ({ player: discardRequests[i].playerId, count: d.length })));
 
     this.cribbageGame.completeCribPhase();
   }
@@ -553,7 +553,7 @@ export class GameLoop extends EventEmitter {
     message: string
   ): Promise<void> {
     const startTime = Date.now();
-    console.log(`[TIMING] waitForAllPlayersReady START at ${startTime}ms for ${decisionType}`);
+    logger.info(`[TIMING] waitForAllPlayersReady START at ${startTime}ms for ${decisionType}`);
     
     // Request acknowledgments from ALL players in parallel
     // Create all requests first without emitting snapshots to avoid showing partial counts
@@ -565,7 +565,7 @@ export class GameLoop extends EventEmitter {
       const request = this.createDecisionRequest(player.id, decisionType, {
         message,
       });
-      console.log(`[TIMING] Created request for player ${player.id} at ${requestStartTime}ms (${requestStartTime - startTime}ms after start)`);
+      logger.info(`[TIMING] Created request for player ${player.id} at ${requestStartTime}ms (${requestStartTime - startTime}ms after start)`);
       acknowledgeRequests.push(request);
     }
 
@@ -589,16 +589,16 @@ export class GameLoop extends EventEmitter {
       pendingDecisionRequests: this.cribbageGame.getPendingDecisionRequests(),
     };
     this.cribbageGame.emit('gameSnapshot', snapshot);
-    console.log(`[TIMING] Emitted snapshot with ${acknowledgeRequests.length} acknowledgment requests`);
+    logger.info(`[TIMING] Emitted snapshot with ${acknowledgeRequests.length} acknowledgment requests`);
 
     // Wait for all acknowledgments in parallel
     // Each player can acknowledge independently
     const acknowledgePromises = acknowledgeRequests.map(request => {
       const promiseStartTime = Date.now();
-      console.log(`[TIMING] Starting waitForDecision promise for player ${request.playerId} at ${promiseStartTime}ms (${promiseStartTime - startTime}ms after start)`);
+      logger.info(`[TIMING] Starting waitForDecision promise for player ${request.playerId} at ${promiseStartTime}ms (${promiseStartTime - startTime}ms after start)`);
       return this.waitForDecision(request).then(result => {
         const promiseEndTime = Date.now();
-        console.log(`[TIMING] waitForDecision promise resolved for player ${request.playerId} at ${promiseEndTime}ms (took ${promiseEndTime - promiseStartTime}ms)`);
+        logger.info(`[TIMING] waitForDecision promise resolved for player ${request.playerId} at ${promiseEndTime}ms (took ${promiseEndTime - promiseStartTime}ms)`);
         return result;
       });
     });
@@ -607,7 +607,7 @@ export class GameLoop extends EventEmitter {
     await Promise.all(acknowledgePromises);
 
     const endTime = Date.now();
-    console.log(`[TIMING] waitForAllPlayersReady COMPLETE at ${endTime}ms (total: ${endTime - startTime}ms)`);
+    logger.info(`[TIMING] waitForAllPlayersReady COMPLETE at ${endTime}ms (total: ${endTime - startTime}ms)`);
     // All players have acknowledged - proceed
   }
 
@@ -651,14 +651,14 @@ export class GameLoop extends EventEmitter {
 
     const turnCard = this.cribbageGame.getGameState().turnCard;
     if (!turnCard) throw new Error('No turn card after cutting deck');
-    console.log(
+    logger.info(
       `Player ${behindDealer.name} cut the deck: ${displayCard(turnCard)}`
     );
 
     // Pegging phase: Agents play cards until no more cards can be played
     const peggingWinner = await this.doPegging();
     if (peggingWinner) {
-      console.log(`PLAYER ${peggingWinner} WINS BY PEGGING!!!`);
+      logger.info(`PLAYER ${peggingWinner} WINS BY PEGGING!!!`);
       return peggingWinner;
     }
 
@@ -670,7 +670,7 @@ export class GameLoop extends EventEmitter {
         'Ready for counting'
       );
     } else {
-      console.log('[FEATURE FLAG] READY_FOR_COUNTING is disabled, skipping acknowledgment request');
+      logger.info('[FEATURE FLAG] READY_FOR_COUNTING is disabled, skipping acknowledgment request');
     }
 
     // SCORING PHASE
@@ -687,7 +687,7 @@ export class GameLoop extends EventEmitter {
       if (!agent) throw new Error(`No agent for player ${player.id}`);
       // await this.sendContinue(player.id, 'Score hand');
       const handScore = this.cribbageGame.scoreHand(player.id);
-      console.log(
+      logger.info(
         `Player ${player.name} scored ${handScore} points hand: 
         ${player.hand.map(card => displayCard(card)).join(', ')}`
       );
@@ -698,7 +698,7 @@ export class GameLoop extends EventEmitter {
       if (player.isDealer) {
         // await this.sendContinue(player.id, 'Score crib');
         const cribScore = this.cribbageGame.scoreCrib(player.id);
-        console.log(
+        logger.info(
           `Player ${player.name} scored ${cribScore} points in their crib: 
           ${this.cribbageGame
             .getCrib()
@@ -720,11 +720,11 @@ export class GameLoop extends EventEmitter {
       'Ready for next round'
     );
 
-    console.log('All players ready for next round');
+    logger.info('All players ready for next round');
 
     // log the scores of each player
     for (const player of this.cribbageGame.getGameState().players) {
-      console.log(`Player ${player.name} score: ${player.score}`);
+      logger.info(`Player ${player.name} score: ${player.score}`);
     }
 
     return null;
@@ -742,7 +742,7 @@ export class GameLoop extends EventEmitter {
       return;
     }
 
-    console.log('Starting dealer selection phase...');
+    logger.info('Starting dealer selection phase...');
 
     // Request dealer card selection from ALL players in parallel
     const selectionRequests: DecisionRequest[] = [];
@@ -781,7 +781,7 @@ export class GameLoop extends EventEmitter {
       pendingDecisionRequests: this.cribbageGame.getPendingDecisionRequests(),
     };
     this.cribbageGame.emit('gameSnapshot', snapshot);
-    console.log(`Emitted snapshot with ${selectionRequests.length} dealer selection requests`);
+    logger.info(`Emitted snapshot with ${selectionRequests.length} dealer selection requests`);
 
     // Wait for all selections in parallel
     const selectionPromises = selectionRequests.map(request =>
@@ -795,7 +795,7 @@ export class GameLoop extends EventEmitter {
     if (!dealer) {
       throw new Error('Dealer was not determined after dealer selection phase.');
     }
-    console.log(`Dealer selection complete. Dealer: ${dealer.name}`);
+    logger.info(`Dealer selection complete. Dealer: ${dealer.name}`);
 
     // Request acknowledgment from all players before starting the game
     // This gives players time to see the dealer selection results
