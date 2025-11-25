@@ -461,7 +461,12 @@ export function registerHttpApi(app: express.Express, hooks?: HttpApiHooks): voi
       res.status(201).json({ request });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to send request';
-      const status = message === 'NOT_FOUND' ? 404 : 400;
+      let status = 400;
+      if (message === 'NOT_FOUND') {
+        status = 404;
+      } else if (message === 'CANNOT_ADD_SELF') {
+        status = 400;
+      }
       res.status(status).json({ error: 'FRIEND_REQUEST_FAILED', message });
     }
   });
@@ -481,7 +486,12 @@ export function registerHttpApi(app: express.Express, hooks?: HttpApiHooks): voi
       res.status(201).json({ request });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to send request from lobby';
-      const status = message === 'NOT_IN_LOBBY' ? 403 : 400;
+      let status = 400;
+      if (message === 'NOT_IN_LOBBY') {
+        status = 403;
+      } else if (message === 'CANNOT_ADD_SELF') {
+        status = 400;
+      }
       res.status(status).json({ error: 'FRIEND_REQUEST_FAILED', message });
     }
   });

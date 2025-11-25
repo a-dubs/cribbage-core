@@ -674,6 +674,12 @@ export async function sendFriendRequest(params: {
   if (!recipientProfile?.id) {
     throw new Error('NOT_FOUND');
   }
+  
+  // Prevent self-friending
+  if (params.senderId === recipientProfile.id) {
+    throw new Error('CANNOT_ADD_SELF');
+  }
+  
   const { data, error } = await client
     .from('friend_requests')
     .insert({
@@ -736,6 +742,12 @@ export async function sendFriendRequestFromLobby(params: {
   lobbyId: string;
 }): Promise<FriendRequest> {
   const client = getServiceClient();
+  
+  // Prevent self-friending
+  if (params.senderId === params.targetUserId) {
+    throw new Error('CANNOT_ADD_SELF');
+  }
+  
   const membershipCheck = await client
     .from('lobby_players')
     .select('player_id')
