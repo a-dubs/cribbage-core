@@ -44,6 +44,8 @@ let serviceClient: SupabaseClient | null = null;
 let anonClient: SupabaseClient | null = null;
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// Username must match database constraint: lowercase letters, numbers, underscores, and hyphens only, 3-20 chars
+const USERNAME_REGEX = /^[a-z0-9_-]{3,20}$/;
 
 function ensureEnv(): void {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
@@ -54,6 +56,32 @@ function ensureEnv(): void {
 export function toUuidOrNull(value: string | null | undefined): string | null {
   if (!value) return null;
   return UUID_REGEX.test(value) ? value : null;
+}
+
+/**
+ * Validates and normalizes username to match database constraint
+ * - Converts to lowercase
+ * - Trims whitespace
+ * - Validates format: lowercase letters, numbers, underscores only, 3-20 chars
+ * @throws Error if username is invalid
+ */
+function validateAndNormalizeUsername(username: string): string {
+  const trimmed = username.trim();
+  if (!trimmed) {
+    throw new Error('Username is required');
+  }
+  
+  const normalized = trimmed.toLowerCase();
+  
+  if (normalized.length < 3 || normalized.length > 20) {
+    throw new Error('Username must be between 3 and 20 characters');
+  }
+  
+  if (!USERNAME_REGEX.test(normalized)) {
+    throw new Error('Username can only contain lowercase letters, numbers, underscores, and hyphens');
+  }
+  
+  return normalized;
 }
 
 export function getServiceClient(): SupabaseClient {
@@ -140,12 +168,19 @@ export async function signUpWithEmail(params: {
   const userId = createdUser.user.id;
   const friendCode = generateFriendCode();
 
+  // Validate and normalize username to match database constraint
+  const normalizedUsername = validateAndNormalizeUsername(params.username);
+  const trimmedDisplayName = params.displayName.trim();
+  if (!trimmedDisplayName) {
+    throw new Error('DISPLAY_NAME_REQUIRED');
+  }
+
   const { error: profileError, data: profileInsert } = await svc
     .from('profiles')
     .insert({
       id: userId,
-      username: params.username,
-      display_name: params.displayName,
+      username: normalizedUsername,
+      display_name: trimmedDisplayName,
       friend_code: friendCode,
     })
     .select()
@@ -775,9 +810,8 @@ export async function updateProfile(params: {
     updates.display_name = trimmed;
   }
   if (params.username !== undefined) {
-    const trimmed = params.username.trim();
-    if (!trimmed) throw new Error('USERNAME_REQUIRED');
-    updates.username = trimmed;
+    // Validate and normalize username to match database constraint
+    updates.username = validateAndNormalizeUsername(params.username);
   }
   if (params.avatarUrl !== undefined) {
     updates.avatar_url = params.avatarUrl;
