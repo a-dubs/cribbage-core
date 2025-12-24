@@ -151,15 +151,18 @@ io.use((socket, next) => {
   }
   const token = (socket.handshake.auth as { accessToken?: string } | undefined)?.accessToken;
   if (!token) {
+    logger.warn(`[Auth] Missing access token from socket ${socket.id}`);
     return next(new Error('Missing access token'));
   }
   verifyAccessToken(token)
     .then(({ userId }) => {
       (socket.data as { userId?: string }).userId = userId;
+      logger.info(`[Auth] Socket ${socket.id} authenticated as user ${userId}`);
       next();
     })
     .catch(err => {
-      logger.error('Socket auth failed', err);
+      const tokenPreview = token.length > 20 ? `${token.substring(0, 20)}...` : token;
+      logger.error(`[Auth] Socket auth failed for socket ${socket.id}. Token preview: ${tokenPreview}`, err);
       next(new Error('Invalid token'));
     });
 });

@@ -18,6 +18,7 @@ import {
   removeLobbyPlayer,
   signInWithEmail,
   signUpWithEmail,
+  refreshAccessToken,
   searchProfilesByUsername,
   startLobby,
   updateLobbyName,
@@ -115,6 +116,22 @@ export function registerHttpApi(app: express.Express, hooks?: HttpApiHooks): voi
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Login failed';
       res.status(401).json({ error: 'LOGIN_FAILED', message });
+    }
+  });
+
+  app.post('/auth/refresh', async (req: Request, res: Response) => {
+    if (!requireSupabaseFlag(SUPABASE_AUTH_ENABLED, res)) return;
+    const { refreshToken } = req.body ?? {};
+    if (!refreshToken) {
+      res.status(400).json({ error: 'VALIDATION_ERROR', message: 'refreshToken is required' });
+      return;
+    }
+    try {
+      const result = await refreshAccessToken(refreshToken);
+      res.status(200).json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Token refresh failed';
+      res.status(401).json({ error: 'REFRESH_FAILED', message });
     }
   });
 

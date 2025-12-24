@@ -141,7 +141,10 @@ export async function verifyAccessToken(token: string): Promise<{ userId: string
   const client = authClientForToken(token);
   const { data, error } = await client.auth.getUser(token);
   if (error || !data?.user) {
-    throw new Error('Invalid or expired token');
+    // Log more details about the error for debugging
+    const errorMessage = error?.message || 'Unknown error';
+    const errorStatus = error?.status || 'unknown';
+    throw new Error(`Invalid or expired token (status: ${errorStatus}): ${errorMessage}`);
   }
   return { userId: data.user.id, email: data.user.email ?? undefined };
 }
@@ -222,6 +225,26 @@ export async function signInWithEmail(params: {
 
   if (error || !data.session || !data.user) {
     throw new Error(error?.message ?? 'Invalid credentials');
+  }
+
+  const userId = data.user.id;
+  const profile = await getProfile(userId, svc);
+
+  return {
+    accessToken: data.session.access_token,
+    refreshToken: data.session.refresh_token,
+    userId,
+    profile,
+  };
+}
+
+export async function refreshAccessToken(refreshToken: string): Promise<{ accessToken: string; refreshToken: string; userId: string; profile: SupabaseProfile | null }> {
+  const anon = getAnonClient();
+  const svc = getServiceClient();
+  const { data, error } = await anon.auth.refreshSession({ refresh_token: refreshToken });
+
+  if (error || !data.session || !data.user) {
+    throw new Error(error?.message ?? 'Failed to refresh token');
   }
 
   const userId = data.user.id;
