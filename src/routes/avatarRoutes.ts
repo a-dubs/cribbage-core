@@ -51,10 +51,10 @@ export function registerAvatarRoutes(app: express.Express, authMiddleware: expre
       if (uploadError) {
         throw uploadError;
       }
-      const { data: publicUrl } = supabase.storage.from('avatars').getPublicUrl(fileName);
+      const { data } = supabase.storage.from('avatars').getPublicUrl(fileName);
       // Update profile with new avatar_url
-      await supabase.from('profiles').update({ avatar_url: publicUrl.publicUrl }).eq('id', userId);
-      res.json({ avatarUrl: publicUrl.publicUrl });
+      await supabase.from('profiles').update({ avatar_url: data.publicUrl }).eq('id', userId);
+      res.json({ avatarUrl: data.publicUrl });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Upload failed';
       res.status(400).json({ error: 'UPLOAD_FAILED', message });
