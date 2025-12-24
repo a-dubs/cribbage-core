@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { type GameEvent, type GameSnapshot, type GameState } from '../types';
+import { logger } from '../utils/logger';
 
 export type SupabaseProfile = {
   id: string;
@@ -152,6 +153,7 @@ export async function verifyAccessToken(token: string): Promise<{ userId: string
     // Log more details about the error for debugging
     const errorMessage = error?.message || 'Unknown error';
     const errorStatus = error?.status || 'unknown';
+    logger.warn(`[Auth] verifyAccessToken failed (status: ${errorStatus}): ${errorMessage}`);
     throw new Error(`Invalid or expired token (status: ${errorStatus}): ${errorMessage}`);
   }
   return { userId: data.user.id, email: data.user.email ?? undefined };
@@ -252,10 +254,13 @@ export async function refreshAccessToken(refreshToken: string): Promise<{ access
   const { data, error } = await anon.auth.refreshSession({ refresh_token: refreshToken });
 
   if (error || !data.session || !data.user) {
-    throw new Error(error?.message ?? 'Failed to refresh token');
+    const message = error?.message ?? 'Failed to refresh token';
+    logger.error(`[Auth] refreshAccessToken failed: ${message}`);
+    throw new Error(message);
   }
 
   const userId = data.user.id;
+  logger.info(`[Auth] Token refreshed successfully for user ${userId}`);
   const profile = await getProfile(userId, svc);
 
   return {
