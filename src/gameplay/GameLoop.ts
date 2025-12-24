@@ -244,16 +244,19 @@ export class GameLoop extends EventEmitter {
       case AgentDecisionType.SELECT_DEALER_CARD: {
         if (agent.selectDealerCard) {
           const selectData = request.requestData as SelectDealerCardRequestData;
+          logger.info(`[waitForDecision] Calling selectDealerCard for player ${request.playerId}, maxIndex: ${selectData.maxIndex}`);
           const cardIndex = await agent.selectDealerCard(
             redactedSnapshot,
             request.playerId,
             selectData.maxIndex
           );
+          logger.info(`[waitForDecision] selectDealerCard returned index ${cardIndex} for player ${request.playerId}`);
           this.cribbageGame.removeDecisionRequest(request.requestId);
           this.cribbageGame.selectDealerCard(request.playerId, cardIndex);
           return cardIndex;
         }
-        break;
+        logger.error(`[waitForDecision] Agent for player ${request.playerId} does not have selectDealerCard method. Agent type: ${agent.constructor.name}`);
+        throw new Error(`Agent for player ${request.playerId} does not support SELECT_DEALER_CARD decision`);
       }
 
       case AgentDecisionType.READY_FOR_COUNTING: {
@@ -743,6 +746,8 @@ export class GameLoop extends EventEmitter {
     }
 
     logger.info('Starting dealer selection phase...');
+    logger.info(`Available agents: ${Object.keys(this.agents).join(', ')}`);
+    logger.info(`Game state players: ${gameState.players.map(p => `${p.id} (${p.name})`).join(', ')}`);
 
     // Request dealer card selection from ALL players in parallel
     const selectionRequests: DecisionRequest[] = [];
@@ -750,6 +755,11 @@ export class GameLoop extends EventEmitter {
 
     // Create all requests first without emitting snapshots
     for (const player of gameState.players) {
+      // Verify agent exists before creating request
+      if (!this.agents[player.id]) {
+        logger.error(`[doDealerSelection] No agent found for player ${player.id} (${player.name}). Available agents: ${Object.keys(this.agents).join(', ')}`);
+        throw new Error(`No agent found for player ${player.id}`);
+      }
       const request = this.createDecisionRequest(
         player.id,
         AgentDecisionType.SELECT_DEALER_CARD,
@@ -785,10 +795,15 @@ export class GameLoop extends EventEmitter {
 
     // Wait for all selections in parallel
     const selectionPromises = selectionRequests.map(request =>
-      this.waitForDecision(request)
+      this.waitForDecision(request).catch(error => {
+        logger.error(`[doDealerSelection] Error waiting for decision from player ${request.playerId}:`, error);
+        throw error;
+      })
     );
 
+    logger.info(`[doDealerSelection] Waiting for ${selectionPromises.length} dealer card selections...`);
     await Promise.all(selectionPromises);
+    logger.info(`[doDealerSelection] All dealer card selections received`);
 
     // Dealer should now be determined (handled in selectDealerCard)
     const dealer = this.cribbageGame.getGameState().players.find(p => p.isDealer);

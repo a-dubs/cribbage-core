@@ -895,6 +895,8 @@ async function startLobbyGameForHost(lobbyId: string, hostId: string): Promise<{
     const botName = botNames[i] || `Bot ${i + 1}`;
     const botAgent = new ExhaustiveSimpleAgent();
     const botId = `${botAgent.playerId}-${Date.now()}-${i}`;
+    // Update the agent's playerId to match the generated botId
+    botAgent.playerId = botId;
     playersInfo.push({ id: botId, name: botName });
     const botPlayerInfo: PlayerInfo = {
       id: botId,
@@ -1481,6 +1483,8 @@ async function handleRestartGame(socket: Socket): Promise<void> {
     const botName = botNames[i] || `Bot ${i + 1}`;
     const botAgent = new ExhaustiveSimpleAgent();
     const botId = `${botAgent.playerId}-${Date.now()}-${i}`;
+    // Update the agent's playerId to match the generated botId
+    botAgent.playerId = botId;
     playersInfo.push({ id: botId, name: botName });
     const botPlayerInfo: PlayerInfo = {
       id: botId,
