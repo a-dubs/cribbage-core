@@ -369,6 +369,39 @@ function cleanupBots(lobbyId: string): void {
   emitConnectedPlayers();
 }
 
+/**
+ * Clean up bots that are not part of any active game
+ */
+function cleanupInactiveBots(): void {
+  // Collect all bot IDs that are part of active games
+  const activeBotIds = new Set<string>();
+  currentGameBotIdsByLobbyId.forEach((botIds, lobbyId) => {
+    // Only include bots from lobbies with active games
+    if (gameLoopsByLobbyId.has(lobbyId)) {
+      botIds.forEach(botId => activeBotIds.add(botId));
+    }
+  });
+
+  // Find and remove bots that aren't part of active games
+  const botsToRemove: string[] = [];
+  connectedPlayers.forEach((playerInfo, playerId) => {
+    const isBot = !(playerInfo.agent instanceof WebSocketAgent);
+    if (isBot && !activeBotIds.has(playerId)) {
+      botsToRemove.push(playerId);
+    }
+  });
+
+  if (botsToRemove.length > 0) {
+    logger.info(`Cleaning up ${botsToRemove.length} inactive bots`);
+    botsToRemove.forEach(botId => {
+      connectedPlayers.delete(botId);
+      playerIdToSocketId.delete(botId);
+      socketIdToPlayerId.delete(botId);
+      logger.info(`Removed inactive bot: ${botId}`);
+    });
+  }
+}
+
 function clearPlayerDisconnectTimer(playerId: string): void {
   const timeout = disconnectGraceTimeouts.get(playerId);
   if (timeout) {
@@ -637,10 +670,29 @@ io.on('connection', socket => {
 
   socket.on('getConnectedPlayers', () => {
     logger.info('Received getConnectedPlayers request from socket:', socket.id);
+    // Clean up inactive bots before responding
+    cleanupInactiveBots();
+
+    const playerId = socketIdToPlayerId.get(socket.id);
+    const playerLobbyId = playerId ? lobbyIdByPlayerId.get(playerId) : null;
+
+    // Collect bot IDs from the requesting player's lobby (if they're in a lobby with an active game)
+    const activeBotIds = new Set<string>();
+    if (playerLobbyId && gameLoopsByLobbyId.has(playerLobbyId)) {
+      const botIds = currentGameBotIdsByLobbyId.get(playerLobbyId);
+      if (botIds) {
+        botIds.forEach(botId => activeBotIds.add(botId));
+      }
+    }
+
     // Send current connected players to this specific client
     const playersIdAndName: PlayerIdAndName[] = [];
     connectedPlayers.forEach(playerInfo => {
-      playersIdAndName.push({ id: playerInfo.id, name: playerInfo.name });
+      const isBot = !(playerInfo.agent instanceof WebSocketAgent);
+      // Include all human players, and only bots from the requesting player's lobby
+      if (!isBot || activeBotIds.has(playerInfo.id)) {
+        playersIdAndName.push({ id: playerInfo.id, name: playerInfo.name });
+      }
     });
     logger.info('Sending connected players to requesting client:', playersIdAndName);
     socket.emit('connectedPlayers', playersIdAndName);
@@ -1404,20 +1456,22 @@ async function handleLogin(socket: Socket, data: LoginData): Promise<void> {
 }
 
 // create function that emits the current connected players to all clients
+// Note: Only includes human players. Bots are included per-lobby in getConnectedPlayers handler.
 function emitConnectedPlayers(): void {
+  // Clean up inactive bots before emitting
+  cleanupInactiveBots();
+
   const playersIdAndName: PlayerIdAndName[] = [];
   connectedPlayers.forEach(playerInfo => {
-    playersIdAndName.push({ id: playerInfo.id, name: playerInfo.name });
+    // Only include human players in global broadcast
+    // Bots are included per-lobby when players request connectedPlayers
+    const isBot = !(playerInfo.agent instanceof WebSocketAgent);
+    if (!isBot) {
+      playersIdAndName.push({ id: playerInfo.id, name: playerInfo.name });
+    }
   });
   logger.info('Emitting connected players to all clients:', playersIdAndName);
   io.emit('connectedPlayers', playersIdAndName);
-  // for (const [_, playerInfo] of connectedPlayers) {
-  //   if (playerInfo.agent instanceof WebSocketAgent) {
-  //     // Emit to the specific player
-  //     playerInfo.agent.socket.emit('connectedPlayers', playersIdAndName);
-  //   }
-
-  // }
 }
 
 function emitToLobbyPlayers(lobbyId: string, event: string, payload?: unknown): void {
