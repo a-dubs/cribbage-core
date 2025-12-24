@@ -101,7 +101,11 @@ export class WebSocketAgent implements GameAgent {
                 }
                 const processed = processResponse(response);
                 if (processed === 'retry') {
-                  // Don't cleanup - we'll retry and the listener will stay active
+                  // Re-register disconnect listener for retry since .once() removes it after first use
+                  if (disconnectListener) {
+                    currentSocket.off('disconnect', disconnectListener);
+                    disconnectListener = null;
+                  }
                   return request();
                 } else if (processed instanceof Error) {
                   // Check if this is a requestId mismatch - if so, ignore and keep listening
