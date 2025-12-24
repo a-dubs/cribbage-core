@@ -29,6 +29,7 @@ import {
   listLobbyInvitations,
   respondToLobbyInvitation,
   verifyAccessToken,
+  getPlayerActiveLobbyId,
   type LobbyPayload,
   type LobbyVisibility,
   type SupabaseProfile,
@@ -198,7 +199,15 @@ export function registerHttpApi(app: express.Express, hooks?: HttpApiHooks): voi
       res.status(201).json({ lobby: mapLobbyPayload(lobby) });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to create lobby';
-      res.status(400).json({ error: 'LOBBY_CREATE_FAILED', message });
+      let status = 400;
+      let errorType = 'LOBBY_CREATE_FAILED';
+
+      if (message === 'ALREADY_IN_LOBBY') {
+        status = 409;
+        errorType = 'ALREADY_IN_LOBBY';
+      }
+
+      res.status(status).json({ error: errorType, message });
     }
   });
 
@@ -221,11 +230,18 @@ export function registerHttpApi(app: express.Express, hooks?: HttpApiHooks): voi
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to join lobby';
       let status = 400;
+      let errorType = 'LOBBY_JOIN_FAILED';
+
       if (message === 'LOBBY_NOT_FOUND') status = 404;
-      if (message === 'LOBBY_LOCKED') status = 409;
-      if (message === 'LOBBY_FULL') status = 409;
-      if (message === 'INVALID_INVITE') status = 403;
-      res.status(status).json({ error: 'LOBBY_JOIN_FAILED', message });
+      else if (message === 'LOBBY_LOCKED') status = 409;
+      else if (message === 'LOBBY_FULL') status = 409;
+      else if (message === 'INVALID_INVITE') status = 403;
+      else if (message === 'ALREADY_IN_LOBBY') {
+        status = 409;
+        errorType = 'ALREADY_IN_LOBBY';
+      }
+
+      res.status(status).json({ error: errorType, message });
     }
   });
 

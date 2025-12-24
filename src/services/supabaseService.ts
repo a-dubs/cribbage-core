@@ -97,6 +97,14 @@ export function getServiceClient(): SupabaseClient {
   return serviceClient;
 }
 
+/**
+ * For testing purposes only: resets the cached service and anon clients.
+ */
+export function resetServiceClients(): void {
+  serviceClient = null;
+  anonClient = null;
+}
+
 function getAnonClient(): SupabaseClient {
   ensureEnv();
   if (!anonClient) {
@@ -266,6 +274,39 @@ export async function getProfile(userId: string, client: SupabaseClient = getSer
   return (data as SupabaseProfile | null) ?? null;
 }
 
+/**
+ * Check if a player is currently in any active lobby (waiting or in_progress)
+ * @param playerId - Player to check
+ * @param excludeLobbyId - Optional lobby ID to exclude from check (for idempotent joins)
+ * @returns The lobby ID if found, null otherwise
+ */
+export async function getPlayerActiveLobbyId(
+  playerId: string,
+  excludeLobbyId?: string
+): Promise<string | null> {
+  const client = getServiceClient();
+  const { data, error } = await client
+    .from('lobby_players')
+    .select('lobby_id, lobbies!inner(status)')
+    .eq('player_id', playerId)
+    .in('lobbies.status', ['waiting', 'in_progress']);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (data && data.length > 0) {
+    // If we have an excludeLobbyId, check if any other lobby is active
+    if (excludeLobbyId) {
+      const otherLobby = data.find((row: any) => row.lobby_id !== excludeLobbyId);
+      return otherLobby ? String(otherLobby.lobby_id) : null;
+    }
+    return String(data[0].lobby_id);
+  }
+
+  return null;
+}
+
 export type LobbyRecord = {
   id: string;
   name: string | null;
@@ -361,6 +402,13 @@ export async function createLobby(params: {
   settings?: Record<string, unknown> | null;
 }): Promise<LobbyPayload> {
   const client = getServiceClient();
+
+  // Check if user is already in an active lobby
+  const existingLobbyId = await getPlayerActiveLobbyId(params.hostId);
+  if (existingLobbyId) {
+    throw new Error('ALREADY_IN_LOBBY');
+  }
+
   const { data, error } = await client
     .from('lobbies')
     .insert({
@@ -410,6 +458,16 @@ export async function joinLobby(params: {
   inviteCode?: string | null;
 }): Promise<LobbyPayload> {
   const client = getServiceClient();
+
+  // Check if player is already in a DIFFERENT active lobby
+  const existingLobbyId = await getPlayerActiveLobbyId(
+    params.playerId,
+    params.lobbyId // Allow if already in THIS lobby (idempotent)
+  );
+  if (existingLobbyId) {
+    throw new Error('ALREADY_IN_LOBBY');
+  }
+
   const { data: lobby, error: lobbyError } = await client.from('lobbies').select('*').eq('id', params.lobbyId).single();
   if (lobbyError || !lobby) {
     throw new Error('LOBBY_NOT_FOUND');
