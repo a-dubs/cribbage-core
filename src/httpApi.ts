@@ -75,7 +75,11 @@ async function authMiddleware(req: AuthenticatedRequest, res: Response, next: Ne
     next();
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Invalid token';
-    res.status(401).json({ error: 'NOT_AUTHORIZED', message });
+    const isExpired = message.toLowerCase().includes('expired');
+    res.status(401).json({ 
+      error: isExpired ? 'TOKEN_EXPIRED' : 'NOT_AUTHORIZED', 
+      message 
+    });
   }
 }
 
