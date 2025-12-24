@@ -39,7 +39,7 @@ export class WebSocketAgent implements GameAgent {
 
   updateSocket(newSocket: Socket): void {
     if (this.socket && this.socket?.id !== newSocket.id) {
-      logger.info('[WebSocketAgent] Old socket id:', this.socket.id);
+      logger.debug('[WebSocketAgent] Old socket id:', this.socket.id);
       // Clean up any event listeners that this agent attached to the old socket.
       // Remove all listeners to ensure no stale listeners remain
       this.socket.removeAllListeners('makeMoveResponse');
@@ -48,7 +48,7 @@ export class WebSocketAgent implements GameAgent {
       this.socket.removeAllListeners('disconnect');
       // Update the socket reference to the new socket.
       this.socket = newSocket;
-      logger.info('[WebSocketAgent] New socket id:', this.socket.id);
+      logger.debug('[WebSocketAgent] New socket id:', this.socket.id);
     }
   }
   // In your WebSocketAgent class:
@@ -61,7 +61,7 @@ export class WebSocketAgent implements GameAgent {
     // Helper: Wait until the current socket is connected.
     const waitForSocketConnected = async (): Promise<void> => {
       while (!this.socket.connected) {
-        logger.info(
+        logger.debug(
           `[WebSocketAgent] Waiting for socket to connect (current id: ${this.socket.id})`
         );
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -106,7 +106,7 @@ export class WebSocketAgent implements GameAgent {
                 } else if (processed instanceof Error) {
                   // Check if this is a requestId mismatch - if so, ignore and keep listening
                   if (processed.message.includes('requestId mismatch')) {
-                    logger.info(
+                    logger.debug(
                       `[WebSocketAgent] Ignoring stale response with mismatched requestId`
                     );
                     return; // Don't cleanup, keep listening for the correct response
@@ -140,7 +140,7 @@ export class WebSocketAgent implements GameAgent {
           (err as Error).message === 'socket disconnected' ||
           (err as Error).message === 'socket replaced'
         ) {
-          logger.info(
+          logger.debug(
             `[WebSocketAgent] ${
               (err as Error).message
             }. Retrying request for event ${responseEvent}...`
