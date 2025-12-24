@@ -158,9 +158,11 @@ io.use((socket, next) => {
       next();
     })
     .catch(err => {
+      const message = err instanceof Error ? err.message : 'Invalid token';
+      const isExpired = message.toLowerCase().includes('expired');
       const tokenPreview = token.length > 20 ? `${token.substring(0, 20)}...` : token;
       logger.error(`[Auth] Socket auth failed for socket ${socket.id}. Token preview: ${tokenPreview}`, err);
-      next(new Error('Invalid token'));
+      next(new Error(isExpired ? 'Token expired' : 'Invalid token'));
     });
 });
 
@@ -1447,8 +1449,12 @@ async function handleLogin(socket: Socket, data: LoginData): Promise<void> {
     sendMostRecentGameData(socket);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Login failed';
+    const isExpired = message.toLowerCase().includes('expired');
     logger.error('Supabase login failed:', message);
-    socket.emit('loginRejected', { reason: 'INVALID_TOKEN', message });
+    socket.emit('loginRejected', { 
+      reason: isExpired ? 'TOKEN_EXPIRED' : 'INVALID_TOKEN', 
+      message: isExpired ? 'Token expired' : message 
+    });
   }
 }
 
