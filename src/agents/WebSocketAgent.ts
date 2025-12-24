@@ -41,9 +41,10 @@ export class WebSocketAgent implements GameAgent {
     if (this.socket && this.socket?.id !== newSocket.id) {
       logger.info('[WebSocketAgent] Old socket id:', this.socket.id);
       // Clean up any event listeners that this agent attached to the old socket.
-      // Adjust the event names if you've added additional listeners.
+      // Remove all listeners to ensure no stale listeners remain
       this.socket.removeAllListeners('makeMoveResponse');
       this.socket.removeAllListeners('discardResponse');
+      this.socket.removeAllListeners('decisionResponse');
       this.socket.removeAllListeners('disconnect');
       // Update the socket reference to the new socket.
       this.socket = newSocket;
@@ -73,39 +74,63 @@ export class WebSocketAgent implements GameAgent {
       const currentSocket = this.socket;
       try {
         const result = await new Promise<T>((resolve, reject) => {
+          let responseListener: ((response: any) => void) | null = null;
+          let disconnectListener: (() => void) | null = null;
+
+          const cleanup = () => {
+            if (responseListener) {
+              currentSocket.off(responseEvent, responseListener);
+              responseListener = null;
+            }
+            if (disconnectListener) {
+              currentSocket.off('disconnect', disconnectListener);
+              disconnectListener = null;
+            }
+          };
+
           const request = () => {
             sendRequest(currentSocket);
-            const onResponse = (response: any) => {
-              cleanup();
-              // Check if the socket instance is still the one we captured.
-              if (currentSocket !== this.socket) {
-                return reject(new Error('socket replaced'));
-              }
-              const processed = processResponse(response);
-              if (processed === 'retry') {
-                return request();
-              } else if (processed instanceof Error) {
-                return reject(processed);
-              } else {
-                return resolve(processed);
-              }
-            };
+            
+            // Only set up listeners if they're not already set up
+            if (!responseListener) {
+              responseListener = (response: any) => {
+                // Check if the socket instance is still the one we captured.
+                if (currentSocket !== this.socket) {
+                  cleanup();
+                  return reject(new Error('socket replaced'));
+                }
+                const processed = processResponse(response);
+                if (processed === 'retry') {
+                  // Don't cleanup - we'll retry and the listener will stay active
+                  return request();
+                } else if (processed instanceof Error) {
+                  // Check if this is a requestId mismatch - if so, ignore and keep listening
+                  if (processed.message.includes('requestId mismatch')) {
+                    logger.info(
+                      `[WebSocketAgent] Ignoring stale response with mismatched requestId`
+                    );
+                    return; // Don't cleanup, keep listening for the correct response
+                  }
+                  cleanup();
+                  return reject(processed);
+                } else {
+                  cleanup();
+                  return resolve(processed);
+                }
+              };
+              currentSocket.on(responseEvent, responseListener);
+            }
 
-            const onDisconnect = () => {
-              cleanup();
-              if (currentSocket !== this.socket) {
-                return reject(new Error('socket replaced'));
-              }
-              reject(new Error('socket disconnected'));
-            };
-
-            const cleanup = () => {
-              currentSocket.off(responseEvent, onResponse);
-              currentSocket.off('disconnect', onDisconnect);
-            };
-
-            currentSocket.once(responseEvent, onResponse);
-            currentSocket.once('disconnect', onDisconnect);
+            if (!disconnectListener) {
+              disconnectListener = () => {
+                cleanup();
+                if (currentSocket !== this.socket) {
+                  return reject(new Error('socket replaced'));
+                }
+                reject(new Error('socket disconnected'));
+              };
+              currentSocket.once('disconnect', disconnectListener);
+            }
           };
           request();
         });

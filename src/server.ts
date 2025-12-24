@@ -1311,18 +1311,21 @@ async function handleLogin(socket: Socket, data: LoginData): Promise<void> {
     const playerId = userId;
 
     let agent: WebSocketAgent | null = null;
-    const existingPlayerId = socketIdToPlayerId.get(socket.id);
+    // Check if this playerId already has an agent (reconnection scenario)
+    const existingPlayerInfo = connectedPlayers.get(playerId);
 
-    if (existingPlayerId) {
-      const oldPlayerInfo = connectedPlayers.get(existingPlayerId);
-      if (oldPlayerInfo && oldPlayerInfo.agent instanceof WebSocketAgent) {
-        agent = oldPlayerInfo.agent;
-        if (oldPlayerInfo.agent.socket.id !== socket.id) {
-          oldPlayerInfo.agent.socket.disconnect(true);
-          oldPlayerInfo.agent.updateSocket(socket);
+    if (existingPlayerInfo && existingPlayerInfo.agent instanceof WebSocketAgent) {
+      agent = existingPlayerInfo.agent;
+      // If the socket ID is different, this is a reconnection - update the socket
+      if (existingPlayerInfo.agent.socket.id !== socket.id) {
+        logger.info(`[handleLogin] Player ${playerId} reconnecting: old socket ${existingPlayerInfo.agent.socket.id}, new socket ${socket.id}`);
+        // Disconnect the old socket if it's still connected
+        if (existingPlayerInfo.agent.socket.connected) {
+          existingPlayerInfo.agent.socket.disconnect(true);
         }
-        oldPlayerInfo.name = displayName;
+        existingPlayerInfo.agent.updateSocket(socket);
       }
+      existingPlayerInfo.name = displayName;
     }
 
     if (!agent) {
