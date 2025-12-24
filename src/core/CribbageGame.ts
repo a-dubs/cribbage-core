@@ -568,6 +568,45 @@ export class CribbageGame extends EventEmitter {
         this.recordGameEvent(ActionType.GO, playerId, null, 0);
       }
       logger.info(`Player ${playerId} said "Go"`);
+
+      // Check if all players with cards have now said "Go" and the last card player has no cards
+      // This handles the case where the last card player ran out of cards and can't say "Go"
+      const lastCardPlayer = this.gameState.players.find(
+        p => p.id === this.gameState.peggingLastCardPlayer
+      );
+      if (lastCardPlayer && lastCardPlayer.peggingHand.length === 0) {
+        // Count how many players still have cards and haven't said "Go"
+        const playersWithCardsNotGone = this.gameState.players.filter(
+          p => p.peggingHand.length > 0 && !this.gameState.peggingGoPlayers.includes(p.id)
+        );
+        // If all players with cards have said "Go", give the last card player a point
+        if (playersWithCardsNotGone.length === 0) {
+          logger.info(`All players with cards have said Go. Player ${lastCardPlayer.id} (out of cards) gets last card point!`);
+          // Capture pegging stack BEFORE calling startNewPeggingRound() which clears it
+          const peggingStackForBreakdown = [...this.gameState.peggingStack];
+          const lastPlayer = this.startNewPeggingRound();
+          // give the player a point for playing the last card
+          this.updatePlayerScore(lastCardPlayer, 1);
+          // log the scoring of the last card
+          const lastCardBreakdown: ScoreBreakdownItem[] = [
+            {
+              type: 'LAST_CARD',
+              points: 1,
+              cards: peggingStackForBreakdown,
+              description: 'Last card',
+            },
+          ];
+          this.recordGameEvent(
+            ActionType.LAST_CARD,
+            lastCardPlayer.id,
+            null,
+            1,
+            lastCardBreakdown
+          );
+          return lastPlayer;
+        }
+      }
+
       return null;
     }
 
