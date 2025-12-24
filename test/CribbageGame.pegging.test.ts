@@ -773,5 +773,87 @@ describe('CribbageGame - Pegging Logic', () => {
       // Note: Actual scoring depends on scorePegging logic, but should be at least 2 points
     });
   });
+
+  describe('playCard - Players Out of Cards During Turn', () => {
+    let game: CribbageGame;
+
+    beforeEach(() => {
+      game = new CribbageGame([
+        { id: 'p1', name: 'Player 1' },
+        { id: 'p2', name: 'Player 2' },
+        { id: 'p3', name: 'Player 3' },
+      ]);
+      game.setPhase(Phase.PEGGING, ActionType.BEGIN_PHASE);
+    });
+
+    it('should handle player starting their turn with zero cards - should be skipped', () => {
+      const state = game.getGameState();
+      const p1 = state.players[0];
+      const p2 = state.players[1];
+      const p3 = state.players[2];
+
+      // Setup: p1 has no cards (already played them all), p2 and p3 have cards
+      p1.peggingHand = []; // Out of cards
+      p2.peggingHand = ['KING_SPADES'];
+      p3.peggingHand = ['QUEEN_HEARTS'];
+      state.peggingStack = ['FIVE_SPADES', 'TEN_CLUBS', 'SIX_DIAMONDS', 'SEVEN_HEARTS']; // Total = 28
+      state.peggingTotal = 28;
+      state.peggingLastCardPlayer = 'p1'; // p1 played last card
+
+      // p2 says Go (can't play without exceeding 31)
+      const result1 = game.playCard('p2', null);
+      expect(result1).toBeNull(); // Round not over yet
+
+      // p3 says Go (can't play without exceeding 31)
+      const result2 = game.playCard('p3', null);
+      expect(result2).toBe('p1'); // Round over! p1 gets last card point (they're out of cards)
+      expect(p1.score).toBe(1); // Got 1 point for last card
+    });
+
+    it('should handle multiple players out of cards in sequence', () => {
+      const state = game.getGameState();
+      const p1 = state.players[0];
+      const p2 = state.players[1];
+      const p3 = state.players[2];
+
+      // Setup: p1 and p2 are out of cards, p3 has one card
+      p1.peggingHand = []; // Out of cards
+      p2.peggingHand = []; // Out of cards
+      p3.peggingHand = ['KING_SPADES'];
+      state.peggingStack = ['FIVE_SPADES', 'TEN_CLUBS', 'SIX_DIAMONDS', 'SEVEN_HEARTS']; // Total = 28
+      state.peggingTotal = 28;
+      state.peggingLastCardPlayer = 'p1'; // p1 played last card
+
+      // p3 says Go (can't play without exceeding 31)
+      const result = game.playCard('p3', null);
+      expect(result).toBe('p1'); // Round over! p1 gets last card point
+      expect(p1.score).toBe(1);
+    });
+
+    it('should handle all players out of cards simultaneously', () => {
+      const state = game.getGameState();
+      const p1 = state.players[0];
+      const p2 = state.players[1];
+      const p3 = state.players[2];
+
+      // All players are out of cards
+      p1.peggingHand = [];
+      p2.peggingHand = [];
+      p3.peggingHand = [];
+      state.peggingStack = ['FIVE_SPADES', 'TEN_CLUBS'];
+      state.peggingTotal = 15;
+      state.peggingLastCardPlayer = 'p1';
+
+      // This shouldn't happen in normal flow (all players out means pegging should end)
+      // But if it does, the last card player should get the point
+      // Actually, if all players are out, endPegging should be called, not playCard
+      // But defensively, if someone says Go when all are out, p1 should get the point
+      const result = game.playCard('p2', null);
+      // p2 says Go, but all players with cards (none) have said Go
+      // So p1 (last card player, out of cards) should get the point
+      expect(result).toBe('p1');
+      expect(p1.score).toBe(1);
+    });
+  });
 });
 

@@ -400,6 +400,20 @@ export class GameLoop extends EventEmitter {
       const player = gameState.players.find(p => p.id === currentPlayerId);
       if (!player) throw new Error(`Player ${currentPlayerId} not found`);
 
+      // CRITICAL: Check if player has no cards BEFORE requesting a decision
+      // This prevents infinite loops when a player runs out of cards
+      if (player.peggingHand.length === 0) {
+        if (!playersDone.includes(currentPlayerId)) {
+          playersDone.push(currentPlayerId);
+        }
+        logger.info(
+          `Player ${currentPlayerId} has no cards left to play. Moving on to the next player.`
+        );
+        currentPlayerId =
+          this.cribbageGame.getFollowingPlayerId(currentPlayerId);
+        continue;
+      }
+
       const playCardRequest = this.requestDecision(
         currentPlayerId,
         AgentDecisionType.PLAY_CARD,
