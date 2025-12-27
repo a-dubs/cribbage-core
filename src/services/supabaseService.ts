@@ -139,6 +139,25 @@ function canonicalizeFriendPair(a: string, b: string): { userId: string; friendI
   return a < b ? { userId: a, friendId: b } : { userId: b, friendId: a };
 }
 
+/**
+ * Check if two users are friends
+ */
+async function areFriends(userId1: string, userId2: string, client: SupabaseClient = getServiceClient()): Promise<boolean> {
+  const { userId, friendId } = canonicalizeFriendPair(userId1, userId2);
+  const { data, error } = await client
+    .from('friendships')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('friend_id', friendId)
+    .maybeSingle();
+  
+  if (error) {
+    throw new Error(error.message);
+  }
+  
+  return !!data;
+}
+
 function publicAvatarUrl(path: string): string {
   const supabase = getServiceClient();
   const { data } = supabase.storage.from('avatars').getPublicUrl(path);
@@ -363,7 +382,7 @@ async function fetchLobbyPlayers(lobbyId: string, client: SupabaseClient): Promi
   });
 }
 
-export async function listLobbies(): Promise<LobbyPayload[]> {
+export async function listLobbies(userId?: string): Promise<LobbyPayload[]> {
   const client = getServiceClient();
   const { data, error } = await client
     .from('lobbies')
@@ -376,8 +395,70 @@ export async function listLobbies(): Promise<LobbyPayload[]> {
   }
 
   const lobbies = (data ?? []) as LobbyRecord[];
+  
+  // Filter by visibility if userId is provided
+  let filteredLobbies = lobbies;
+  if (userId) {
+    // Batch fetch memberships, invitations, and friendships for efficiency
+    const lobbyIds = lobbies.map(l => l.id);
+    const [memberships, invitations, friendships] = await Promise.all([
+      // Get all memberships for this user
+      client
+        .from('lobby_players')
+        .select('lobby_id')
+        .eq('player_id', userId)
+        .in('lobby_id', lobbyIds),
+      // Get all invitations for this user
+      client
+        .from('lobby_invitations')
+        .select('lobby_id')
+        .eq('recipient_id', userId)
+        .in('lobby_id', lobbyIds),
+      // Get all friendships for this user
+      client
+        .from('friendships')
+        .select('user_id, friend_id')
+        .or(`user_id.eq.${userId},friend_id.eq.${userId}`),
+    ]);
+    
+    const memberLobbyIds = new Set((memberships.data ?? []).map((m: any) => m.lobby_id));
+    const invitedLobbyIds = new Set((invitations.data ?? []).map((i: any) => i.lobby_id));
+    const friendIds = new Set(
+      (friendships.data ?? []).map((f: any) => (f.user_id === userId ? f.friend_id : f.user_id))
+    );
+    
+    filteredLobbies = lobbies.filter(lobby => {
+      // Public lobbies are always visible
+      if (lobby.visibility === 'public') {
+        return true;
+      }
+      
+      // Host can always see their own lobby
+      if (lobby.host_id === userId) {
+        return true;
+      }
+      
+      // Members can always see lobbies they're in
+      if (memberLobbyIds.has(lobby.id)) {
+        return true;
+      }
+      
+      // Private lobbies: check for invitation
+      if (lobby.visibility === 'private') {
+        return invitedLobbyIds.has(lobby.id);
+      }
+      
+      // Friends-only lobbies: check if user is friends with host
+      if (lobby.visibility === 'friends' && lobby.host_id) {
+        return friendIds.has(lobby.host_id);
+      }
+      
+      return false; // Not visible
+    });
+  }
+  
   const results: LobbyPayload[] = await Promise.all(
-    lobbies.map(async lobby => {
+    filteredLobbies.map(async lobby => {
       const players = await fetchLobbyPlayers(lobby.id, client);
       return { ...lobby, players };
     })
@@ -485,6 +566,17 @@ export async function joinLobby(params: {
 
   if (lobbyRecord.visibility === 'private' && lobbyRecord.invite_code && params.inviteCode !== lobbyRecord.invite_code) {
     throw new Error('INVALID_INVITE');
+  }
+
+  // Check friends visibility: if lobby is friends-only, player must be friends with host
+  if (lobbyRecord.visibility === 'friends') {
+    if (!lobbyRecord.host_id) {
+      throw new Error('LOBBY_NO_HOST');
+    }
+    const isFriend = await areFriends(params.playerId, lobbyRecord.host_id, client);
+    if (!isFriend) {
+      throw new Error('NOT_FRIENDS_WITH_HOST');
+    }
   }
 
   // Check existing membership

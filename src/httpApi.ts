@@ -164,10 +164,14 @@ export function registerHttpApi(app: express.Express, hooks?: HttpApiHooks): voi
     }
   });
 
-  app.get('/lobbies', authMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
+  app.get('/lobbies', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     if (!requireSupabaseFlag(SUPABASE_LOBBIES_ENABLED, res)) return;
+    if (!req.userId) {
+      res.status(401).json({ error: 'NOT_AUTHORIZED', message: 'Missing user' });
+      return;
+    }
     try {
-      const lobbies = await listLobbies();
+      const lobbies = await listLobbies(req.userId);
       res.json({ lobbies: lobbies.map(mapLobbyPayload) });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to list lobbies';
@@ -236,6 +240,8 @@ export function registerHttpApi(app: express.Express, hooks?: HttpApiHooks): voi
       else if (message === 'LOBBY_LOCKED') status = 409;
       else if (message === 'LOBBY_FULL') status = 409;
       else if (message === 'INVALID_INVITE') status = 403;
+      else if (message === 'NOT_FRIENDS_WITH_HOST') status = 403;
+      else if (message === 'LOBBY_NO_HOST') status = 500;
       else if (message === 'ALREADY_IN_LOBBY') {
         status = 409;
         errorType = 'ALREADY_IN_LOBBY';
