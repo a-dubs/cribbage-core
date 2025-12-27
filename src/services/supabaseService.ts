@@ -443,14 +443,22 @@ export async function listLobbies(userId?: string): Promise<LobbyPayload[]> {
         return true;
       }
       
-      // Private lobbies: check for invitation
+      // Private lobbies: check for invitation (via lobby_invitations table)
       if (lobby.visibility === 'private') {
         return invitedLobbyIds.has(lobby.id);
       }
       
-      // Friends-only lobbies: check if user is friends with host
+      // Friends-only lobbies: check if user is friends with host OR has valid invite code
       if (lobby.visibility === 'friends' && lobby.host_id) {
-        return friendIds.has(lobby.host_id);
+        // Friends can always see
+        if (friendIds.has(lobby.host_id)) {
+          return true;
+        }
+        // Non-friends can see if they have the invite code (we can't check invite code here,
+        // but they'll be able to join with it - visibility in list is permissive for invite codes)
+        // Actually, for list visibility, we should only show to friends since invite codes
+        // are meant to be shared privately. Users with invite codes can join directly via lobby ID.
+        return false;
       }
       
       return false; // Not visible
@@ -568,13 +576,23 @@ export async function joinLobby(params: {
     throw new Error('INVALID_INVITE');
   }
 
-  // Check friends visibility: if lobby is friends-only, player must be friends with host
+  // Check friends visibility: if lobby is friends-only, player must be friends with host OR have valid invite code
   if (lobbyRecord.visibility === 'friends') {
     if (!lobbyRecord.host_id) {
       throw new Error('LOBBY_NO_HOST');
     }
     const isFriend = await areFriends(params.playerId, lobbyRecord.host_id, client);
-    if (!isFriend) {
+    
+    // Allow if friends with host
+    if (isFriend) {
+      // Friends can join directly, no invite code needed
+    } 
+    // Or if not friends, check for valid invite code
+    else if (lobbyRecord.invite_code && params.inviteCode === lobbyRecord.invite_code) {
+      // Non-friends can join with valid invite code
+    } 
+    // Otherwise, reject
+    else {
       throw new Error('NOT_FRIENDS_WITH_HOST');
     }
   }
