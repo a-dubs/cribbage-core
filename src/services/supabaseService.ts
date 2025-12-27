@@ -519,17 +519,37 @@ export async function joinLobby(params: {
 
 export async function leaveLobby(params: { lobbyId: string; playerId: string }): Promise<LobbyPayload | null> {
   const client = getServiceClient();
+
+  // Fetch the lobby first to check if the leaving player is the host
+  const lobbyBefore = await fetchLobbyRecord(params.lobbyId, client);
+  if (!lobbyBefore) return null;
+
+  const wasHost = lobbyBefore.host_id === params.playerId;
+
   const { error } = await client.from('lobby_players').delete().eq('lobby_id', params.lobbyId).eq('player_id', params.playerId);
   if (error) {
     throw new Error(error.message);
   }
+
   const lobby = await fetchLobbyRecord(params.lobbyId, client);
   if (!lobby) return null;
+
+  const players = await fetchLobbyPlayers(params.lobbyId, client);
+
+  // If lobby is empty, mark it as finished
   if ((lobby.current_players ?? 0) === 0) {
     await client.from('lobbies').update({ status: 'finished' }).eq('id', params.lobbyId);
     lobby.status = 'finished';
+  } else if (wasHost && players.length > 0) {
+    // Transfer host to another player if the host left and there are remaining players
+    const newHostId = players[0].playerId;
+    const { error: updateError } = await client.from('lobbies').update({ host_id: newHostId }).eq('id', params.lobbyId);
+    if (updateError) {
+      throw new Error(updateError.message);
+    }
+    lobby.host_id = newHostId;
   }
-  const players = await fetchLobbyPlayers(params.lobbyId, client);
+
   return { ...lobby, players };
 }
 
