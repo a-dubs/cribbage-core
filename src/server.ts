@@ -1,4 +1,3 @@
-import './utils/logger-init';
 import http from 'http';
 import express from 'express';
 import cors from 'cors';
@@ -14,6 +13,7 @@ import {
 } from './types';
 import { WebSocketAgent } from './agents/WebSocketAgent';
 import { ExhaustiveSimpleAgent } from './agents/ExhaustiveSimpleAgent';
+import dotenv from 'dotenv';
 import { logger } from './utils/logger';
 import { uniqueNamesGenerator, adjectives, animals } from 'unique-names-generator';
 import { v4 as uuidv4 } from 'uuid';
@@ -37,6 +37,9 @@ import {
   verifyAccessToken,
   type LobbyPayload,
 } from './services/supabaseService';
+
+// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
+dotenv.config();
 
 const PORT = process.env.PORT || 3002;
 const WEB_APP_ORIGIN = process.env.WEB_APP_ORIGIN || 'http://localhost:3000';
@@ -158,11 +161,9 @@ io.use((socket, next) => {
       next();
     })
     .catch(err => {
-      const message = err instanceof Error ? err.message : 'Invalid token';
-      const isExpired = message.toLowerCase().includes('expired');
       const tokenPreview = token.length > 20 ? `${token.substring(0, 20)}...` : token;
       logger.error(`[Auth] Socket auth failed for socket ${socket.id}. Token preview: ${tokenPreview}`, err);
-      next(new Error(isExpired ? 'Token expired' : 'Invalid token'));
+      next(new Error('Invalid token'));
     });
 });
 
@@ -357,12 +358,12 @@ function cleanupBots(lobbyId: string): void {
   if (!botIds || botIds.length === 0) {
     return;
   }
-  logger.debug(`Cleaning up ${botIds.length} bots for lobby ${lobbyId}`);
+  logger.info(`Cleaning up ${botIds.length} bots for lobby ${lobbyId}`);
   botIds.forEach(botId => {
     connectedPlayers.delete(botId);
     playerIdToSocketId.delete(botId);
     socketIdToPlayerId.delete(botId);
-    logger.debug(`Removed bot: ${botId}`);
+    logger.info(`Removed bot: ${botId}`);
   });
   currentGameBotIdsByLobbyId.delete(lobbyId);
   emitConnectedPlayers();
@@ -391,12 +392,12 @@ function cleanupInactiveBots(): void {
   });
 
   if (botsToRemove.length > 0) {
-    logger.debug(`Cleaning up ${botsToRemove.length} inactive bots`);
+    logger.info(`Cleaning up ${botsToRemove.length} inactive bots`);
     botsToRemove.forEach(botId => {
       connectedPlayers.delete(botId);
       playerIdToSocketId.delete(botId);
       socketIdToPlayerId.delete(botId);
-      logger.debug(`Removed inactive bot: ${botId}`);
+      logger.info(`Removed inactive bot: ${botId}`);
     });
   }
 }
@@ -526,7 +527,7 @@ function cleanupFinishedLobbies(): void {
 
     lobbiesById.delete(lobbyId);
     io.emit('lobbyClosed', { lobbyId });
-    logger.debug(`[cleanupFinishedLobbies] Removed finished lobby ${lobbyId}`);
+    logger.info(`[cleanupFinishedLobbies] Removed finished lobby ${lobbyId}`);
   });
 }
 
@@ -608,7 +609,7 @@ io.on('connection', socket => {
   emitConnectedPlayers();
 
   socket.on('login', (data: LoginData) => {
-    logger.debug('Received login event from socket:', socket.id);
+    logger.info('Received login event from socket:', socket.id);
     handleLogin(socket, data).catch(err => {
       logger.error('Login failed', err);
       socket.emit('loginRejected', { reason: 'INVALID_TOKEN', message: 'Login failed' });
@@ -616,42 +617,42 @@ io.on('connection', socket => {
   });
 
   socket.on('createLobby', (data: { playerCount: number; name?: string; visibility?: 'public' | 'private' | 'friends'; isFixedSize?: boolean }, callback?: (response: any) => void) => {
-    logger.debug('Received createLobby event from socket:', socket.id, 'playerCount:', data?.playerCount);
+    logger.info('Received createLobby event from socket:', socket.id, 'playerCount:', data?.playerCount);
     handleCreateLobby(socket, data, callback);
   });
 
   socket.on('joinLobby', (data: { lobbyId: string }, callback?: (response: any) => void) => {
-    logger.debug('Received joinLobby event from socket:', socket.id, 'lobbyId:', data?.lobbyId);
+    logger.info('Received joinLobby event from socket:', socket.id, 'lobbyId:', data?.lobbyId);
     handleJoinLobby(socket, data, callback);
   });
 
   socket.on('leaveLobby', (data: { lobbyId: string }, callback?: (response: any) => void) => {
-    logger.debug('Received leaveLobby event from socket:', socket.id, 'lobbyId:', data?.lobbyId);
+    logger.info('Received leaveLobby event from socket:', socket.id, 'lobbyId:', data?.lobbyId);
     handleLeaveLobby(socket, data, callback);
   });
 
   socket.on('kickPlayer', (data: { lobbyId: string; targetPlayerId: string }, callback?: (response: any) => void) => {
-    logger.debug('Received kickPlayer event from socket:', socket.id, 'lobbyId:', data?.lobbyId, 'target:', data?.targetPlayerId);
+    logger.info('Received kickPlayer event from socket:', socket.id, 'lobbyId:', data?.lobbyId, 'target:', data?.targetPlayerId);
     handleKickPlayer(socket, data, callback);
   });
 
   socket.on('updateLobbySize', (data: { lobbyId: string; playerCount: number }, callback?: (response: any) => void) => {
-    logger.debug('Received updateLobbySize event from socket:', socket.id, 'lobbyId:', data?.lobbyId, 'playerCount:', data?.playerCount);
+    logger.info('Received updateLobbySize event from socket:', socket.id, 'lobbyId:', data?.lobbyId, 'playerCount:', data?.playerCount);
     handleUpdateLobbySize(socket, data, callback);
   });
 
   socket.on('updateLobbyName', (data: { lobbyId: string; name: string }, callback?: (response: any) => void) => {
-    logger.debug('Received updateLobbyName event from socket:', socket.id, 'lobbyId:', data?.lobbyId, 'name:', data?.name);
+    logger.info('Received updateLobbyName event from socket:', socket.id, 'lobbyId:', data?.lobbyId, 'name:', data?.name);
     handleUpdateLobbyName(socket, data, callback);
   });
 
   socket.on('listLobbies', () => {
-    logger.debug('Received listLobbies request from socket:', socket.id);
+    logger.info('Received listLobbies request from socket:', socket.id);
     handleListLobbies(socket);
   });
 
   socket.on('startLobbyGame', (data: { lobbyId: string }, callback?: (response: any) => void) => {
-    logger.debug('Received startLobbyGame event from socket:', socket.id, 'lobbyId:', data?.lobbyId);
+    logger.info('Received startLobbyGame event from socket:', socket.id, 'lobbyId:', data?.lobbyId);
     handleStartLobbyGame(socket, data, callback).catch(error => {
       logger.error('Error starting lobby game:', error);
       if (callback) callback({ error: 'Failed to start game' });
@@ -660,7 +661,7 @@ io.on('connection', socket => {
   });
 
   socket.on('restartGame', () => {
-    logger.debug('Received restartGame event from socket:', socket.id);
+    logger.info('Received restartGame event from socket:', socket.id);
     handleRestartGame(socket).catch(error => {
       logger.error('Error restarting game:', error);
       socket.emit('error', { message: 'Failed to restart game' });
@@ -668,7 +669,7 @@ io.on('connection', socket => {
   });
 
   socket.on('getConnectedPlayers', () => {
-    logger.debug('Received getConnectedPlayers request from socket:', socket.id);
+    logger.info('Received getConnectedPlayers request from socket:', socket.id);
     // Clean up inactive bots before responding
     cleanupInactiveBots();
 
@@ -693,7 +694,7 @@ io.on('connection', socket => {
         playersIdAndName.push({ id: playerInfo.id, name: playerInfo.name });
       }
     });
-    logger.debug('Sending connected players to requesting client:', playersIdAndName);
+    logger.info('Sending connected players to requesting client:', playersIdAndName);
     socket.emit('connectedPlayers', playersIdAndName);
   });
 
@@ -732,17 +733,17 @@ io.on('connection', socket => {
         connectedPlayers.delete(playerId);
         playerIdToSocketId.delete(playerId);
         socketIdToPlayerId.delete(socket.id);
-        logger.debug(`Removed player ${playerId} (socket ${socket.id})`);
+        logger.info(`Removed player ${playerId} (socket ${socket.id})`);
         // send updated connected players to all clients
         emitConnectedPlayers();
       } else {
-        logger.debug('Player is part of an active game. Keeping player record for reconnection.');
+        logger.info('Player is part of an active game. Keeping player record for reconnection.');
       }
     }
   });
 
   socket.on('heartbeat', () => {
-    logger.debug('Received heartbeat from client');
+    logger.info('Received heartbeat from client');
   });
 });
 
@@ -1015,7 +1016,7 @@ async function startLobbyGameForHost(lobbyId: string, hostId: string): Promise<{
         const latestSnapshot = mostRecentGameSnapshotByLobbyId.get(lobby.id);
         const latestEvents = currentRoundGameEventsByLobbyId.get(lobby.id) || [];
         if (latestSnapshot === newSnapshot) {
-          logger.debug('Re-emitting first game snapshot to ensure all clients received it');
+          logger.info('Re-emitting first game snapshot to ensure all clients received it');
           sendRedactedSnapshotToAllPlayers(gameLoop, latestSnapshot, latestEvents, lobby.id);
         }
       }, 100);
@@ -1202,7 +1203,7 @@ function handleListLobbies(socket: Socket): void {
             createdAt: lobby.created_at ? new Date(lobby.created_at).getTime() : Date.now(),
           };
         });
-      logger.debug(`Sending ${waitingLobbies.length} waiting lobbies to client`);
+      logger.info(`Sending ${waitingLobbies.length} waiting lobbies to client`);
       socket.emit('lobbyList', { lobbies: waitingLobbies });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to list lobbies';
@@ -1427,7 +1428,7 @@ async function handleLogin(socket: Socket, data: LoginData): Promise<void> {
         reconnectLobby.finishedAt = null;
         logger.info(`Restored lobby ${reconnectLobby.name} to waiting status (was empty, now has players)`);
       } else if (gameWasFinished) {
-        logger.debug(`Lobby ${reconnectLobby.name} has finished game - keeping 'finished' status to allow restart`);
+        logger.info(`Lobby ${reconnectLobby.name} has finished game - keeping 'finished' status to allow restart`);
       }
 
       socket.join(reconnectLobbyId);
@@ -1438,7 +1439,7 @@ async function handleLogin(socket: Socket, data: LoginData): Promise<void> {
       });
     }
 
-    logger.debug('emitting loggedIn event to client:', playerId);
+    logger.info('emitting loggedIn event to client:', playerId);
     const loggedInData: PlayerIdAndName = {
       id: playerId,
       name: displayName,
@@ -1449,12 +1450,8 @@ async function handleLogin(socket: Socket, data: LoginData): Promise<void> {
     sendMostRecentGameData(socket);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Login failed';
-    const isExpired = message.toLowerCase().includes('expired');
     logger.error('Supabase login failed:', message);
-    socket.emit('loginRejected', { 
-      reason: isExpired ? 'TOKEN_EXPIRED' : 'INVALID_TOKEN', 
-      message: isExpired ? 'Token expired' : message 
-    });
+    socket.emit('loginRejected', { reason: 'INVALID_TOKEN', message });
   }
 }
 
@@ -1473,7 +1470,7 @@ function emitConnectedPlayers(): void {
       playersIdAndName.push({ id: playerInfo.id, name: playerInfo.name });
     }
   });
-  logger.debug('Emitting connected players to all clients:', playersIdAndName);
+  logger.info('Emitting connected players to all clients:', playersIdAndName);
   io.emit('connectedPlayers', playersIdAndName);
 }
 
@@ -1610,7 +1607,7 @@ async function handleRestartGame(socket: Socket): Promise<void> {
         const latestSnapshot = mostRecentGameSnapshotByLobbyId.get(lobby.id);
         const latestEvents = currentRoundGameEventsByLobbyId.get(lobby.id) || [];
         if (latestSnapshot === newSnapshot) {
-          logger.debug('Re-emitting first game snapshot to ensure all clients received it');
+          logger.info('Re-emitting first game snapshot to ensure all clients received it');
           sendRedactedSnapshotToAllPlayers(gameLoop, latestSnapshot, latestEvents, lobby.id);
         }
       }, 100);
@@ -1696,7 +1693,7 @@ function sendRedactedSnapshotToAllPlayers(
 }
 
 function sendMostRecentGameData(socket: Socket): void {
-  logger.debug('Sending most recent game data to client');
+  logger.info('Sending most recent game data to client');
   
   // Find which player this socket belongs to
   const playerId = socketIdToPlayerId.get(socket.id);
