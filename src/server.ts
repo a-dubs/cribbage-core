@@ -229,11 +229,15 @@ function cacheLobbyFromPayload(payload: LobbyPayload): Lobby {
   const mapped = lobbyFromSupabase(payload);
   const playerIds = new Set(mapped.players.map(p => p.playerId));
   mapped.players.forEach(p => lobbyIdByPlayerId.set(p.playerId, mapped.id));
+  // Collect entries to delete first to avoid modifying Map during iteration
+  const playerIdsToDelete: string[] = [];
   for (const [playerId, lobbyId] of lobbyIdByPlayerId.entries()) {
     if (lobbyId === mapped.id && !playerIds.has(playerId)) {
-      lobbyIdByPlayerId.delete(playerId);
+      playerIdsToDelete.push(playerId);
     }
   }
+  // Delete collected entries after iteration completes
+  playerIdsToDelete.forEach(playerId => lobbyIdByPlayerId.delete(playerId));
   lobbiesById.set(mapped.id, mapped);
   return mapped;
 }
