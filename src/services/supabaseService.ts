@@ -763,24 +763,47 @@ export async function respondToLobbyInvitation(params: {
   if (invitation.recipient_id !== params.recipientId) {
     throw new Error('NOT_AUTHORIZED');
   }
-  const status: 'accepted' | 'declined' = params.accept ? 'accepted' : 'declined';
+  if (!params.accept) {
+    // For declines, update status immediately
+    const status: 'declined' = 'declined';
+    const { error: updateError } = await client
+      .from('lobby_invitations')
+      .update({ status })
+      .eq('id', params.invitationId)
+      .eq('recipient_id', params.recipientId);
+    if (updateError) {
+      throw new Error(updateError.message);
+    }
+    return { invitation: { ...(invitation as LobbyInvitation), status } };
+  }
+
+  // For accepts, try to join lobby first, then update status
+  const lobbyId = invitation.lobby_id as string;
+  let lobby: LobbyPayload;
+  try {
+    lobby = await joinLobby({
+      lobbyId,
+      playerId: params.recipientId,
+      inviteCode: (invitation as any).lobbies?.invite_code ?? undefined,
+    });
+  } catch (error) {
+    // If join fails, don't update invitation status
+    throw error;
+  }
+
+  // Only update status to 'accepted' after successful join
+  const status: 'accepted' = 'accepted';
   const { error: updateError } = await client
     .from('lobby_invitations')
     .update({ status })
     .eq('id', params.invitationId)
     .eq('recipient_id', params.recipientId);
   if (updateError) {
+    // If status update fails after successful join, this is a database error
+    // The user has already joined, but the invitation status is inconsistent
     throw new Error(updateError.message);
   }
-  if (!params.accept) {
-    return { invitation: { ...(invitation as LobbyInvitation), status } };
-  }
-  const lobbyId = invitation.lobby_id as string;
-  const lobby = await joinLobby({
-    lobbyId,
-    playerId: params.recipientId,
-    inviteCode: (invitation as any).lobbies?.invite_code ?? undefined,
-  });
+
   return {
     invitation: { ...(invitation as LobbyInvitation), status: 'accepted' },
     lobby,
