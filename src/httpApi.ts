@@ -159,7 +159,14 @@ export function registerHttpApi(app: express.Express, hooks?: HttpApiHooks): voi
       res.json({ profile });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to update profile';
-      const status = ['USERNAME_REQUIRED', 'DISPLAY_NAME_REQUIRED', 'NO_FIELDS'].includes(message) ? 400 : 409;
+      // Check for validation errors (username/display name validation)
+      const isValidationError = 
+        message.includes('Username') || 
+        message.includes('must be between') ||
+        message.includes('can only contain') ||
+        message === 'DISPLAY_NAME_REQUIRED' ||
+        message === 'NO_FIELDS';
+      const status = isValidationError ? 400 : 409;
       res.status(status).json({ error: 'PROFILE_UPDATE_FAILED', message });
     }
   });
