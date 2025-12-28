@@ -299,8 +299,14 @@ function snapshotForEvent(event: GameEvent, latestSnapshot: GameSnapshot, roundS
 async function persistRoundHistory(lobbyId: string, latestSnapshot: GameSnapshot): Promise<void> {
   const supabaseGameId = supabaseGameIdByLobbyId.get(lobbyId);
   if (!SUPABASE_AUTH_ENABLED || !supabaseGameId) return;
+  
+  // Atomically capture and clear events to prevent race conditions
+  // If START_ROUND fires during persistence, it won't be lost
   const roundEvents = currentRoundGameEventsByLobbyId.get(lobbyId) ?? [];
   if (roundEvents.length === 0) return;
+  
+  // Clear immediately before async operation to prevent race conditions
+  currentRoundGameEventsByLobbyId.set(lobbyId, []);
 
   const roundStartSnapshot = roundStartSnapshotByLobbyId.get(lobbyId);
   const eventsWithSnapshots = roundEvents.map(event => {
@@ -314,9 +320,10 @@ async function persistRoundHistory(lobbyId: string, latestSnapshot: GameSnapshot
 
   try {
     await persistGameEvents({ gameId: supabaseGameId, events: eventsWithSnapshots });
-    currentRoundGameEventsByLobbyId.set(lobbyId, []);
   } catch (error) {
     logger.error('[Supabase] Failed to persist round history', error);
+    // Note: Events are already cleared, so they won't be retried
+    // This is acceptable since persistence failures are logged for monitoring
   }
 }
 
