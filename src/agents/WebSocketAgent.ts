@@ -101,10 +101,16 @@ export class WebSocketAgent implements GameAgent {
                 }
                 const processed = processResponse(response);
                 if (processed === 'retry') {
+                  // Clean up listeners before retry so fresh listeners can be registered
                   // Re-register disconnect listener for retry since .once() removes it after first use
                   if (disconnectListener) {
                     currentSocket.off('disconnect', disconnectListener);
                     disconnectListener = null;
+                  }
+                  // Remove old response listener so a fresh one can be registered on retry
+                  if (responseListener) {
+                    currentSocket.off(responseEvent, responseListener);
+                    responseListener = null;
                   }
                   return request();
                 } else if (processed instanceof Error) {
