@@ -949,10 +949,13 @@ export async function respondToFriendRequest(params: {
       throw new Error(sender.error?.message ?? 'Failed to lookup sender');
     }
     const { userId, friendId } = canonicalizeFriendPair(params.recipientId, sender.data.sender_id as string);
-    await client.from('friendships').insert({
+    const { error: friendshipError } = await client.from('friendships').insert({
       user_id: userId,
       friend_id: friendId,
     });
+    if (friendshipError) {
+      throw new Error(friendshipError.message);
+    }
   }
 }
 
