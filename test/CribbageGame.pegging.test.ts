@@ -200,6 +200,29 @@ describe('CribbageGame - Pegging Logic', () => {
       expect(state.peggingStack.length).toBeGreaterThan(0); // Stack not cleared
     });
 
+    it('should award last card point when last card player has cards but can\'t play them (e.g., 2 at stack 30)', () => {
+      const state = game.getGameState();
+      const p1 = state.players[0];
+      const p2 = state.players[1];
+
+      // Setup: p1 played last card, p1 has a 2 but stack is at 30 (can't play without exceeding 31)
+      p1.peggingHand = ['TWO_HEARTS']; // Has a card but can't play (30 + 2 = 32 > 31)
+      p2.peggingHand = ['KING_SPADES']; // Has a card but can't play (would exceed 31)
+      state.peggingStack = ['FIVE_SPADES', 'TEN_CLUBS', 'SIX_DIAMONDS', 'NINE_HEARTS']; // Total = 30
+      state.peggingTotal = 30;
+      state.peggingLastCardPlayer = 'p1'; // p1 played the last card
+      state.peggingGoPlayers = [];
+
+      // p2 says Go (can't play without exceeding 31)
+      const result = game.playCard('p2', null);
+
+      // Should detect that p1 (last card player) can't play and all others said Go
+      expect(result).toBe('p1'); // Round over, last card player returned
+      expect(p1.score).toBe(1); // Got 1 point for last card
+      expect(state.peggingStack.length).toBe(0); // Stack cleared
+      expect(state.peggingGoPlayers.length).toBe(0); // Go players cleared
+    });
+
     it('should handle 3-player scenario: last card player out of cards, others say Go', () => {
       game = new CribbageGame([
         { id: 'p1', name: 'Player 1' },
@@ -292,6 +315,58 @@ describe('CribbageGame - Pegging Logic', () => {
       expect(lastEvent.actionType).toBe(ActionType.LAST_CARD);
       expect(lastEvent.playerId).toBe('p1');
       expect(lastEvent.scoreChange).toBe(1);
+    });
+
+    it('should NOT award last card point when last card player says Go but others have not said Go', () => {
+      const state = game.getGameState();
+      const p1 = state.players[0];
+      const p2 = state.players[1];
+
+      // Setup: p1 played last card, p1 has no cards left
+      p1.peggingHand = []; // Out of cards
+      p2.peggingHand = ['KING_SPADES']; // Has a card but can't play (would exceed 31)
+      state.peggingStack = ['FIVE_SPADES', 'TEN_CLUBS', 'SIX_DIAMONDS', 'SEVEN_HEARTS']; // Total = 28
+      state.peggingTotal = 28;
+      state.peggingLastCardPlayer = 'p1'; // p1 played the last card
+      state.peggingGoPlayers = [];
+
+      // p1 says Go (but p2 hasn't said Go yet)
+      // Since p1 is the last card player saying Go, they should go through the normal path
+      // which checks if all others have said Go (they haven't), so no bonus yet
+      const result = game.playCard('p1', null);
+
+      // Should NOT award bonus yet because p2 hasn't said Go
+      expect(result).toBeNull(); // Round not over yet
+      expect(p1.score).toBe(0); // No bonus point yet
+      expect(state.peggingStack.length).toBeGreaterThan(0); // Stack not cleared
+      expect(state.peggingGoPlayers).toContain('p1'); // p1 added to Go players
+    });
+
+    it('should award last card point through normal path when last card player says Go after all others said Go', () => {
+      const state = game.getGameState();
+      const p1 = state.players[0];
+      const p2 = state.players[1];
+
+      // Setup: p1 played last card, p1 still has cards
+      p1.peggingHand = ['TEN_HEARTS']; // Still has cards
+      p2.peggingHand = ['KING_SPADES'];
+      state.peggingStack = ['FIVE_SPADES', 'TEN_CLUBS', 'SIX_DIAMONDS']; // Total = 21
+      state.peggingTotal = 21;
+      state.peggingLastCardPlayer = 'p1';
+      state.peggingGoPlayers = [];
+
+      // p2 says Go first
+      game.playCard('p2', null);
+      expect(state.peggingGoPlayers).toContain('p2');
+
+      // p1 says Go (they played last card, all others have said Go)
+      // This should go through the normal path (lines 532-563), not the special path
+      const result = game.playCard('p1', null);
+
+      expect(result).toBe('p1'); // Round over, last card player returned
+      expect(p1.score).toBe(1); // Got 1 point for last card
+      expect(state.peggingStack.length).toBe(0); // Stack cleared
+      expect(state.peggingGoPlayers.length).toBe(0); // Go players cleared
     });
   });
 

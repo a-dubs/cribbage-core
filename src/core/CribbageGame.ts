@@ -20,7 +20,7 @@ import {
 } from './scoring';
 import { ScoreBreakdownItem } from '../types';
 import EventEmitter from 'eventemitter3';
-import { isValidDiscard } from './utils';
+import { isValidDiscard, playerHasValidPlay } from './utils';
 import { validatePlayerCount, getPlayerCountConfig, getExpectedCribSize } from '../gameplay/rules';
 import { logger } from '../utils/logger';
 
@@ -569,19 +569,38 @@ export class CribbageGame extends EventEmitter {
       }
       logger.info(`Player ${playerId} said "Go"`);
 
-      // Check if all players with cards have now said "Go" and the last card player has no cards
-      // This handles the case where the last card player ran out of cards and can't say "Go"
+      // Check if all other players have said "Go" or can't play, and the last card player can't play
+      // This handles the case where the last card player ran out of cards OR has cards but can't play them
+      // (e.g., they have a 2 but stack is at 30, so playing it would exceed 31)
+      // The last card player doesn't need to say "Go" - they just need to be unable to play
+      // Players with no cards are automatically skipped (they don't say "Go")
+      // Players with cards who can't play MUST say "Go" before the bonus is awarded
+      // Only check this if the current player saying "Go" is NOT the last card player
+      // (if the last card player is saying "Go", they should go through the normal path above)
       const lastCardPlayer = this.gameState.players.find(
         p => p.id === this.gameState.peggingLastCardPlayer
       );
-      if (lastCardPlayer && lastCardPlayer.peggingHand.length === 0) {
-        // Count how many players still have cards and haven't said "Go"
-        const playersWithCardsNotGone = this.gameState.players.filter(
-          p => p.peggingHand.length > 0 && !this.gameState.peggingGoPlayers.includes(p.id)
-        );
-        // If all players with cards have said "Go", give the last card player a point
-        if (playersWithCardsNotGone.length === 0) {
-          logger.info(`All players with cards have said Go. Player ${lastCardPlayer.id} (out of cards) gets last card point!`);
+      if (lastCardPlayer && !playerHasValidPlay(this.gameState, lastCardPlayer) && lastCardPlayer.id !== playerId) {
+        // Check if all other players (excluding last card player and current player) have either:
+        // - Said "Go" (if they have cards but can't play - they MUST say "Go")
+        // - Have no cards (automatically skipped, don't need to say "Go")
+        const allOthersGoneOrCantPlay = this.gameState.players
+          .filter(p => p.id !== lastCardPlayer.id && p.id !== playerId)
+          .every(p => {
+            // If player has no cards, they're automatically skipped (can't play)
+            if (p.peggingHand.length === 0) {
+              return true;
+            }
+            // If player has cards but can't play, they MUST have said "Go"
+            if (!playerHasValidPlay(this.gameState, p)) {
+              return this.gameState.peggingGoPlayers.includes(p.id);
+            }
+            // If player can play, they haven't "gone" yet
+            return false;
+          });
+        // If all other players have said "Go" or have no cards, give the last card player a point
+        if (allOthersGoneOrCantPlay) {
+          logger.info(`All other players have said Go or have no cards. Player ${lastCardPlayer.id} (can't play) gets last card point!`);
           // Capture pegging stack BEFORE calling startNewPeggingRound() which clears it
           const peggingStackForBreakdown = [...this.gameState.peggingStack];
           const lastPlayer = this.startNewPeggingRound();
