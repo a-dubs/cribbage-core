@@ -953,25 +953,26 @@ export async function respondToFriendRequest(params: {
 }): Promise<void> {
   const client = getServiceClient();
   const status: FriendRequestStatus = params.accept ? 'accepted' : 'declined';
-  const { error } = await client
+  // Verify the update actually matched a row to prevent accepting someone else's request
+  const { data: updated, error } = await client
     .from('friend_requests')
     .update({ status })
     .eq('id', params.requestId)
-    .eq('recipient_id', params.recipientId);
+    .eq('recipient_id', params.recipientId)
+    .select('sender_id');
   if (error) {
     throw new Error(error.message);
   }
+  if (!updated || updated.length === 0) {
+    throw new Error('Friend request not found or not authorized');
+  }
   if (status === 'accepted') {
     // Create friendship row (canonical ordering handled by trigger)
-    const sender = await client
-      .from('friend_requests')
-      .select('sender_id')
-      .eq('id', params.requestId)
-      .single();
-  if (sender.error || !sender.data?.sender_id) {
-      throw new Error(sender.error?.message ?? 'Failed to lookup sender');
+    const senderId = updated[0].sender_id;
+    if (!senderId) {
+      throw new Error('Failed to lookup sender');
     }
-    const { userId, friendId } = canonicalizeFriendPair(params.recipientId, sender.data.sender_id as string);
+    const { userId, friendId } = canonicalizeFriendPair(params.recipientId, senderId as string);
     const { error: friendshipError } = await client.from('friendships').insert({
       user_id: userId,
       friend_id: friendId,
