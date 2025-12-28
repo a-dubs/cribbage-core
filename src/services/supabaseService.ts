@@ -202,22 +202,40 @@ export async function signUpWithEmail(params: {
   const normalizedUsername = validateAndNormalizeUsername(params.username);
   const trimmedDisplayName = params.displayName.trim();
   if (!trimmedDisplayName) {
+    // Roll back auth user creation before throwing
+    await svc.auth.admin.deleteUser(userId).catch(() => {
+      // Ignore errors during cleanup - best effort
+    });
     throw new Error('DISPLAY_NAME_REQUIRED');
   }
 
-  const { error: profileError, data: profileInsert } = await svc
-    .from('profiles')
-    .insert({
-      id: userId,
-      username: normalizedUsername,
-      display_name: trimmedDisplayName,
-      friend_code: friendCode,
-    })
-    .select()
-    .single();
+  let profileInsert: SupabaseProfile;
+  try {
+    const { error: profileError, data: insertedProfile } = await svc
+      .from('profiles')
+      .insert({
+        id: userId,
+        username: normalizedUsername,
+        display_name: trimmedDisplayName,
+        friend_code: friendCode,
+      })
+      .select()
+      .single();
 
-  if (profileError || !profileInsert) {
-    throw new Error(profileError?.message ?? 'Failed to create profile');
+    if (profileError || !insertedProfile) {
+      // Roll back auth user creation on profile insert failure
+      await svc.auth.admin.deleteUser(userId).catch(() => {
+        // Ignore errors during cleanup - best effort
+      });
+      throw new Error(profileError?.message ?? 'Failed to create profile');
+    }
+    profileInsert = insertedProfile as SupabaseProfile;
+  } catch (error) {
+    // If profile insert fails for any reason, roll back auth user
+    await svc.auth.admin.deleteUser(userId).catch(() => {
+      // Ignore errors during cleanup - best effort
+    });
+    throw error;
   }
 
   // Generate a session for convenience
