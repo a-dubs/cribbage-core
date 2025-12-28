@@ -980,14 +980,24 @@ async function startLobbyGameForHost(lobbyId: string, hostId: string): Promise<{
     if (info) agents.set(info.id, info.agent);
   });
 
+  // Filter out disconnected players - only include players who have agents
+  const validPlayersInfo = playersInfo.filter(p => agents.has(p.id));
+  if (validPlayersInfo.length !== playersInfo.length) {
+    const disconnectedPlayers = playersInfo.filter(p => !agents.has(p.id));
+    logger.warn(`[startLobbyGameForHost] Filtering out ${disconnectedPlayers.length} disconnected players: ${disconnectedPlayers.map(p => p.name).join(', ')}`);
+  }
+  if (validPlayersInfo.length < 2) {
+    throw new Error('Not enough connected players to start game');
+  }
+
   // Store bot IDs for cleanup after game ends
   currentGameBotIdsByLobbyId.set(lobby.id, newBotIds);
 
-  const gameLoop = new GameLoop(playersInfo);
+  const gameLoop = new GameLoop(validPlayersInfo);
   agents.forEach((agent, id) => gameLoop.addAgent(id, agent));
   gameLoopsByLobbyId.set(lobby.id, gameLoop);
   currentRoundGameEventsByLobbyId.set(lobby.id, []);
-  await createSupabaseGameForLobby(lobby, playersInfo, gameLoop);
+  await createSupabaseGameForLobby(lobby, validPlayersInfo, gameLoop);
 
   // Set up gameSnapshot listener to send redacted snapshots to all clients
   let firstSnapshotEmitted = false;
