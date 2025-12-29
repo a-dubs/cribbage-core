@@ -92,17 +92,33 @@ export class CribbageGame extends EventEmitter {
   }
 
   private updatePlayerScore(player: Player, points: number): void {
-    // Only move pegs when the player's score actually increases
-    if (points <= 0) {
+    if (points === 0) {
       return;
     }
 
-    // Move current peg position to previous
-    player.pegPositions.previous = player.pegPositions.current;
-    // Update the actual score first
-    player.score += points;
-    // Update current peg to new score position
+    // Always update the numeric score, even for negative adjustments.
+    // In standard cribbage play scores only increase, but allowing negative
+    // changes supports correction/administrative adjustments and tests.
+    const nextScore = player.score + points;
+    player.score = nextScore;
+
+    // Only perform the normal "two-peg" movement behavior when scoring
+    // increases. For negative adjustments, keep peg state consistent with the
+    // updated score without treating it as a scoring movement.
+    if (points > 0) {
+      // Move current peg position to previous
+      player.pegPositions.previous = player.pegPositions.current;
+      // Update current peg to new score position
+      player.pegPositions.current = player.score;
+      return;
+    }
+
+    // Negative adjustment: align current peg to score and prevent previous from
+    // being ahead of current.
     player.pegPositions.current = player.score;
+    if (player.pegPositions.previous > player.pegPositions.current) {
+      player.pegPositions.previous = player.pegPositions.current;
+    }
   }
 
   private recordGameEvent(

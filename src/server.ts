@@ -194,7 +194,9 @@ interface Lobby {
 }
 
 interface LoginData {
-  accessToken: string;
+  // Optional because auth is established at handshake time via middleware.
+  // If provided, it must match the middleware-authenticated user.
+  accessToken?: string;
 }
 
 const connectedPlayers: Map<string, PlayerInfo> = new Map();
@@ -1367,8 +1369,6 @@ function handleCreateLobby(
 }
 
 async function handleLogin(socket: Socket, data: LoginData): Promise<void> {
-  const { accessToken } = data;
-
   if (!SUPABASE_AUTH_ENABLED) {
     socket.emit('loginRejected', {
       reason: 'AUTH_DISABLED',
@@ -1378,10 +1378,47 @@ async function handleLogin(socket: Socket, data: LoginData): Promise<void> {
   }
 
   try {
-    const { userId } = await verifyAccessToken(accessToken);
-    const profile = await getProfile(userId);
+    const socketAuthedUserId = (socket.data as { userId?: string }).userId;
+    if (!socketAuthedUserId) {
+      logger.warn(`[handleLogin] Missing middleware-authenticated userId for socket ${socket.id}`);
+      socket.emit('loginRejected', {
+        reason: 'INVALID_TOKEN',
+        message: 'Socket is not authenticated',
+      });
+      return;
+    }
+
+    // Defense-in-depth: if the client also sends an access token in the
+    // login payload, ensure it cannot switch identities after connection.
+    const payloadToken = data?.accessToken;
+    if (payloadToken) {
+      try {
+        const { userId: payloadUserId } = await verifyAccessToken(payloadToken);
+        if (payloadUserId !== socketAuthedUserId) {
+          logger.warn(
+            `[handleLogin] Token/user mismatch for socket ${socket.id}: ` +
+              `handshake user ${socketAuthedUserId} vs login user ${payloadUserId}`
+          );
+          socket.emit('loginRejected', {
+            reason: 'TOKEN_MISMATCH',
+            message: 'Login token does not match authenticated socket',
+          });
+          return;
+        }
+      } catch (error) {
+        // The socket is already authenticated via middleware; do not allow a
+        // bad/expired payload token to block login as the authenticated user.
+        logger.warn(
+          `[handleLogin] Ignoring invalid login token for socket ${socket.id} ` +
+            `(socket already authenticated)`,
+          error
+        );
+      }
+    }
+
+    const profile = await getProfile(socketAuthedUserId);
     const displayName = profile?.display_name ?? 'Player';
-    const playerId = userId;
+    const playerId = socketAuthedUserId;
 
     let agent: WebSocketAgent | null = null;
     // Check if this playerId already has an agent (reconnection scenario)
