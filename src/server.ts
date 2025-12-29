@@ -83,21 +83,46 @@ const getAllowedOrigins = (): string | string[] | ((origin: string | undefined, 
   // Remove duplicates
   const uniqueOrigins = [...new Set(expandedOrigins)];
   
-  if (uniqueOrigins.length === 1) {
+  // Check if any origin contains a wildcard - if so, use dynamic matcher
+  const hasWildcard = uniqueOrigins.some(origin => origin.startsWith('*.'));
+  
+  // If single origin and no wildcard, return string directly for exact match
+  if (uniqueOrigins.length === 1 && !hasWildcard) {
     return uniqueOrigins[0];
   }
   
-  // Multiple origins - use function to check dynamically
+  // Multiple origins or wildcard present - use function to check dynamically
   return (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
     if (!origin) {
       callback(null, true); // Allow requests with no origin (e.g., mobile apps, Postman)
       return;
     }
+    
+    // Extract hostname from origin URL for proper comparison
+    let originHostname: string;
+    try {
+      const originUrl = new URL(origin);
+      originHostname = originUrl.hostname;
+    } catch {
+      // If origin is not a valid URL, fall back to treating it as hostname
+      originHostname = origin.replace(/^https?:\/\//, '').split('/')[0];
+    }
+    
     const isAllowed = uniqueOrigins.some(allowedOrigin => {
       // Support wildcard subdomains
       if (allowedOrigin.startsWith('*.')) {
         const domain = allowedOrigin.slice(2);
-        return origin.endsWith(domain);
+        // Extract hostname from allowed origin if it's a full URL
+        let allowedHostname = domain;
+        try {
+          const allowedUrl = new URL(domain);
+          allowedHostname = allowedUrl.hostname;
+        } catch {
+          // If domain is not a valid URL, treat it as hostname
+          allowedHostname = domain.replace(/^https?:\/\//, '').split('/')[0];
+        }
+        // Enforce dot boundary to prevent matches like badexample.com for *.example.com
+        return originHostname === allowedHostname || originHostname.endsWith('.' + allowedHostname);
       }
       // Exact match
       if (origin === allowedOrigin) {
