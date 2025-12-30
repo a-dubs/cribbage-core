@@ -969,128 +969,158 @@ async function startLobbyGameForHost(lobbyId: string, hostId: string): Promise<{
 
   const startedLobby = await startLobby({ lobbyId, hostId });
   const lobby = cacheLobbyFromPayload(startedLobby);
-
-  // Clean up any existing bots before creating new ones
-  cleanupBots(lobby.id);
-
-  // Build playersInfo from lobby members (humans only, no bots yet)
-  const playersInfo: PlayerIdAndName[] = lobby.players.map(p => ({ id: p.playerId, name: p.displayName }));
-
-  // Calculate bots needed
-  const targetCount = lobby.maxPlayers ?? lobby.playerCount ?? playersInfo.length;
-  const botsNeeded = Math.max(0, targetCount - playersInfo.length);
-  logger.info(`Starting lobby game: ${lobby.name} with ${playersInfo.length} humans and ${botsNeeded} bots needed`);
-
-  // Create bots
-  const botNames = ['Bot Alex', 'Bot Morgan', 'Bot Jordan'];
   const newBotIds: string[] = [];
-  for (let i = 0; i < botsNeeded; i++) {
-    const botName = botNames[i] || `Bot ${i + 1}`;
-    const botAgent = new ExhaustiveSimpleAgent();
-    const botId = `${botAgent.playerId}-${Date.now()}-${i}`;
-    // Update the agent's playerId to match the generated botId
-    botAgent.playerId = botId;
-    playersInfo.push({ id: botId, name: botName });
-    const botPlayerInfo: PlayerInfo = {
-      id: botId,
-      name: botName,
-      agent: botAgent,
-    };
-    connectedPlayers.set(botId, botPlayerInfo);
-    newBotIds.push(botId);
-    logger.info(`Added bot: ${botName} (ID: ${botId})`);
-  }
 
-  // Create GameLoop using players from the lobby
-  const agents: Map<string, GameAgent> = new Map();
-  // Populate human agents
-  lobby.players.forEach(p => {
-    const info = connectedPlayers.get(p.playerId);
-    if (info) agents.set(info.id, info.agent);
-  });
-  // Populate bot agents
-  newBotIds.forEach(id => {
-    const info = connectedPlayers.get(id);
-    if (info) agents.set(info.id, info.agent);
-  });
+  try {
+    // Clean up any existing bots before creating new ones
+    cleanupBots(lobby.id);
 
-  // Filter out disconnected players - only include players who have agents
-  const validPlayersInfo = playersInfo.filter(p => agents.has(p.id));
-  if (validPlayersInfo.length !== playersInfo.length) {
-    const disconnectedPlayers = playersInfo.filter(p => !agents.has(p.id));
-    logger.warn(`[startLobbyGameForHost] Filtering out ${disconnectedPlayers.length} disconnected players: ${disconnectedPlayers.map(p => p.name).join(', ')}`);
-  }
-  if (validPlayersInfo.length < 2) {
-    throw new Error('Not enough connected players to start game');
-  }
+    // Build playersInfo from lobby members (humans only, no bots yet)
+    const playersInfo: PlayerIdAndName[] = lobby.players.map(p => ({ id: p.playerId, name: p.displayName }));
 
-  // Store bot IDs for cleanup after game ends
-  currentGameBotIdsByLobbyId.set(lobby.id, newBotIds);
+    // Calculate bots needed
+    const targetCount = lobby.maxPlayers ?? lobby.playerCount ?? playersInfo.length;
+    const botsNeeded = Math.max(0, targetCount - playersInfo.length);
+    logger.info(`Starting lobby game: ${lobby.name} with ${playersInfo.length} humans and ${botsNeeded} bots needed`);
 
-  const gameLoop = new GameLoop(validPlayersInfo);
-  agents.forEach((agent, id) => gameLoop.addAgent(id, agent));
-  gameLoopsByLobbyId.set(lobby.id, gameLoop);
-  currentRoundGameEventsByLobbyId.set(lobby.id, []);
-  await createSupabaseGameForLobby(lobby, validPlayersInfo, gameLoop);
-
-  // Set up gameSnapshot listener to send redacted snapshots to all clients
-  let firstSnapshotEmitted = false;
-  gameLoop.on('gameSnapshot', (newSnapshot: GameSnapshot) => {
-    mostRecentGameSnapshotByLobbyId.set(lobby.id, newSnapshot);
-    const existingEvents = currentRoundGameEventsByLobbyId.get(lobby.id) || [];
-    const updatedEvents = [...existingEvents, newSnapshot.gameEvent];
-    const isStartRound = newSnapshot.gameEvent.actionType === ActionType.START_ROUND;
-    const roundEvents = isStartRound ? [newSnapshot.gameEvent] : updatedEvents;
-    if (isStartRound) {
-      roundStartSnapshotByLobbyId.set(lobby.id, newSnapshot);
-      currentRoundGameEventsByLobbyId.set(lobby.id, roundEvents);
-    } else {
-      currentRoundGameEventsByLobbyId.set(lobby.id, updatedEvents);
+    // Create bots
+    const botNames = ['Bot Alex', 'Bot Morgan', 'Bot Jordan'];
+    for (let i = 0; i < botsNeeded; i++) {
+      const botName = botNames[i] || `Bot ${i + 1}`;
+      const botAgent = new ExhaustiveSimpleAgent();
+      const botId = `${botAgent.playerId}-${Date.now()}-${i}`;
+      // Update the agent's playerId to match the generated botId
+      botAgent.playerId = botId;
+      playersInfo.push({ id: botId, name: botName });
+      const botPlayerInfo: PlayerInfo = {
+        id: botId,
+        name: botName,
+        agent: botAgent,
+      };
+      connectedPlayers.set(botId, botPlayerInfo);
+      newBotIds.push(botId);
+      logger.info(`Added bot: ${botName} (ID: ${botId})`);
     }
 
-    if (newSnapshot.gameEvent.actionType === ActionType.READY_FOR_NEXT_ROUND || newSnapshot.gameEvent.actionType === ActionType.WIN) {
-      void persistRoundHistory(lobby.id, newSnapshot);
+    // Create GameLoop using players from the lobby
+    const agents: Map<string, GameAgent> = new Map();
+    // Populate human agents
+    lobby.players.forEach(p => {
+      const info = connectedPlayers.get(p.playerId);
+      if (info) agents.set(info.id, info.agent);
+    });
+    // Populate bot agents
+    newBotIds.forEach(id => {
+      const info = connectedPlayers.get(id);
+      if (info) agents.set(info.id, info.agent);
+    });
+
+    // Filter out disconnected players - only include players who have agents
+    const validPlayersInfo = playersInfo.filter(p => agents.has(p.id));
+    if (validPlayersInfo.length !== playersInfo.length) {
+      const disconnectedPlayers = playersInfo.filter(p => !agents.has(p.id));
+      logger.warn(`[startLobbyGameForHost] Filtering out ${disconnectedPlayers.length} disconnected players: ${disconnectedPlayers.map(p => p.name).join(', ')}`);
     }
-    
-    // Send redacted snapshots to all players
-    sendRedactedSnapshotToAllPlayers(gameLoop, newSnapshot, roundEvents, lobby.id);
-    
-    // After the first snapshot, ensure all clients received it by re-emitting
-    // This helps clients that reset state after gameStartedFromLobby
-    if (!firstSnapshotEmitted) {
-      firstSnapshotEmitted = true;
-      // Small delay to ensure clients have processed gameStartedFromLobby and set up listeners
-      setTimeout(() => {
-        const latestSnapshot = mostRecentGameSnapshotByLobbyId.get(lobby.id);
-        const latestEvents = currentRoundGameEventsByLobbyId.get(lobby.id) || [];
-        if (latestSnapshot === newSnapshot) {
-          logger.info('Re-emitting first game snapshot to ensure all clients received it');
-          sendRedactedSnapshotToAllPlayers(gameLoop, latestSnapshot, latestEvents, lobby.id);
-        }
-      }, 100);
+    if (validPlayersInfo.length < 2) {
+      throw new Error('Not enough connected players to start game');
     }
-  });
 
-  // Map lobby -> game
-  const gameId = gameLoop.cribbageGame.getGameState().id;
-  gameIdByLobbyId.set(lobby.id, gameId);
+    // Store bot IDs for cleanup after game ends
+    currentGameBotIdsByLobbyId.set(lobby.id, newBotIds);
 
-  // Update lobby status and broadcast updates
-  lobby.status = 'in_progress';
-  lobby.finishedAt = null;
-  lobby.disconnectedPlayerIds = [];
-  io.emit('lobbyUpdated', lobby);
+    const gameLoop = new GameLoop(validPlayersInfo);
+    agents.forEach((agent, id) => gameLoop.addAgent(id, agent));
+    gameLoopsByLobbyId.set(lobby.id, gameLoop);
+    currentRoundGameEventsByLobbyId.set(lobby.id, []);
+    await createSupabaseGameForLobby(lobby, validPlayersInfo, gameLoop);
 
-  // Notify lobby members of the game start
-  io.emit('gameStartedFromLobby', { lobbyId: lobby.id, gameId, players: playersInfo });
+    // Set up gameSnapshot listener to send redacted snapshots to all clients
+    let firstSnapshotEmitted = false;
+    gameLoop.on('gameSnapshot', (newSnapshot: GameSnapshot) => {
+      mostRecentGameSnapshotByLobbyId.set(lobby.id, newSnapshot);
+      const existingEvents = currentRoundGameEventsByLobbyId.get(lobby.id) || [];
+      const updatedEvents = [...existingEvents, newSnapshot.gameEvent];
+      const isStartRound = newSnapshot.gameEvent.actionType === ActionType.START_ROUND;
+      const roundEvents = isStartRound ? [newSnapshot.gameEvent] : updatedEvents;
+      if (isStartRound) {
+        roundStartSnapshotByLobbyId.set(lobby.id, newSnapshot);
+        currentRoundGameEventsByLobbyId.set(lobby.id, roundEvents);
+      } else {
+        currentRoundGameEventsByLobbyId.set(lobby.id, updatedEvents);
+      }
 
-  // Start the game loop (this will emit snapshots as the game progresses)
-  // Don't await - let it run in the background
-  startGame(lobby.id).catch(error => {
-    logger.error('[startLobbyGameForHost] Error in game loop:', error);
-  });
+      if (newSnapshot.gameEvent.actionType === ActionType.READY_FOR_NEXT_ROUND || newSnapshot.gameEvent.actionType === ActionType.WIN) {
+        void persistRoundHistory(lobby.id, newSnapshot);
+      }
+      
+      // Send redacted snapshots to all players
+      sendRedactedSnapshotToAllPlayers(gameLoop, newSnapshot, roundEvents, lobby.id);
+      
+      // After the first snapshot, ensure all clients received it by re-emitting
+      // This helps clients that reset state after gameStartedFromLobby
+      if (!firstSnapshotEmitted) {
+        firstSnapshotEmitted = true;
+        // Small delay to ensure clients have processed gameStartedFromLobby and set up listeners
+        setTimeout(() => {
+          const latestSnapshot = mostRecentGameSnapshotByLobbyId.get(lobby.id);
+          const latestEvents = currentRoundGameEventsByLobbyId.get(lobby.id) || [];
+          if (latestSnapshot === newSnapshot) {
+            logger.info('Re-emitting first game snapshot to ensure all clients received it');
+            sendRedactedSnapshotToAllPlayers(gameLoop, latestSnapshot, latestEvents, lobby.id);
+          }
+        }, 100);
+      }
+    });
 
-  return { lobby: startedLobby, gameId };
+    // Map lobby -> game
+    const gameId = gameLoop.cribbageGame.getGameState().id;
+    gameIdByLobbyId.set(lobby.id, gameId);
+
+    // Update lobby status and broadcast updates
+    lobby.status = 'in_progress';
+    lobby.finishedAt = null;
+    lobby.disconnectedPlayerIds = [];
+    io.emit('lobbyUpdated', lobby);
+
+    // Notify lobby members of the game start
+    io.emit('gameStartedFromLobby', { lobbyId: lobby.id, gameId, players: playersInfo });
+
+    // Start the game loop (this will emit snapshots as the game progresses)
+    // Don't await - let it run in the background
+    startGame(lobby.id).catch(error => {
+      logger.error('[startLobbyGameForHost] Error in game loop:', error);
+    });
+
+    return { lobby: startedLobby, gameId };
+  } catch (error) {
+    // Rollback lobby status to 'waiting' if game start fails
+    try {
+      const client = getServiceClient();
+      await client.from('lobbies').update({ status: 'waiting' }).eq('id', lobbyId);
+      logger.info(`[startLobbyGameForHost] Rolled back lobby ${lobbyId} status to 'waiting' due to error`);
+    } catch (rollbackError) {
+      logger.error(`[startLobbyGameForHost] Failed to rollback lobby ${lobbyId} status:`, rollbackError);
+    }
+
+    // Clean up any bots that were created
+    newBotIds.forEach(botId => {
+      connectedPlayers.delete(botId);
+    });
+    if (newBotIds.length > 0) {
+      logger.info(`[startLobbyGameForHost] Cleaned up ${newBotIds.length} bots after error`);
+    }
+
+    // Clean up any partial game state that may have been created
+    gameLoopsByLobbyId.delete(lobby.id);
+    currentGameBotIdsByLobbyId.delete(lobby.id);
+    gameIdByLobbyId.delete(lobby.id);
+    currentRoundGameEventsByLobbyId.delete(lobby.id);
+    mostRecentGameSnapshotByLobbyId.delete(lobby.id);
+    roundStartSnapshotByLobbyId.delete(lobby.id);
+
+    // Re-throw the original error
+    throw error;
+  }
 }
 
 function handleUpdateLobbySize(socket: Socket, data: { lobbyId: string; playerCount: number }, callback?: (response: any) => void): void {
