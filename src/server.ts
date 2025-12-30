@@ -1685,11 +1685,21 @@ async function handleRestartGame(socket: Socket): Promise<void> {
   // Store bot IDs for cleanup after game ends
   currentGameBotIdsByLobbyId.set(lobby.id, newBotIds);
 
-  const gameLoop = new GameLoop(playersInfo);
+  // Filter out disconnected players - only include players who have agents
+  const validPlayersInfo = playersInfo.filter(p => agents.has(p.id));
+  if (validPlayersInfo.length !== playersInfo.length) {
+    const disconnectedPlayers = playersInfo.filter(p => !agents.has(p.id));
+    logger.warn(`[handleRestartGame] Filtering out ${disconnectedPlayers.length} disconnected players: ${disconnectedPlayers.map(p => p.name).join(', ')}`);
+  }
+  if (validPlayersInfo.length < 2) {
+    throw new Error('Not enough connected players to restart game');
+  }
+
+  const gameLoop = new GameLoop(validPlayersInfo);
   agents.forEach((agent, id) => gameLoop.addAgent(id, agent));
   gameLoopsByLobbyId.set(lobby.id, gameLoop);
   currentRoundGameEventsByLobbyId.set(lobby.id, []);
-  await createSupabaseGameForLobby(lobby, playersInfo, gameLoop);
+  await createSupabaseGameForLobby(lobby, validPlayersInfo, gameLoop);
 
   // Set up gameSnapshot listener to send redacted snapshots to all clients
   let firstSnapshotEmitted = false;
@@ -1740,7 +1750,7 @@ async function handleRestartGame(socket: Socket): Promise<void> {
   // Notify lobby members of the game restart (same as game start)
   // Small delay to ensure clients have processed gameReset
   setTimeout(() => {
-    io.emit('gameStartedFromLobby', { lobbyId: lobby.id, gameId, players: playersInfo });
+    io.emit('gameStartedFromLobby', { lobbyId: lobby.id, gameId, players: validPlayersInfo });
   }, 50);
 
   // Start the game loop (this will emit snapshots as the game progresses)
