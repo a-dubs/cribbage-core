@@ -1083,7 +1083,7 @@ async function startLobbyGameForHost(lobbyId: string, hostId: string): Promise<{
     io.emit('lobbyUpdated', lobby);
 
     // Notify lobby members of the game start
-    io.emit('gameStartedFromLobby', { lobbyId: lobby.id, gameId, players: playersInfo });
+    io.emit('gameStartedFromLobby', { lobbyId: lobby.id, gameId, players: validPlayersInfo });
 
     // Start the game loop (this will emit snapshots as the game progresses)
     // Don't await - let it run in the background
