@@ -1,17 +1,34 @@
 import fs from 'fs';
 import path from 'path';
+import util from 'util';
+
+const isNode =
+  typeof process !== 'undefined' && typeof process.versions?.node === 'string';
+const baseDir = isNode
+  ? typeof __dirname !== 'undefined'
+    ? __dirname
+    : process.cwd?.() ?? undefined
+  : undefined;
 
 // Configuration from environment
-const LOG_DIR = process.env.LOG_DIR || path.join(__dirname, '../../logs');
-const LOG_FILE = process.env.LOG_FILE || 'server.log';
-const DEBUG_LOGGING = process.env.DEBUG_LOGGING === 'true';
+const LOG_DIR =
+  process.env.LOG_DIR || (baseDir ? path.join(baseDir, '../../logs') : undefined);
 
-// Ensure log directory exists
-if (!fs.existsSync(LOG_DIR)) {
-  fs.mkdirSync(LOG_DIR, { recursive: true });
+// Create a timestamped log file name for each run
+const timestamp = new Date().toISOString().replace(/:/g, '-').replace(/\..+/, '');
+const DEFAULT_LOG_FILE = `server-${timestamp}.log`;
+const LOG_FILE = process.env.LOG_FILE || DEFAULT_LOG_FILE;
+const DEBUG_LOGGING = process.env.DEBUG_LOGGING === 'true' || process.env.DEBUG !== undefined;
+
+// Ensure log directory exists when running in Node
+if (isNode && LOG_DIR) {
+  if (!fs.existsSync(LOG_DIR)) {
+    fs.mkdirSync(LOG_DIR, { recursive: true });
+  }
 }
 
-const logFilePath = path.join(LOG_DIR, LOG_FILE);
+const logFilePath =
+  isNode && LOG_DIR ? path.join(LOG_DIR, LOG_FILE) : undefined;
 
 /**
  * Get current timestamp in ISO format
@@ -29,16 +46,21 @@ function writeLog(level: string, message: string, ...args: any[]): void {
   
   // Console output (with color for level)
   const consoleMethod = level === 'ERROR' ? console.error : level === 'WARN' ? console.warn : console.log;
-  consoleMethod(formattedMessage, ...args);
+  
+  // Use util.format for better argument handling similar to console.log
+  const fullMessage = args.length > 0 
+    ? util.format(formattedMessage, ...args)
+    : formattedMessage;
+
+  consoleMethod(fullMessage);
   
   // File output
-  try {
-    const fileMessage = args.length > 0 
-      ? `${formattedMessage} ${JSON.stringify(args)}`
-      : formattedMessage;
-    fs.appendFileSync(logFilePath, `${fileMessage}\n`, 'utf-8');
-  } catch (err) {
-    console.error('Failed to write to log file:', err);
+  if (logFilePath) {
+    try {
+      fs.appendFileSync(logFilePath, `${fullMessage}\n`, 'utf-8');
+    } catch (err) {
+      console.error('Failed to write to log file:', err);
+    }
   }
 }
 
@@ -94,4 +116,75 @@ export const logger = {
     const message = `[${type}] ${playerName} duration=${durationMs}ms`;
     writeLog('INFO', message);
   },
+
+  /**
+   * Redirects debug module output to our logger
+   */
+  captureDebugLogs: () => {
+    const override = (debugModule: any) => {
+      if (!debugModule) return;
+      
+      // Some versions of debug export the function directly, 
+      // others might have it under .default
+      const d = debugModule.default || debugModule;
+      
+      if (typeof d === 'function' && d.log) {
+        d.log = (message: string, ...args: any[]) => {
+          // Debug messages already have namespaces and colors/formatting
+          // We'll treat them as DEBUG level
+          writeLog('DEBUG', message, ...args);
+        };
+        
+        // If DEBUG env var is set, make sure this instance is enabled
+        if (process.env.DEBUG && typeof d.enable === 'function') {
+          d.enable(process.env.DEBUG);
+        }
+      }
+    };
+
+    // 1. Try to find all debug modules already in the cache
+    try {
+      Object.keys(require.cache).forEach(key => {
+        if (key.includes('/node_modules/debug/')) {
+          try {
+            const m = require.cache[key];
+            if (m) override(m.exports);
+          } catch (e) {
+            // Ignore errors accessing cache
+          }
+        }
+      });
+    } catch (e) {
+      // Ignore errors iterating cache
+    }
+
+    // 2. Hook into the Module system to catch any future debug loads
+    // and any versions we might have missed
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const Module = require('module');
+      const originalRequire = Module.prototype.require;
+      Module.prototype.require = function(path: string) {
+        const exports = originalRequire.apply(this, arguments as any);
+        if (path === 'debug' || path.endsWith('/node_modules/debug/src/index.js') || path.endsWith('/node_modules/debug/src/node.js')) {
+          override(exports);
+        }
+        return exports;
+      };
+    } catch (e) {
+      // If we can't hook require, just try a normal require as a fallback
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        override(require('debug'));
+      } catch (e2) {}
+    }
+
+    // 3. Ensure debug is enabled if DEBUG env var is set
+    if (process.env.DEBUG) {
+      try {
+        const debug = require('debug');
+        debug.enable(process.env.DEBUG);
+      } catch (e) {}
+    }
+  }
 };

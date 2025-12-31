@@ -20,7 +20,7 @@ import {
 } from './scoring';
 import { ScoreBreakdownItem } from '../types';
 import EventEmitter from 'eventemitter3';
-import { isValidDiscard } from './utils';
+import { isValidDiscard, playerHasValidPlay } from './utils';
 import { validatePlayerCount, getPlayerCountConfig, getExpectedCribSize } from '../gameplay/rules';
 import { logger } from '../utils/logger';
 
@@ -92,17 +92,33 @@ export class CribbageGame extends EventEmitter {
   }
 
   private updatePlayerScore(player: Player, points: number): void {
-    // Only move pegs when the player's score actually increases
-    if (points <= 0) {
+    if (points === 0) {
       return;
     }
 
-    // Move current peg position to previous
-    player.pegPositions.previous = player.pegPositions.current;
-    // Update the actual score first
-    player.score += points;
-    // Update current peg to new score position
+    // Always update the numeric score, even for negative adjustments.
+    // In standard cribbage play scores only increase, but allowing negative
+    // changes supports correction/administrative adjustments and tests.
+    const nextScore = player.score + points;
+    player.score = nextScore;
+
+    // Only perform the normal "two-peg" movement behavior when scoring
+    // increases. For negative adjustments, keep peg state consistent with the
+    // updated score without treating it as a scoring movement.
+    if (points > 0) {
+      // Move current peg position to previous
+      player.pegPositions.previous = player.pegPositions.current;
+      // Update current peg to new score position
+      player.pegPositions.current = player.score;
+      return;
+    }
+
+    // Negative adjustment: align current peg to score and prevent previous from
+    // being ahead of current.
     player.pegPositions.current = player.score;
+    if (player.pegPositions.previous > player.pegPositions.current) {
+      player.pegPositions.previous = player.pegPositions.current;
+    }
   }
 
   private recordGameEvent(
@@ -568,6 +584,64 @@ export class CribbageGame extends EventEmitter {
         this.recordGameEvent(ActionType.GO, playerId, null, 0);
       }
       logger.info(`Player ${playerId} said "Go"`);
+
+      // Check if all other players have said "Go" or can't play, and the last card player can't play
+      // This handles the case where the last card player ran out of cards OR has cards but can't play them
+      // (e.g., they have a 2 but stack is at 30, so playing it would exceed 31)
+      // The last card player doesn't need to say "Go" - they just need to be unable to play
+      // Players with no cards are automatically skipped (they don't say "Go")
+      // Players with cards who can't play MUST say "Go" before the bonus is awarded
+      // Only check this if the current player saying "Go" is NOT the last card player
+      // (if the last card player is saying "Go", they should go through the normal path above)
+      const lastCardPlayer = this.gameState.players.find(
+        p => p.id === this.gameState.peggingLastCardPlayer
+      );
+      if (lastCardPlayer && !playerHasValidPlay(this.gameState, lastCardPlayer) && lastCardPlayer.id !== playerId) {
+        // Check if all other players (excluding last card player and current player) have either:
+        // - Said "Go" (if they have cards but can't play - they MUST say "Go")
+        // - Have no cards (automatically skipped, don't need to say "Go")
+        const allOthersGoneOrCantPlay = this.gameState.players
+          .filter(p => p.id !== lastCardPlayer.id && p.id !== playerId)
+          .every(p => {
+            // If player has no cards, they're automatically skipped (can't play)
+            if (p.peggingHand.length === 0) {
+              return true;
+            }
+            // If player has cards but can't play, they MUST have said "Go"
+            if (!playerHasValidPlay(this.gameState, p)) {
+              return this.gameState.peggingGoPlayers.includes(p.id);
+            }
+            // If player can play, they haven't "gone" yet
+            return false;
+          });
+        // If all other players have said "Go" or have no cards, give the last card player a point
+        if (allOthersGoneOrCantPlay) {
+          logger.info(`All other players have said Go or have no cards. Player ${lastCardPlayer.id} (can't play) gets last card point!`);
+          // Capture pegging stack BEFORE calling startNewPeggingRound() which clears it
+          const peggingStackForBreakdown = [...this.gameState.peggingStack];
+          const lastPlayer = this.startNewPeggingRound();
+          // give the player a point for playing the last card
+          this.updatePlayerScore(lastCardPlayer, 1);
+          // log the scoring of the last card
+          const lastCardBreakdown: ScoreBreakdownItem[] = [
+            {
+              type: 'LAST_CARD',
+              points: 1,
+              cards: peggingStackForBreakdown,
+              description: 'Last card',
+            },
+          ];
+          this.recordGameEvent(
+            ActionType.LAST_CARD,
+            lastCardPlayer.id,
+            null,
+            1,
+            lastCardBreakdown
+          );
+          return lastPlayer;
+        }
+      }
+
       return null;
     }
 
