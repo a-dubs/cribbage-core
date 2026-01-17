@@ -21,6 +21,7 @@ import { registerHttpApi } from './httpApi';
 import {
   createLobby,
   getLobbyWithPlayers,
+  getPlayerActiveLobbyId,
   joinLobby as joinLobbyInSupabase,
   leaveLobby as leaveLobbyInSupabase,
   listLobbies as listLobbiesFromSupabase,
@@ -1506,13 +1507,37 @@ async function handleLogin(socket: Socket, data: LoginData): Promise<void> {
     let reconnectLobbyId = lobbyIdByPlayerId.get(playerId);
     let reconnectLobby = reconnectLobbyId ? lobbiesById.get(reconnectLobbyId) : null;
 
+    // If not found in memory, check database (handles server restart scenario)
     if (!reconnectLobby) {
+      // First check in-memory maps
       for (const [lobbyId, lobby] of lobbiesById.entries()) {
         if (lobby.players.some(p => p.playerId === playerId)) {
           reconnectLobbyId = lobbyId;
           reconnectLobby = lobby;
           lobbyIdByPlayerId.set(playerId, lobbyId);
           break;
+        }
+      }
+
+      // If still not found, check database for active lobby membership
+      if (!reconnectLobby) {
+        try {
+          const dbLobbyId = await getPlayerActiveLobbyId(playerId);
+          if (dbLobbyId) {
+            logger.info(`[handleLogin] Found active lobby ${dbLobbyId} in database for player ${playerId}, restoring...`);
+            reconnectLobbyId = dbLobbyId;
+            reconnectLobby = await refreshLobbyFromSupabase(dbLobbyId);
+            if (reconnectLobby) {
+              lobbyIdByPlayerId.set(playerId, dbLobbyId);
+              logger.info(`[handleLogin] Successfully restored lobby ${reconnectLobby.name} from database`);
+            } else {
+              logger.warn(`[handleLogin] Failed to load lobby ${dbLobbyId} from database`);
+              reconnectLobbyId = undefined;
+            }
+          }
+        } catch (error) {
+          logger.error(`[handleLogin] Error checking database for active lobby:`, error);
+          // Continue without restoring lobby - player can still create/join new lobbies
         }
       }
     }
@@ -1536,7 +1561,20 @@ async function handleLogin(socket: Socket, data: LoginData): Promise<void> {
       const hasGameSnapshot = mostRecentGameSnapshotByLobbyId.has(reconnectLobbyId);
       const gameWasFinished = reconnectLobby.status === 'finished' && (hasGameSnapshot || reconnectLobby.finishedAt);
 
-      if (reconnectLobby.status === 'finished' && reconnectLobby.players.length > 0 && !gameWasFinished) {
+      // If lobby is 'in_progress' but no active game is running (server restart scenario),
+      // reset to 'waiting' so players can start a new game
+      if (reconnectLobby.status === 'in_progress' && !hasActiveGame) {
+        reconnectLobby.status = 'waiting';
+        reconnectLobby.finishedAt = null;
+        // Update database to reflect the status change
+        try {
+          const client = getServiceClient();
+          await client.from('lobbies').update({ status: 'waiting' }).eq('id', reconnectLobbyId);
+          logger.info(`[handleLogin] Reset lobby ${reconnectLobby.name} from 'in_progress' to 'waiting' (no active game after server restart)`);
+        } catch (error) {
+          logger.error(`[handleLogin] Failed to update lobby status in database:`, error);
+        }
+      } else if (reconnectLobby.status === 'finished' && reconnectLobby.players.length > 0 && !gameWasFinished) {
         reconnectLobby.status = 'waiting';
         reconnectLobby.finishedAt = null;
         logger.info(`Restored lobby ${reconnectLobby.name} to waiting status (was empty, now has players)`);
