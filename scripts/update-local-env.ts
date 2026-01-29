@@ -26,6 +26,7 @@ import * as path from 'path';
 const ENV_FILE = path.join(process.cwd(), '.env');
 // Supabase commands should be run from root directory (where supabase/ folder is)
 const ROOT_DIR = path.join(process.cwd(), '..');
+const SUPABASE_CONFIG_FILE = path.join(ROOT_DIR, 'supabase', 'config.toml');
 
 type Environment = 'local' | 'remote';
 
@@ -54,6 +55,222 @@ const SUPABASE_KEYS = [
   'SUPABASE_ANON_KEY',
   'SUPABASE_SERVICE_ROLE_KEY',
 ] as const;
+
+function getCurrentProjectId(): string {
+  try {
+    if (fs.existsSync(SUPABASE_CONFIG_FILE)) {
+      const configContent = fs.readFileSync(SUPABASE_CONFIG_FILE, 'utf-8');
+      const match = configContent.match(/project_id\s*=\s*["']([^"']+)["']/);
+      if (match && match[1]) {
+        return match[1];
+      }
+    }
+  } catch (error) {
+    // If we can't read the config, fall back to directory name
+  }
+
+  // Fallback to directory name if config not found
+  return path.basename(ROOT_DIR);
+}
+
+function stopOtherSupabaseInstances(): void {
+  console.log('🛑 Stopping other Supabase instances...\n');
+
+  try {
+    const currentProjectId = getCurrentProjectId();
+    console.log(`   Current project ID: ${currentProjectId}\n`);
+
+    // Find all Docker containers that are part of Supabase stacks
+    // Supabase containers typically have names containing "supabase"
+    const containersOutput = execSync(
+      'docker ps --format "{{.Names}}" --filter "name=supabase"',
+      { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+    );
+
+    const allContainers = containersOutput
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+
+    // Separate current project containers from others
+    const currentProjectContainers = allContainers.filter((container) =>
+      container.includes(`_${currentProjectId}`),
+    );
+    const otherContainers = allContainers.filter(
+      (container) => !container.includes(`_${currentProjectId}`),
+    );
+
+    if (otherContainers.length === 0) {
+      if (currentProjectContainers.length > 0) {
+        console.log(
+          `   Found ${currentProjectContainers.length} running container(s) for current project, none to stop.\n`,
+        );
+      } else {
+        console.log('   No other Supabase instances found.\n');
+      }
+      return;
+    }
+
+    console.log(`   Found ${otherContainers.length} other Supabase container(s) to stop:`);
+    otherContainers.forEach((container) => {
+      console.log(`   - ${container}`);
+    });
+
+    // Stop only containers from other projects
+    for (const container of otherContainers) {
+      try {
+        console.log(`   Stopping ${container}...`);
+        execSync(`docker stop ${container}`, {
+          encoding: 'utf-8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+      } catch (error) {
+        // Container might already be stopped, continue
+        console.log(
+          `   ⚠️  Could not stop ${container} (may already be stopped)`,
+        );
+      }
+    }
+
+    console.log('   ✅ Stopped other Supabase instances.\n');
+  } catch (error: any) {
+    // If docker command fails (e.g., Docker not running), just continue
+    // The script will fail later if Supabase isn't running anyway
+    const errorMessage = error?.message || String(error);
+    if (errorMessage.includes('Cannot connect to the Docker daemon')) {
+      console.log('   ⚠️  Docker is not running. Skipping cleanup.\n');
+    } else {
+      console.log(
+        '   ⚠️  Could not check for other Supabase instances.\n',
+      );
+    }
+  }
+}
+
+function cleanupExitedContainers(): void {
+  try {
+    const currentProjectId = getCurrentProjectId();
+    // Find all exited containers for this project
+    const exitedContainersOutput = execSync(
+      `docker ps -a --format "{{.Names}}" --filter "name=supabase" --filter "status=exited"`,
+      { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+    );
+
+    const exitedContainers = exitedContainersOutput
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && line.includes(`_${currentProjectId}`));
+
+    if (exitedContainers.length > 0) {
+      console.log(
+        `   🧹 Found ${exitedContainers.length} exited container(s), cleaning up...`,
+      );
+      for (const container of exitedContainers) {
+        try {
+          execSync(`docker rm -f ${container}`, {
+            encoding: 'utf-8',
+            stdio: ['pipe', 'pipe', 'pipe'],
+          });
+        } catch (error) {
+          // Container might already be removed, continue
+        }
+      }
+      console.log('   ✅ Cleaned up exited containers.\n');
+    }
+  } catch (error) {
+    // Docker command might fail, but that's okay - we'll try to start anyway
+  }
+}
+
+function ensureCurrentSupabaseRunning(): void {
+  console.log("🚀 Ensuring current project's Supabase is running...\n");
+
+  try {
+    // Check if Supabase is running for this project (run from root directory)
+    const statusOutput = execSync('npx supabase status', {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      cwd: ROOT_DIR,
+    });
+
+    // Check if there are any stopped services
+    if (statusOutput.includes('Stopped services:')) {
+      const stoppedMatch = statusOutput.match(/Stopped services: \[([^\]]+)\]/);
+      if (stoppedMatch && stoppedMatch[1]) {
+        const stoppedServices = stoppedMatch[1]
+          .split(' ')
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
+
+        if (stoppedServices.length > 0) {
+          console.log(`   ⚠️  Found ${stoppedServices.length} stopped service(s):`);
+          stoppedServices.forEach((service) => {
+            console.log(`      - ${service}`);
+          });
+          console.log('   Restarting to ensure all services are running...');
+          // Clean up any exited containers first
+          cleanupExitedContainers();
+          try {
+            execSync('npx supabase start', {
+              encoding: 'utf-8',
+              stdio: 'inherit',
+              cwd: ROOT_DIR,
+            });
+            console.log(
+              "   ✅ Restarted Supabase to ensure all services are running.\n",
+            );
+            return;
+          } catch (restartError) {
+            console.error(
+              '   ⚠️  Could not restart Supabase. Continuing anyway...',
+            );
+          }
+        }
+      }
+    }
+
+    console.log("   ✅ Current project's Supabase is already running.\n");
+  } catch (error) {
+    // Not running or status check failed, try to start it
+    console.log('   Starting Supabase for current project...');
+    // Clean up any exited containers first
+    cleanupExitedContainers();
+    try {
+      execSync('npx supabase start', {
+        encoding: 'utf-8',
+        stdio: 'inherit',
+        cwd: ROOT_DIR,
+      });
+      console.log("   ✅ Started Supabase for current project.\n");
+    } catch (startError: any) {
+      const errorMessage = startError?.message || String(startError);
+      if (errorMessage.includes('container is not running: exited')) {
+        console.log(
+          '   ⚠️  Detected exited containers. Attempting cleanup and restart...',
+        );
+        cleanupExitedContainers();
+        try {
+          execSync('npx supabase start', {
+            encoding: 'utf-8',
+            stdio: 'inherit',
+            cwd: ROOT_DIR,
+          });
+          console.log("   ✅ Started Supabase after cleanup.\n");
+          return;
+        } catch (retryError) {
+          console.error('   ❌ Failed to start Supabase after cleanup.');
+          console.error('   Try running: npx supabase stop && npx supabase start');
+          console.error('   (from the repo root directory)');
+          process.exit(1);
+        }
+      } else {
+        console.error('   ❌ Failed to start Supabase.');
+        console.error('   Make sure Docker is running and try again.');
+        process.exit(1);
+      }
+    }
+  }
+}
 
 function getLocalSupabaseCredentials(): SupabaseCredentials {
   try {
@@ -414,8 +631,16 @@ function generateEnvFile(
 }
 
 function activateLocal(): void {
-  console.log('🔄 Fetching local Supabase credentials...\n');
+  console.log('🔄 Setting up local Supabase environment...\n');
 
+  // Step 1: Stop other Supabase instances
+  stopOtherSupabaseInstances();
+
+  // Step 2: Ensure current project's Supabase is running
+  ensureCurrentSupabaseRunning();
+
+  // Step 3: Fetch credentials and update .env
+  console.log('📋 Fetching local Supabase credentials...\n');
   const localCreds = getLocalSupabaseCredentials();
   const parsed = parseEnvFile();
 
@@ -434,6 +659,9 @@ function activateLocal(): void {
   if (parsed.remoteCredentials) {
     console.log('\n📦 Remote credentials preserved (commented out)');
   }
+  console.log('\n📝 Note: Supabase uses persistent Docker volumes, so data persists');
+  console.log('   between restarts. If you need fresh data, you can:');
+  console.log('   - Run migrations: npx supabase db reset (from repo root)');
 }
 
 function activateRemote(): void {
