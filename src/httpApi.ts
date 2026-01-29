@@ -30,6 +30,7 @@ import {
   respondToLobbyInvitation,
   verifyAccessToken,
   getPlayerActiveLobbyId,
+  getLobbyWithPlayers,
   type LobbyPayload,
   type LobbyVisibility,
   type SupabaseProfile,
@@ -183,6 +184,30 @@ export function registerHttpApi(app: express.Express, hooks?: HttpApiHooks): voi
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to list lobbies';
       res.status(500).json({ error: 'LOBBY_LIST_FAILED', message });
+    }
+  });
+
+  app.get('/lobbies/current', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    if (!requireSupabaseFlag(SUPABASE_LOBBIES_ENABLED, res)) return;
+    if (!req.userId) {
+      res.status(401).json({ error: 'NOT_AUTHORIZED', message: 'Missing user' });
+      return;
+    }
+    try {
+      const lobbyId = await getPlayerActiveLobbyId(req.userId);
+      if (!lobbyId) {
+        res.status(404).json({ error: 'NOT_IN_LOBBY', message: 'User is not in any active lobby' });
+        return;
+      }
+      const lobby = await getLobbyWithPlayers(lobbyId);
+      if (!lobby) {
+        res.status(404).json({ error: 'LOBBY_NOT_FOUND', message: 'Lobby not found' });
+        return;
+      }
+      res.json({ lobby: mapLobbyPayload(lobby) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to get current lobby';
+      res.status(500).json({ error: 'LOBBY_GET_FAILED', message });
     }
   });
 
