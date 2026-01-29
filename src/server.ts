@@ -50,7 +50,7 @@ const SUPABASE_LOBBIES_ENABLED = process.env.SUPABASE_LOBBIES_ENABLED === 'true'
 logger.info('PORT:', PORT);
 logger.info('WEB_APP_ORIGIN:', WEB_APP_ORIGIN);
 
-logger.info('Cribbage-core server starting...');
+logger.info('cribbage-core server starting...');
 
 // Support multiple origins or wildcard for development
 // Also automatically supports both HTTP and HTTPS versions of origins
@@ -166,29 +166,53 @@ const io = new Server(server, {
   // Allow all handshake requests - auth is checked via middleware
   // Handshake validation (auth checked in middleware)
   allowRequest: (req, callback) => {
+    logger.info('[Socket.IO] allowRequest called', {
+      url: req.url,
+      origin: req.headers?.origin,
+    });
     callback(null, true);
   },
 });
 
 // Auth middleware (Supabase JWT required when flag enabled)
 io.use((socket, next) => {
+  // Direct console.log to verify middleware is being called
+  console.log('>>> AUTH MIDDLEWARE CALLED <<<', socket.id);
+  const socketId = socket.id || 'pending';
+  logger.info(`[Auth Middleware] 🔐 Processing connection for socket ${socketId}`, {
+    hasAuth: !!socket.handshake.auth,
+    authKeys: socket.handshake.auth ? Object.keys(socket.handshake.auth) : [],
+    authValues: socket.handshake.auth,
+    origin: socket.handshake.headers.origin,
+    SUPABASE_AUTH_ENABLED,
+  });
+  
   if (!SUPABASE_AUTH_ENABLED) {
+    logger.info(`[Auth Middleware] ✅ Auth disabled, allowing connection for socket ${socketId}`);
     return next();
   }
   const token = (socket.handshake.auth as { accessToken?: string } | undefined)?.accessToken;
   if (!token) {
-    logger.warn(`[Auth] Missing access token from socket ${socket.id}`);
+    logger.warn(`[Auth Middleware] ❌ Missing access token from socket ${socketId}`, {
+      handshakeAuth: socket.handshake.auth,
+    });
     return next(new Error('Missing access token'));
   }
+  
+  logger.info(`[Auth Middleware] 🔍 Verifying token for socket ${socketId}`, {
+    tokenLength: token.length,
+    tokenPreview: token.substring(0, 20) + '...',
+  });
+  
   verifyAccessToken(token)
     .then(({ userId }) => {
       (socket.data as { userId?: string }).userId = userId;
-      logger.info(`[Auth] Socket ${socket.id} authenticated as user ${userId}`);
+      logger.info(`[Auth Middleware] ✅✅✅ Socket ${socketId} authenticated as user ${userId}`);
       next();
     })
     .catch(err => {
       const tokenPreview = token.length > 20 ? `${token.substring(0, 20)}...` : token;
-      logger.error(`[Auth] Socket auth failed for socket ${socket.id}. Token preview: ${tokenPreview}`, err);
+      logger.error(`[Auth Middleware] ❌❌❌ Socket auth failed for socket ${socketId}. Token preview: ${tokenPreview}`, err);
       next(new Error('Invalid token'));
     });
 });
@@ -631,13 +655,21 @@ function getUniquePlayerId(username: string, socketId: string): string {
 io.on('connection', socket => {
   const origin = socket.handshake.headers.origin;
   const address = socket.handshake.address;
+  
+  logger.info(`[Connection] 🔌 Connection event received for socket ${socket.id}`, {
+    origin: origin || 'proxy',
+    address,
+    hasUserId: !!(socket.data as { userId?: string }).userId,
+  });
+  
   if (SUPABASE_AUTH_ENABLED) {
     const userId = (socket.data as { userId?: string }).userId;
     if (!userId) {
-      logger.warn('Connection without userId, disconnecting');
+      logger.warn(`[Connection] ❌ Connection without userId, disconnecting socket ${socket.id}`);
       socket.disconnect(true);
       return;
     }
+    logger.info(`[Connection] ✅ Socket ${socket.id} has userId: ${userId}`);
   }
   
   // Auth was already checked in middleware, so this socket is authenticated
