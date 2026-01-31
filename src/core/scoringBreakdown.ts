@@ -1,6 +1,6 @@
 /**
  * Scoring Breakdown Implementation
- * 
+ *
  * This file contains the implementation of detailed scoring breakdowns
  * for both hand/crib scoring and pegging scoring.
  */
@@ -63,4 +63,3 @@ function createBreakdownItem(
 
 // Export for use in scoring.ts
 export { createBreakdownItem };
-

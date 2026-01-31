@@ -21,7 +21,11 @@ import {
 import { ScoreBreakdownItem } from '../types';
 import EventEmitter from 'eventemitter3';
 import { isValidDiscard, playerHasValidPlay } from './utils';
-import { validatePlayerCount, getPlayerCountConfig, getExpectedCribSize } from '../gameplay/rules';
+import {
+  validatePlayerCount,
+  getPlayerCountConfig,
+  getExpectedCribSize,
+} from '../gameplay/rules';
 import { logger } from '../utils/logger';
 
 export class CribbageGame extends EventEmitter {
@@ -29,7 +33,10 @@ export class CribbageGame extends EventEmitter {
   // private gameEventRecords: GameEvent[]; // Log of all game actions
   private gameSnapshotHistory: GameSnapshot[]; // Log of all game state and events
   private pendingDecisionRequests: DecisionRequest[] = []; // Active decision requests
-  private dealerSelectionCards: Map<string, { cardIndex: number; card: Card; timestamp: number }> = new Map(); // Track dealer selection cards
+  private dealerSelectionCards: Map<
+    string,
+    { cardIndex: number; card: Card; timestamp: number }
+  > = new Map(); // Track dealer selection cards
 
   constructor(playersInfo: PlayerIdAndName[], startingScore = 0) {
     super();
@@ -37,7 +44,7 @@ export class CribbageGame extends EventEmitter {
     validatePlayerCount(playersInfo.length);
     const deck = this.generateDeck();
     // Initially, no dealer is set - dealer will be determined by card selection
-    const players = playersInfo.map((info) => ({
+    const players = playersInfo.map(info => ({
       id: info.id,
       name: info.name,
       hand: [],
@@ -191,7 +198,10 @@ export class CribbageGame extends EventEmitter {
     const config = getPlayerCountConfig(this.gameState.players.length);
     if (config.autoCribCardsFromDeck > 0) {
       // Deal cards from deck to crib before player dealing
-      const autoCribCards = this.gameState.deck.splice(0, config.autoCribCardsFromDeck);
+      const autoCribCards = this.gameState.deck.splice(
+        0,
+        config.autoCribCardsFromDeck
+      );
       this.gameState.crib.push(...autoCribCards);
       // Record the auto-crib event
       this.recordGameEvent(
@@ -200,7 +210,11 @@ export class CribbageGame extends EventEmitter {
         autoCribCards,
         0
       );
-      logger.info(`Auto-dealt ${autoCribCards.length} card(s) to crib: ${autoCribCards.join(', ')}`);
+      logger.info(
+        `Auto-dealt ${
+          autoCribCards.length
+        } card(s) to crib: ${autoCribCards.join(', ')}`
+      );
     }
   }
 
@@ -215,10 +229,10 @@ export class CribbageGame extends EventEmitter {
   public endGame(winnerId: string): void {
     const winner = this.gameState.players.find(p => p.id === winnerId);
     if (!winner) throw new Error(`Winner not found: ${winnerId}`);
-    
+
     // Set phase to END before recording the event so the snapshot includes Phase.END
     this.gameState.currentPhase = Phase.END;
-    
+
     // Record the WIN event and emit final snapshot with Phase.END
     this.recordGameEvent(ActionType.WIN, winnerId, null, 0);
   }
@@ -245,7 +259,7 @@ export class CribbageGame extends EventEmitter {
 
     // Get hand size based on player count
     const config = getPlayerCountConfig(this.gameState.players.length);
-    
+
     this.gameState.players.forEach((player: Player) => {
       player.hand = this.gameState.deck.splice(0, config.handSize);
       this.recordGameEvent(ActionType.DEAL, player.id, player.hand, 0);
@@ -276,8 +290,8 @@ export class CribbageGame extends EventEmitter {
     const expectedSize = getExpectedCribSize(this.gameState.players.length);
     if (this.gameState.crib.length !== expectedSize) {
       throw new Error(
-        `Crib phase not complete. Ensure all players discarded. ` +
-        `Expected ${expectedSize} cards in crib, but found ${this.gameState.crib.length}.`
+        'Crib phase not complete. Ensure all players discarded. ' +
+          `Expected ${expectedSize} cards in crib, but found ${this.gameState.crib.length}.`
       );
     }
 
@@ -351,7 +365,9 @@ export class CribbageGame extends EventEmitter {
    */
   public selectDealerCard(playerId: string, requestedIndex: number): void {
     if (this.gameState.currentPhase !== Phase.DEALER_SELECTION) {
-      throw new Error('Cannot select dealer card outside of dealer selection phase.');
+      throw new Error(
+        'Cannot select dealer card outside of dealer selection phase.'
+      );
     }
 
     const player = this.gameState.players.find(p => p.id === playerId);
@@ -363,19 +379,21 @@ export class CribbageGame extends EventEmitter {
     }
 
     // Check if requested index is already taken
-    const takenIndices = Array.from(this.dealerSelectionCards.values()).map(v => v.cardIndex);
+    const takenIndices = Array.from(this.dealerSelectionCards.values()).map(
+      v => v.cardIndex
+    );
     let finalIndex = requestedIndex;
 
     if (takenIndices.includes(requestedIndex)) {
       // Conflict: find next available index
       const maxIndex = this.gameState.deck.length - 1;
       let nextIndex = requestedIndex + 1;
-      
+
       // Try next indices first
       while (nextIndex <= maxIndex && takenIndices.includes(nextIndex)) {
         nextIndex++;
       }
-      
+
       if (nextIndex <= maxIndex) {
         finalIndex = nextIndex;
       } else {
@@ -410,7 +428,12 @@ export class CribbageGame extends EventEmitter {
     });
 
     // Record event
-    this.recordGameEvent(ActionType.SELECT_DEALER_CARD, playerId, [selectedCard], 0);
+    this.recordGameEvent(
+      ActionType.SELECT_DEALER_CARD,
+      playerId,
+      [selectedCard],
+      0
+    );
 
     // Check if all players have selected
     if (this.dealerSelectionCards.size === this.gameState.players.length) {
@@ -424,10 +447,10 @@ export class CribbageGame extends EventEmitter {
    */
   private determineDealer(): void {
     const suitOrder: Record<string, number> = {
-      'SPADES': 4,
-      'HEARTS': 3,
-      'DIAMONDS': 2,
-      'CLUBS': 1,
+      SPADES: 4,
+      HEARTS: 3,
+      DIAMONDS: 2,
+      CLUBS: 1,
     };
 
     if (this.dealerSelectionCards.size === 0) {
@@ -441,34 +464,43 @@ export class CribbageGame extends EventEmitter {
     }
 
     // Find lowest card
-    const lowestSelection = selections.reduce((lowest, [playerId, selection]) => {
-      const parsed = parseCard(selection.card);
-      const suitOrderValue = suitOrder[parsed.suit] || 0;
+    const lowestSelection = selections.reduce(
+      (lowest, [playerId, selection]) => {
+        const parsed = parseCard(selection.card);
+        const suitOrderValue = suitOrder[parsed.suit] || 0;
 
-      if (!lowest) {
-        return {
-          playerId,
-          card: selection.card,
-          runValue: parsed.runValue,
-          suitOrder: suitOrderValue,
-        };
-      }
+        if (!lowest) {
+          return {
+            playerId,
+            card: selection.card,
+            runValue: parsed.runValue,
+            suitOrder: suitOrderValue,
+          };
+        }
 
-      // Compare: first by runValue (lower wins), then by suit (lower wins)
-      if (
-        parsed.runValue < lowest.runValue ||
-        (parsed.runValue === lowest.runValue && suitOrderValue < lowest.suitOrder)
-      ) {
-        return {
-          playerId,
-          card: selection.card,
-          runValue: parsed.runValue,
-          suitOrder: suitOrderValue,
-        };
-      }
+        // Compare: first by runValue (lower wins), then by suit (lower wins)
+        if (
+          parsed.runValue < lowest.runValue ||
+          (parsed.runValue === lowest.runValue &&
+            suitOrderValue < lowest.suitOrder)
+        ) {
+          return {
+            playerId,
+            card: selection.card,
+            runValue: parsed.runValue,
+            suitOrder: suitOrderValue,
+          };
+        }
 
-      return lowest;
-    }, null as { playerId: string; card: Card; runValue: number; suitOrder: number } | null);
+        return lowest;
+      },
+      null as {
+        playerId: string;
+        card: Card;
+        runValue: number;
+        suitOrder: number;
+      } | null
+    );
 
     if (!lowestSelection) {
       throw new Error('Could not determine dealer - no cards selected.');
@@ -481,7 +513,9 @@ export class CribbageGame extends EventEmitter {
       player.isDealer = player.id === dealerId;
     });
 
-    logger.info(`Dealer determined: Player ${dealerId} selected ${dealerCard} (lowest card)`);
+    logger.info(
+      `Dealer determined: Player ${dealerId} selected ${dealerCard} (lowest card)`
+    );
 
     // Transition to DEALING phase
     // NOTE: Do NOT clear dealerSelectionCards here - they need to remain visible
@@ -596,7 +630,11 @@ export class CribbageGame extends EventEmitter {
       const lastCardPlayer = this.gameState.players.find(
         p => p.id === this.gameState.peggingLastCardPlayer
       );
-      if (lastCardPlayer && !playerHasValidPlay(this.gameState, lastCardPlayer) && lastCardPlayer.id !== playerId) {
+      if (
+        lastCardPlayer &&
+        !playerHasValidPlay(this.gameState, lastCardPlayer) &&
+        lastCardPlayer.id !== playerId
+      ) {
         // Check if all other players (excluding last card player and current player) have either:
         // - Said "Go" (if they have cards but can't play - they MUST say "Go")
         // - Have no cards (automatically skipped, don't need to say "Go")
@@ -616,7 +654,9 @@ export class CribbageGame extends EventEmitter {
           });
         // If all other players have said "Go" or have no cards, give the last card player a point
         if (allOthersGoneOrCantPlay) {
-          logger.info(`All other players have said Go or have no cards. Player ${lastCardPlayer.id} (can't play) gets last card point!`);
+          logger.info(
+            `All other players have said Go or have no cards. Player ${lastCardPlayer.id} (can't play) gets last card point!`
+          );
           // Capture pegging stack BEFORE calling startNewPeggingRound() which clears it
           const peggingStackForBreakdown = [...this.gameState.peggingStack];
           const lastPlayer = this.startNewPeggingRound();
@@ -687,9 +727,10 @@ export class CribbageGame extends EventEmitter {
         {
           type: 'LAST_CARD',
           points: 1,
-          cards: this.gameState.peggingStack.length > 0 
-            ? this.gameState.peggingStack 
-            : [],
+          cards:
+            this.gameState.peggingStack.length > 0
+              ? this.gameState.peggingStack
+              : [],
           description: 'Last card',
         },
       ];
@@ -843,7 +884,9 @@ export class CribbageGame extends EventEmitter {
    */
   public addDecisionRequest(request: DecisionRequest): void {
     // Check if request already exists (by requestId)
-    if (!this.pendingDecisionRequests.find(r => r.requestId === request.requestId)) {
+    if (
+      !this.pendingDecisionRequests.find(r => r.requestId === request.requestId)
+    ) {
       this.pendingDecisionRequests.push(request);
     }
   }
@@ -877,7 +920,7 @@ export class CribbageGame extends EventEmitter {
     const pendingRequests = this.pendingDecisionRequests.filter(
       r => r.decisionType === decisionType
     );
-    
+
     // If no pending requests, all have acknowledged
     return pendingRequests.length === 0;
   }
@@ -952,10 +995,16 @@ export class CribbageGame extends EventEmitter {
 
     // Add dealer selection cards (hidden until all players have selected)
     const dealerSelectionCards: Record<string, Card | 'UNKNOWN'> = {};
-    if (this.gameState.currentPhase === Phase.DEALER_SELECTION || 
-        (this.gameState.currentPhase === Phase.DEALING && this.dealerSelectionCards.size > 0)) {
+    if (
+      this.gameState.currentPhase === Phase.DEALER_SELECTION ||
+      (this.gameState.currentPhase === Phase.DEALING &&
+        this.dealerSelectionCards.size > 0)
+    ) {
       for (const player of this.gameState.players) {
-        dealerSelectionCards[player.id] = this.getDealerSelectionCard(player.id, forPlayerId);
+        dealerSelectionCards[player.id] = this.getDealerSelectionCard(
+          player.id,
+          forPlayerId
+        );
       }
     }
 
@@ -965,7 +1014,10 @@ export class CribbageGame extends EventEmitter {
       players: redactedPlayers,
       crib: redactedCrib,
       deck: redactedDeck,
-      dealerSelectionCards: Object.keys(dealerSelectionCards).length > 0 ? dealerSelectionCards : undefined,
+      dealerSelectionCards:
+        Object.keys(dealerSelectionCards).length > 0
+          ? dealerSelectionCards
+          : undefined,
       // All other fields remain visible (scores, pegging stack, turn card, etc.)
     };
   }
@@ -977,21 +1029,25 @@ export class CribbageGame extends EventEmitter {
    * @param forPlayerId - ID of the player requesting (for redaction)
    * @returns The selected card, or 'UNKNOWN' if not all have selected
    */
-  public getDealerSelectionCard(playerId: string, forPlayerId: string): Card | 'UNKNOWN' {
+  public getDealerSelectionCard(
+    playerId: string,
+    forPlayerId: string
+  ): Card | 'UNKNOWN' {
     // Check if all players have selected
-    const allPlayersSelected = this.dealerSelectionCards.size === this.gameState.players.length;
-    
+    const allPlayersSelected =
+      this.dealerSelectionCards.size === this.gameState.players.length;
+
     if (!allPlayersSelected) {
       // Not all players have selected - hide all cards
       return 'UNKNOWN';
     }
-    
+
     // All players have selected - reveal the card
     const selection = this.dealerSelectionCards.get(playerId);
     if (!selection) {
       return 'UNKNOWN';
     }
-    
+
     return selection.card;
   }
 
@@ -1019,7 +1075,8 @@ export class CribbageGame extends EventEmitter {
     }
 
     // Determine if event is from opponent
-    const isOpponentEvent = gameEvent.playerId !== null && gameEvent.playerId !== forPlayerId;
+    const isOpponentEvent =
+      gameEvent.playerId !== null && gameEvent.playerId !== forPlayerId;
     const isDealer = requestingPlayer.isDealer;
     const isCountingPhase = this.gameState.currentPhase === Phase.COUNTING;
 
@@ -1049,7 +1106,8 @@ export class CribbageGame extends EventEmitter {
 
       case ActionType.SELECT_DEALER_CARD:
         // Dealer selection cards are hidden until all players have selected
-        const allPlayersSelected = this.dealerSelectionCards.size === this.gameState.players.length;
+        const allPlayersSelected =
+          this.dealerSelectionCards.size === this.gameState.players.length;
         shouldRedact = !allPlayersSelected;
         break;
 
@@ -1106,22 +1164,23 @@ export class CribbageGame extends EventEmitter {
    */
   public getRedactedGameSnapshot(forPlayerId: string): GameSnapshot {
     // Get the most recent snapshot (or create one if none exists)
-    const latestSnapshot = this.gameSnapshotHistory.length > 0
-      ? this.gameSnapshotHistory[this.gameSnapshotHistory.length - 1]
-      : {
-          gameState: this.gameState,
-          gameEvent: {
-            gameId: this.gameState.id,
-            phase: this.gameState.currentPhase,
-            actionType: ActionType.START_ROUND,
-            playerId: null,
-            cards: null,
-            scoreChange: 0,
-            timestamp: new Date(),
-            snapshotId: this.gameState.snapshotId,
-          },
-          pendingDecisionRequests: this.pendingDecisionRequests,
-        };
+    const latestSnapshot =
+      this.gameSnapshotHistory.length > 0
+        ? this.gameSnapshotHistory[this.gameSnapshotHistory.length - 1]
+        : {
+            gameState: this.gameState,
+            gameEvent: {
+              gameId: this.gameState.id,
+              phase: this.gameState.currentPhase,
+              actionType: ActionType.START_ROUND,
+              playerId: null,
+              cards: null,
+              scoreChange: 0,
+              timestamp: new Date(),
+              snapshotId: this.gameState.snapshotId,
+            },
+            pendingDecisionRequests: this.pendingDecisionRequests,
+          };
 
     // Redact game state and game event
     const redactedGameState = this.getRedactedGameState(forPlayerId);
@@ -1160,4 +1219,3 @@ export class CribbageGame extends EventEmitter {
     return this.gameSnapshotHistory;
   }
 }
-

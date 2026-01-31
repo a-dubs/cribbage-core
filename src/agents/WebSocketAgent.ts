@@ -90,7 +90,7 @@ export class WebSocketAgent implements GameAgent {
 
           const request = () => {
             sendRequest(currentSocket);
-            
+
             // Only set up listeners if they're not already set up
             if (!responseListener) {
               responseListener = (response: any) => {
@@ -117,7 +117,7 @@ export class WebSocketAgent implements GameAgent {
                   // Check if this is a requestId mismatch - if so, ignore and keep listening
                   if (processed.message.includes('requestId mismatch')) {
                     logger.debug(
-                      `[WebSocketAgent] Ignoring stale response with mismatched requestId`
+                      '[WebSocketAgent] Ignoring stale response with mismatched requestId'
                     );
                     return; // Don't cleanup, keep listening for the correct response
                   }
@@ -166,7 +166,10 @@ export class WebSocketAgent implements GameAgent {
 
   // --- Updated makeMove ---
 
-  async makeMove(snapshot: GameSnapshot, playerId: string): Promise<Card | null> {
+  async makeMove(
+    snapshot: GameSnapshot,
+    playerId: string
+  ): Promise<Card | null> {
     const game = snapshot.gameState;
     const player = game.players.find(p => p.id === playerId);
     if (!player) throw new Error('Player not found.');
@@ -174,15 +177,17 @@ export class WebSocketAgent implements GameAgent {
 
     // Find the pending request from snapshot
     const request = snapshot.pendingDecisionRequests.find(
-      r => r.playerId === playerId && r.decisionType === AgentDecisionType.PLAY_CARD
+      r =>
+        r.playerId === playerId &&
+        r.decisionType === AgentDecisionType.PLAY_CARD
     );
     if (!request) throw new Error('No pending PLAY_CARD request');
 
-    return this.waitForDecisionResponse(request, (response) => {
+    return this.waitForDecisionResponse(request, response => {
       if (response.decisionType !== AgentDecisionType.PLAY_CARD) {
         return new Error('Invalid response type');
       }
-      const playResponse = response as PlayCardResponse;
+      const playResponse = response;
       const invalidReason = getInvalidPeggingPlayReason(
         game,
         player,
@@ -212,15 +217,16 @@ export class WebSocketAgent implements GameAgent {
   ): Promise<Card[]> {
     const game = snapshot.gameState;
     const request = snapshot.pendingDecisionRequests.find(
-      r => r.playerId === playerId && r.decisionType === AgentDecisionType.DISCARD
+      r =>
+        r.playerId === playerId && r.decisionType === AgentDecisionType.DISCARD
     );
     if (!request) throw new Error('No pending DISCARD request');
 
-    return this.waitForDecisionResponse(request, (response) => {
+    return this.waitForDecisionResponse(request, response => {
       if (response.decisionType !== AgentDecisionType.DISCARD) {
         return new Error('Invalid response type');
       }
-      const discardResponse = response as DiscardResponse;
+      const discardResponse = response;
       const player = game.players.find(p => p.id === playerId);
       if (!player) throw new Error('Player not found.');
       if (isValidDiscard(game, player, discardResponse.selectedCards)) {
@@ -255,10 +261,10 @@ export class WebSocketAgent implements GameAgent {
       },
       (response: DecisionResponse) => {
         if (response.requestId !== request.requestId) {
-          return new Error(`Response requestId mismatch`);
+          return new Error('Response requestId mismatch');
         }
         if (response.playerId !== this.playerId) {
-          return new Error(`Response from wrong player`);
+          return new Error('Response from wrong player');
         }
         return responseHandler(response);
       }
@@ -280,7 +286,7 @@ export class WebSocketAgent implements GameAgent {
     );
     if (!request) throw new Error('No pending DEAL request');
 
-    await this.waitForDecisionResponse(request, (response) => {
+    await this.waitForDecisionResponse(request, response => {
       if (response.decisionType !== AgentDecisionType.DEAL) {
         return new Error('Invalid response type');
       }
@@ -294,15 +300,16 @@ export class WebSocketAgent implements GameAgent {
     maxIndex: number
   ): Promise<number> {
     const request = snapshot.pendingDecisionRequests.find(
-      r => r.playerId === playerId && r.decisionType === AgentDecisionType.CUT_DECK
+      r =>
+        r.playerId === playerId && r.decisionType === AgentDecisionType.CUT_DECK
     );
     if (!request) throw new Error('No pending CUT_DECK request');
 
-    return this.waitForDecisionResponse(request, (response) => {
+    return this.waitForDecisionResponse(request, response => {
       if (response.decisionType !== AgentDecisionType.CUT_DECK) {
         return new Error('Invalid response type');
       }
-      const cutResponse = response as CutDeckResponse;
+      const cutResponse = response;
       if (cutResponse.cutIndex < 0 || cutResponse.cutIndex > maxIndex) {
         return new Error(`Invalid cut index: ${cutResponse.cutIndex}`);
       }
@@ -316,15 +323,17 @@ export class WebSocketAgent implements GameAgent {
     maxIndex: number
   ): Promise<number> {
     const request = snapshot.pendingDecisionRequests.find(
-      r => r.playerId === playerId && r.decisionType === AgentDecisionType.SELECT_DEALER_CARD
+      r =>
+        r.playerId === playerId &&
+        r.decisionType === AgentDecisionType.SELECT_DEALER_CARD
     );
     if (!request) throw new Error('No pending SELECT_DEALER_CARD request');
 
-    return this.waitForDecisionResponse(request, (response) => {
+    return this.waitForDecisionResponse(request, response => {
       if (response.decisionType !== AgentDecisionType.SELECT_DEALER_CARD) {
         return new Error('Invalid response type');
       }
-      const selectResponse = response as SelectDealerCardResponse;
+      const selectResponse = response;
       if (selectResponse.cardIndex < 0 || selectResponse.cardIndex > maxIndex) {
         return new Error(`Invalid card index: ${selectResponse.cardIndex}`);
       }
@@ -337,11 +346,13 @@ export class WebSocketAgent implements GameAgent {
     playerId: string
   ): Promise<void> {
     const request = snapshot.pendingDecisionRequests.find(
-      r => r.playerId === playerId && r.decisionType === AgentDecisionType.READY_FOR_GAME_START
+      r =>
+        r.playerId === playerId &&
+        r.decisionType === AgentDecisionType.READY_FOR_GAME_START
     );
     if (!request) throw new Error('No pending READY_FOR_GAME_START request');
 
-    await this.waitForDecisionResponse(request, (response) => {
+    await this.waitForDecisionResponse(request, response => {
       if (response.decisionType !== AgentDecisionType.READY_FOR_GAME_START) {
         return new Error('Invalid response type');
       }
@@ -354,11 +365,13 @@ export class WebSocketAgent implements GameAgent {
     playerId: string
   ): Promise<void> {
     const request = snapshot.pendingDecisionRequests.find(
-      r => r.playerId === playerId && r.decisionType === AgentDecisionType.READY_FOR_COUNTING
+      r =>
+        r.playerId === playerId &&
+        r.decisionType === AgentDecisionType.READY_FOR_COUNTING
     );
     if (!request) throw new Error('No pending READY_FOR_COUNTING request');
 
-    await this.waitForDecisionResponse(request, (response) => {
+    await this.waitForDecisionResponse(request, response => {
       if (response.decisionType !== AgentDecisionType.READY_FOR_COUNTING) {
         return new Error('Invalid response type');
       }
@@ -371,11 +384,13 @@ export class WebSocketAgent implements GameAgent {
     playerId: string
   ): Promise<void> {
     const request = snapshot.pendingDecisionRequests.find(
-      r => r.playerId === playerId && r.decisionType === AgentDecisionType.READY_FOR_NEXT_ROUND
+      r =>
+        r.playerId === playerId &&
+        r.decisionType === AgentDecisionType.READY_FOR_NEXT_ROUND
     );
     if (!request) throw new Error('No pending READY_FOR_NEXT_ROUND request');
 
-    await this.waitForDecisionResponse(request, (response) => {
+    await this.waitForDecisionResponse(request, response => {
       if (response.decisionType !== AgentDecisionType.READY_FOR_NEXT_ROUND) {
         return new Error('Invalid response type');
       }

@@ -12,7 +12,11 @@ export type SupabaseProfile = {
 export type LobbyVisibility = 'public' | 'private' | 'friends';
 export type LobbyStatus = 'waiting' | 'in_progress' | 'finished';
 export type FriendRequestStatus = 'pending' | 'accepted' | 'declined';
-export type Friendship = { user_id: string; friend_id: string; created_at: string };
+export type Friendship = {
+  user_id: string;
+  friend_id: string;
+  created_at: string;
+};
 export type FriendRequest = {
   id: string;
   sender_id: string;
@@ -43,7 +47,8 @@ const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 let serviceClient: SupabaseClient | null = null;
 let anonClient: SupabaseClient | null = null;
 
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 // Username must match database constraint: lowercase letters, numbers, underscores, and hyphens only, 3-20 chars
 const USERNAME_REGEX = /^[a-z0-9_-]{3,20}$/;
 
@@ -70,29 +75,35 @@ function validateAndNormalizeUsername(username: string): string {
   if (!trimmed) {
     throw new Error('Username is required');
   }
-  
+
   const normalized = trimmed.toLowerCase();
-  
+
   if (normalized.length < 3 || normalized.length > 20) {
     throw new Error('Username must be between 3 and 20 characters');
   }
-  
+
   if (!USERNAME_REGEX.test(normalized)) {
-    throw new Error('Username can only contain lowercase letters, numbers, underscores, and hyphens');
+    throw new Error(
+      'Username can only contain lowercase letters, numbers, underscores, and hyphens'
+    );
   }
-  
+
   return normalized;
 }
 
 export function getServiceClient(): SupabaseClient {
   ensureEnv();
   if (!serviceClient) {
-    serviceClient = createClient(SUPABASE_URL as string, SUPABASE_SERVICE_ROLE_KEY as string, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    });
+    serviceClient = createClient(
+      SUPABASE_URL as string,
+      SUPABASE_SERVICE_ROLE_KEY as string,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      }
+    );
   }
   return serviceClient;
 }
@@ -108,12 +119,16 @@ export function resetServiceClients(): void {
 function getAnonClient(): SupabaseClient {
   ensureEnv();
   if (!anonClient) {
-    anonClient = createClient(SUPABASE_URL as string, SUPABASE_ANON_KEY as string, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    });
+    anonClient = createClient(
+      SUPABASE_URL as string,
+      SUPABASE_ANON_KEY as string,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      }
+    );
   }
   return anonClient;
 }
@@ -135,14 +150,21 @@ export function generateFriendCode(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
-function canonicalizeFriendPair(a: string, b: string): { userId: string; friendId: string } {
+function canonicalizeFriendPair(
+  a: string,
+  b: string
+): { userId: string; friendId: string } {
   return a < b ? { userId: a, friendId: b } : { userId: b, friendId: a };
 }
 
 /**
  * Check if two users are friends
  */
-async function areFriends(userId1: string, userId2: string, client: SupabaseClient = getServiceClient()): Promise<boolean> {
+async function areFriends(
+  userId1: string,
+  userId2: string,
+  client: SupabaseClient = getServiceClient()
+): Promise<boolean> {
   const { userId, friendId } = canonicalizeFriendPair(userId1, userId2);
   const { data, error } = await client
     .from('friendships')
@@ -150,11 +172,11 @@ async function areFriends(userId1: string, userId2: string, client: SupabaseClie
     .eq('user_id', userId)
     .eq('friend_id', friendId)
     .maybeSingle();
-  
+
   if (error) {
     throw new Error(error.message);
   }
-  
+
   return !!data;
 }
 
@@ -164,14 +186,18 @@ function publicAvatarUrl(path: string): string {
   return data.publicUrl;
 }
 
-export async function verifyAccessToken(token: string): Promise<{ userId: string; email?: string }> {
+export async function verifyAccessToken(
+  token: string
+): Promise<{ userId: string; email?: string }> {
   const client = authClientForToken(token);
   const { data, error } = await client.auth.getUser(token);
   if (error || !data?.user) {
     // Log more details about the error for debugging
     const errorMessage = error?.message || 'Unknown error';
     const errorStatus = error?.status || 'unknown';
-    throw new Error(`Invalid or expired token (status: ${errorStatus}): ${errorMessage}`);
+    throw new Error(
+      `Invalid or expired token (status: ${errorStatus}): ${errorMessage}`
+    );
   }
   return { userId: data.user.id, email: data.user.email ?? undefined };
 }
@@ -181,15 +207,21 @@ export async function signUpWithEmail(params: {
   password: string;
   username: string;
   displayName: string;
-}): Promise<{ accessToken: string; refreshToken: string; userId: string; profile: SupabaseProfile }> {
+}): Promise<{
+  accessToken: string;
+  refreshToken: string;
+  userId: string;
+  profile: SupabaseProfile;
+}> {
   const svc = getServiceClient();
   const anon = getAnonClient();
 
-  const { data: createdUser, error: createError } = await svc.auth.admin.createUser({
-    email: params.email,
-    password: params.password,
-    email_confirm: true,
-  });
+  const { data: createdUser, error: createError } =
+    await svc.auth.admin.createUser({
+      email: params.email,
+      password: params.password,
+      email_confirm: true,
+    });
 
   if (createError || !createdUser?.user) {
     throw new Error(createError?.message ?? 'Failed to create user');
@@ -239,10 +271,11 @@ export async function signUpWithEmail(params: {
   }
 
   // Generate a session for convenience
-  const { data: loginData, error: loginError } = await anon.auth.signInWithPassword({
-    email: params.email,
-    password: params.password,
-  });
+  const { data: loginData, error: loginError } =
+    await anon.auth.signInWithPassword({
+      email: params.email,
+      password: params.password,
+    });
 
   if (loginError || !loginData.session) {
     throw new Error(loginError?.message ?? 'Failed to sign in after signup');
@@ -253,14 +286,19 @@ export async function signUpWithEmail(params: {
     accessToken: session.access_token,
     refreshToken: session.refresh_token,
     userId,
-    profile: profileInsert as SupabaseProfile,
+    profile: profileInsert,
   };
 }
 
 export async function signInWithEmail(params: {
   email: string;
   password: string;
-}): Promise<{ accessToken: string; refreshToken: string; userId: string; profile: SupabaseProfile | null }> {
+}): Promise<{
+  accessToken: string;
+  refreshToken: string;
+  userId: string;
+  profile: SupabaseProfile | null;
+}> {
   const anon = getAnonClient();
   const svc = getServiceClient();
   const { data, error } = await anon.auth.signInWithPassword({
@@ -283,10 +321,17 @@ export async function signInWithEmail(params: {
   };
 }
 
-export async function refreshAccessToken(refreshToken: string): Promise<{ accessToken: string; refreshToken: string; userId: string; profile: SupabaseProfile | null }> {
+export async function refreshAccessToken(refreshToken: string): Promise<{
+  accessToken: string;
+  refreshToken: string;
+  userId: string;
+  profile: SupabaseProfile | null;
+}> {
   const anon = getAnonClient();
   const svc = getServiceClient();
-  const { data, error } = await anon.auth.refreshSession({ refresh_token: refreshToken });
+  const { data, error } = await anon.auth.refreshSession({
+    refresh_token: refreshToken,
+  });
 
   if (error || !data.session || !data.user) {
     throw new Error(error?.message ?? 'Failed to refresh token');
@@ -303,8 +348,15 @@ export async function refreshAccessToken(refreshToken: string): Promise<{ access
   };
 }
 
-export async function getProfile(userId: string, client: SupabaseClient = getServiceClient()): Promise<SupabaseProfile | null> {
-  const { data, error } = await client.from('profiles').select('*').eq('id', userId).maybeSingle();
+export async function getProfile(
+  userId: string,
+  client: SupabaseClient = getServiceClient()
+): Promise<SupabaseProfile | null> {
+  const { data, error } = await client
+    .from('profiles')
+    .select('*')
+    .eq('id', userId)
+    .maybeSingle();
   if (error) {
     throw new Error(error.message);
   }
@@ -335,7 +387,9 @@ export async function getPlayerActiveLobbyId(
   if (data && data.length > 0) {
     // If we have an excludeLobbyId, check if any other lobby is active
     if (excludeLobbyId) {
-      const otherLobby = data.find((row: any) => row.lobby_id !== excludeLobbyId);
+      const otherLobby = data.find(
+        (row: any) => row.lobby_id !== excludeLobbyId
+      );
       return otherLobby ? String(otherLobby.lobby_id) : null;
     }
     return String(data[0].lobby_id);
@@ -366,15 +420,25 @@ export type LobbyPlayer = {
 
 export type LobbyPayload = LobbyRecord & { players: LobbyPlayer[] };
 
-async function fetchLobbyRecord(lobbyId: string, client: SupabaseClient): Promise<LobbyRecord | null> {
-  const { data, error } = await client.from('lobbies').select('*').eq('id', lobbyId).maybeSingle();
+async function fetchLobbyRecord(
+  lobbyId: string,
+  client: SupabaseClient
+): Promise<LobbyRecord | null> {
+  const { data, error } = await client
+    .from('lobbies')
+    .select('*')
+    .eq('id', lobbyId)
+    .maybeSingle();
   if (error) {
     throw new Error(error.message);
   }
   return (data as LobbyRecord | null) ?? null;
 }
 
-async function fetchLobbyPlayers(lobbyId: string, client: SupabaseClient): Promise<LobbyPlayer[]> {
+async function fetchLobbyPlayers(
+  lobbyId: string,
+  client: SupabaseClient
+): Promise<LobbyPlayer[]> {
   const { data, error } = await client
     .from('lobby_players')
     .select(
@@ -391,7 +455,9 @@ async function fetchLobbyPlayers(lobbyId: string, client: SupabaseClient): Promi
 
   const rows = (data ?? []) as any[];
   return rows.map(row => {
-    const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+    const profile = Array.isArray(row.profiles)
+      ? row.profiles[0]
+      : row.profiles;
     const displayName = profile?.display_name ?? 'Unknown';
     return {
       playerId: String(row.player_id),
@@ -413,7 +479,7 @@ export async function listLobbies(userId?: string): Promise<LobbyPayload[]> {
   }
 
   const lobbies = (data ?? []) as LobbyRecord[];
-  
+
   // Filter by visibility if userId is provided
   let filteredLobbies = lobbies;
   if (userId) {
@@ -438,34 +504,40 @@ export async function listLobbies(userId?: string): Promise<LobbyPayload[]> {
         .select('user_id, friend_id')
         .or(`user_id.eq.${userId},friend_id.eq.${userId}`),
     ]);
-    
-    const memberLobbyIds = new Set((memberships.data ?? []).map((m: any) => m.lobby_id));
-    const invitedLobbyIds = new Set((invitations.data ?? []).map((i: any) => i.lobby_id));
-    const friendIds = new Set(
-      (friendships.data ?? []).map((f: any) => (f.user_id === userId ? f.friend_id : f.user_id))
+
+    const memberLobbyIds = new Set(
+      (memberships.data ?? []).map((m: any) => m.lobby_id)
     );
-    
+    const invitedLobbyIds = new Set(
+      (invitations.data ?? []).map((i: any) => i.lobby_id)
+    );
+    const friendIds = new Set(
+      (friendships.data ?? []).map((f: any) =>
+        f.user_id === userId ? f.friend_id : f.user_id
+      )
+    );
+
     filteredLobbies = lobbies.filter(lobby => {
       // Public lobbies are always visible
       if (lobby.visibility === 'public') {
         return true;
       }
-      
+
       // Host can always see their own lobby
       if (lobby.host_id === userId) {
         return true;
       }
-      
+
       // Members can always see lobbies they're in
       if (memberLobbyIds.has(lobby.id)) {
         return true;
       }
-      
+
       // Private lobbies: check for invitation (via lobby_invitations table)
       if (lobby.visibility === 'private') {
         return invitedLobbyIds.has(lobby.id);
       }
-      
+
       // Friends-only lobbies: check if user is friends with host OR has valid invite code
       if (lobby.visibility === 'friends' && lobby.host_id) {
         // Friends can always see
@@ -478,11 +550,11 @@ export async function listLobbies(userId?: string): Promise<LobbyPayload[]> {
         // are meant to be shared privately. Users with invite codes can join directly via lobby ID.
         return false;
       }
-      
+
       return false; // Not visible
     });
   }
-  
+
   const results: LobbyPayload[] = await Promise.all(
     filteredLobbies.map(async lobby => {
       const players = await fetchLobbyPlayers(lobby.id, client);
@@ -492,7 +564,9 @@ export async function listLobbies(userId?: string): Promise<LobbyPayload[]> {
   return results;
 }
 
-export async function getLobbyWithPlayers(lobbyId: string): Promise<LobbyPayload | null> {
+export async function getLobbyWithPlayers(
+  lobbyId: string
+): Promise<LobbyPayload | null> {
   const client = getServiceClient();
   const lobby = await fetchLobbyRecord(lobbyId, client);
   if (!lobby) return null;
@@ -548,7 +622,11 @@ export async function createLobby(params: {
   return { ...(data as LobbyRecord), players };
 }
 
-async function ensureLobbyHost(lobbyId: string, hostId: string, client: SupabaseClient): Promise<LobbyRecord> {
+async function ensureLobbyHost(
+  lobbyId: string,
+  hostId: string,
+  client: SupabaseClient
+): Promise<LobbyRecord> {
   const lobby = await fetchLobbyRecord(lobbyId, client);
   if (!lobby) {
     throw new Error('LOBBY_NOT_FOUND');
@@ -575,7 +653,11 @@ export async function joinLobby(params: {
     throw new Error('ALREADY_IN_LOBBY');
   }
 
-  const { data: lobby, error: lobbyError } = await client.from('lobbies').select('*').eq('id', params.lobbyId).single();
+  const { data: lobby, error: lobbyError } = await client
+    .from('lobbies')
+    .select('*')
+    .eq('id', params.lobbyId)
+    .single();
   if (lobbyError || !lobby) {
     throw new Error('LOBBY_NOT_FOUND');
   }
@@ -586,11 +668,18 @@ export async function joinLobby(params: {
     throw new Error('LOBBY_LOCKED');
   }
 
-  if (lobbyRecord.is_fixed_size && lobbyRecord.current_players >= lobbyRecord.max_players) {
+  if (
+    lobbyRecord.is_fixed_size &&
+    lobbyRecord.current_players >= lobbyRecord.max_players
+  ) {
     throw new Error('LOBBY_FULL');
   }
 
-  if (lobbyRecord.visibility === 'private' && lobbyRecord.invite_code && params.inviteCode !== lobbyRecord.invite_code) {
+  if (
+    lobbyRecord.visibility === 'private' &&
+    lobbyRecord.invite_code &&
+    params.inviteCode !== lobbyRecord.invite_code
+  ) {
     throw new Error('INVALID_INVITE');
   }
 
@@ -599,16 +688,23 @@ export async function joinLobby(params: {
     if (!lobbyRecord.host_id) {
       throw new Error('LOBBY_NO_HOST');
     }
-    const isFriend = await areFriends(params.playerId, lobbyRecord.host_id, client);
-    
+    const isFriend = await areFriends(
+      params.playerId,
+      lobbyRecord.host_id,
+      client
+    );
+
     // Allow if friends with host
     if (isFriend) {
       // Friends can join directly, no invite code needed
-    } 
+    }
     // Or if not friends, check for valid invite code
-    else if (lobbyRecord.invite_code && params.inviteCode === lobbyRecord.invite_code) {
+    else if (
+      lobbyRecord.invite_code &&
+      params.inviteCode === lobbyRecord.invite_code
+    ) {
       // Non-friends can join with valid invite code
-    } 
+    }
     // Otherwise, reject
     else {
       throw new Error('NOT_FRIENDS_WITH_HOST');
@@ -645,7 +741,10 @@ export async function joinLobby(params: {
   return { ...lobbyRecord, players };
 }
 
-export async function leaveLobby(params: { lobbyId: string; playerId: string }): Promise<LobbyPayload | null> {
+export async function leaveLobby(params: {
+  lobbyId: string;
+  playerId: string;
+}): Promise<LobbyPayload | null> {
   const client = getServiceClient();
 
   // Fetch the lobby first to check if the leaving player is the host
@@ -654,7 +753,11 @@ export async function leaveLobby(params: { lobbyId: string; playerId: string }):
 
   const wasHost = lobbyBefore.host_id === params.playerId;
 
-  const { error } = await client.from('lobby_players').delete().eq('lobby_id', params.lobbyId).eq('player_id', params.playerId);
+  const { error } = await client
+    .from('lobby_players')
+    .delete()
+    .eq('lobby_id', params.lobbyId)
+    .eq('player_id', params.playerId);
   if (error) {
     throw new Error(error.message);
   }
@@ -666,12 +769,18 @@ export async function leaveLobby(params: { lobbyId: string; playerId: string }):
 
   // If lobby is empty, mark it as finished
   if ((lobby.current_players ?? 0) === 0) {
-    await client.from('lobbies').update({ status: 'finished' }).eq('id', params.lobbyId);
+    await client
+      .from('lobbies')
+      .update({ status: 'finished' })
+      .eq('id', params.lobbyId);
     lobby.status = 'finished';
   } else if (wasHost && players.length > 0) {
     // Transfer host to another player if the host left and there are remaining players
     const newHostId = players[0].playerId;
-    const { error: updateError } = await client.from('lobbies').update({ host_id: newHostId }).eq('id', params.lobbyId);
+    const { error: updateError } = await client
+      .from('lobbies')
+      .update({ host_id: newHostId })
+      .eq('id', params.lobbyId);
     if (updateError) {
       throw new Error(updateError.message);
     }
@@ -681,7 +790,11 @@ export async function leaveLobby(params: { lobbyId: string; playerId: string }):
   return { ...lobby, players };
 }
 
-export async function sendLobbyInvite(params: { lobbyId: string; senderId: string; recipientId: string }): Promise<LobbyInvitation> {
+export async function sendLobbyInvite(params: {
+  lobbyId: string;
+  senderId: string;
+  recipientId: string;
+}): Promise<LobbyInvitation> {
   const client = getServiceClient();
   await ensureLobbyHost(params.lobbyId, params.senderId, client);
   const { data, error } = await client
@@ -725,11 +838,12 @@ export async function listLobbyInvitations(userId: string): Promise<{
   type RawLobbyInvitationRow = LobbyInvitation & {
     lobbies: LobbyRecord[] | LobbyRecord | null;
   };
-  const rows = ((data ?? []) as RawLobbyInvitationRow[])
-    .map(row => ({
-      ...row,
-      lobbies: Array.isArray(row.lobbies) ? row.lobbies[0] ?? null : row.lobbies ?? null,
-    })) as LobbyInvitationWithLobby[];
+  const rows = ((data ?? []) as RawLobbyInvitationRow[]).map(row => ({
+    ...row,
+    lobbies: Array.isArray(row.lobbies)
+      ? row.lobbies[0] ?? null
+      : row.lobbies ?? null,
+  })) as LobbyInvitationWithLobby[];
   return {
     incoming: rows.filter(row => row.recipient_id === userId),
     outgoing: rows.filter(row => row.sender_id === userId),
@@ -832,9 +946,7 @@ export async function listFriends(userId: string): Promise<SupabaseProfile[]> {
   const profiles: SupabaseProfile[] = [];
   rows.forEach(row => {
     const friend =
-      row.friend_id === userId
-        ? row.user_profile
-        : row.friend_profile;
+      row.friend_id === userId ? row.user_profile : row.friend_profile;
     if (friend) {
       profiles.push({
         id: friend.id,
@@ -896,14 +1008,15 @@ export async function listFriendRequestsWithProfiles(userId: string): Promise<{
     sender_profile: SupabaseProfile[] | SupabaseProfile | null;
     recipient_profile: SupabaseProfile[] | SupabaseProfile | null;
   };
-  const rows = ((data ?? []) as RawFriendRequestWithProfilesRow[])
-    .map(row => ({
-      ...row,
-      sender_profile: Array.isArray(row.sender_profile) ? row.sender_profile[0] ?? null : row.sender_profile ?? null,
-      recipient_profile: Array.isArray(row.recipient_profile)
-        ? row.recipient_profile[0] ?? null
-        : row.recipient_profile ?? null,
-    })) as FriendRequestWithProfiles[];
+  const rows = ((data ?? []) as RawFriendRequestWithProfilesRow[]).map(row => ({
+    ...row,
+    sender_profile: Array.isArray(row.sender_profile)
+      ? row.sender_profile[0] ?? null
+      : row.sender_profile ?? null,
+    recipient_profile: Array.isArray(row.recipient_profile)
+      ? row.recipient_profile[0] ?? null
+      : row.recipient_profile ?? null,
+  })) as FriendRequestWithProfiles[];
   return {
     incoming: rows.filter(r => r.recipient_id === userId),
     outgoing: rows.filter(r => r.sender_id === userId),
@@ -926,12 +1039,12 @@ export async function sendFriendRequest(params: {
   if (!recipientProfile?.id) {
     throw new Error('NOT_FOUND');
   }
-  
+
   // Prevent self-friending
   if (params.senderId === recipientProfile.id) {
     throw new Error('CANNOT_ADD_SELF');
   }
-  
+
   const { data, error } = await client
     .from('friend_requests')
     .insert({
@@ -972,7 +1085,10 @@ export async function respondToFriendRequest(params: {
     if (!senderId) {
       throw new Error('Failed to lookup sender');
     }
-    const { userId, friendId } = canonicalizeFriendPair(params.recipientId, senderId as string);
+    const { userId, friendId } = canonicalizeFriendPair(
+      params.recipientId,
+      senderId as string
+    );
     const { error: friendshipError } = await client.from('friendships').insert({
       user_id: userId,
       friend_id: friendId,
@@ -983,10 +1099,20 @@ export async function respondToFriendRequest(params: {
   }
 }
 
-export async function removeFriendship(params: { userId: string; friendId: string }): Promise<void> {
+export async function removeFriendship(params: {
+  userId: string;
+  friendId: string;
+}): Promise<void> {
   const client = getServiceClient();
-  const { userId, friendId } = canonicalizeFriendPair(params.userId, params.friendId);
-  const { error } = await client.from('friendships').delete().eq('user_id', userId).eq('friend_id', friendId);
+  const { userId, friendId } = canonicalizeFriendPair(
+    params.userId,
+    params.friendId
+  );
+  const { error } = await client
+    .from('friendships')
+    .delete()
+    .eq('user_id', userId)
+    .eq('friend_id', friendId);
   if (error) {
     throw new Error(error.message);
   }
@@ -998,12 +1124,12 @@ export async function sendFriendRequestFromLobby(params: {
   lobbyId: string;
 }): Promise<FriendRequest> {
   const client = getServiceClient();
-  
+
   // Prevent self-friending
   if (params.senderId === params.targetUserId) {
     throw new Error('CANNOT_ADD_SELF');
   }
-  
+
   const membershipCheck = await client
     .from('lobby_players')
     .select('player_id')
@@ -1032,7 +1158,9 @@ export async function sendFriendRequestFromLobby(params: {
   return data as FriendRequest;
 }
 
-export async function searchProfilesByUsername(query: string): Promise<SupabaseProfile[]> {
+export async function searchProfilesByUsername(
+  query: string
+): Promise<SupabaseProfile[]> {
   const client = getServiceClient();
   const trimmed = query.trim();
   if (trimmed.length < 3) {
@@ -1051,15 +1179,21 @@ export async function searchProfilesByUsername(query: string): Promise<SupabaseP
 
 export async function listPresetAvatars(): Promise<string[]> {
   const client = getServiceClient();
-  const { data, error } = await client.storage.from('avatars').list('presets', { limit: 100 });
+  const { data, error } = await client.storage
+    .from('avatars')
+    .list('presets', { limit: 100 });
   if (error) {
     throw new Error(error.message);
   }
   const files = data ?? [];
-  return files.filter(f => f.name).map(file => publicAvatarUrl(`presets/${file.name}`));
+  return files
+    .filter(f => f.name)
+    .map(file => publicAvatarUrl(`presets/${file.name}`));
 }
 
-export async function getProfileFromToken(token: string): Promise<SupabaseProfile | null> {
+export async function getProfileFromToken(
+  token: string
+): Promise<SupabaseProfile | null> {
   const { userId } = await verifyAccessToken(token);
   return getProfile(userId);
 }
@@ -1099,7 +1233,11 @@ export async function updateProfile(params: {
   return data as SupabaseProfile;
 }
 
-export async function updateLobbyName(params: { lobbyId: string; hostId: string; name: string }): Promise<LobbyPayload> {
+export async function updateLobbyName(params: {
+  lobbyId: string;
+  hostId: string;
+  name: string;
+}): Promise<LobbyPayload> {
   const client = getServiceClient();
   const trimmed = params.name.trim();
   if (!trimmed) {
@@ -1136,7 +1274,9 @@ export async function updateLobbySize(params: {
   if (lobby.status !== 'waiting') {
     throw new Error('LOBBY_NOT_WAITING');
   }
-  const currentPlayers = lobby.current_players ?? (await fetchLobbyPlayers(params.lobbyId, client)).length;
+  const currentPlayers =
+    lobby.current_players ??
+    (await fetchLobbyPlayers(params.lobbyId, client)).length;
   if (params.maxPlayers < currentPlayers) {
     throw new Error('SIZE_TOO_SMALL');
   }
@@ -1159,13 +1299,18 @@ export async function updateLobbySize(params: {
   return { ...(data as LobbyRecord), players };
 }
 
-export async function lockLobby(params: { lobbyId: string; hostId: string }): Promise<LobbyPayload> {
+export async function lockLobby(params: {
+  lobbyId: string;
+  hostId: string;
+}): Promise<LobbyPayload> {
   const client = getServiceClient();
   const lobby = await ensureLobbyHost(params.lobbyId, params.hostId, client);
   if (lobby.status !== 'waiting') {
     throw new Error('LOBBY_NOT_WAITING');
   }
-  const currentPlayers = lobby.current_players ?? (await fetchLobbyPlayers(params.lobbyId, client)).length;
+  const currentPlayers =
+    lobby.current_players ??
+    (await fetchLobbyPlayers(params.lobbyId, client)).length;
   const { data, error } = await client
     .from('lobbies')
     .update({
@@ -1182,20 +1327,28 @@ export async function lockLobby(params: { lobbyId: string; hostId: string }): Pr
   return { ...(data as LobbyRecord), players };
 }
 
-export async function startLobby(params: { lobbyId: string; hostId: string }): Promise<LobbyPayload> {
+export async function startLobby(params: {
+  lobbyId: string;
+  hostId: string;
+}): Promise<LobbyPayload> {
   const client = getServiceClient();
   const lobby = await ensureLobbyHost(params.lobbyId, params.hostId, client);
   if (lobby.status !== 'waiting') {
     throw new Error('LOBBY_NOT_WAITING');
   }
-  const currentPlayers = lobby.current_players ?? (await fetchLobbyPlayers(params.lobbyId, client)).length;
+  const currentPlayers =
+    lobby.current_players ??
+    (await fetchLobbyPlayers(params.lobbyId, client)).length;
   const updatePayload: Partial<LobbyRecord> = {
     status: 'in_progress',
     started_at: new Date().toISOString(),
   } as Partial<LobbyRecord>;
   if (!lobby.is_fixed_size) {
     (updatePayload as any).is_fixed_size = true;
-    (updatePayload as any).max_players = Math.max(lobby.max_players ?? currentPlayers, currentPlayers);
+    (updatePayload as any).max_players = Math.max(
+      lobby.max_players ?? currentPlayers,
+      currentPlayers
+    );
   }
   const { data, error } = await client
     .from('lobbies')
@@ -1233,7 +1386,12 @@ export async function removeLobbyPlayer(params: {
     throw new Error('LOBBY_NOT_FOUND');
   }
   if ((updated.current_players ?? 0) === 0) {
-    const finish = await client.from('lobbies').update({ status: 'finished' }).eq('id', params.lobbyId).select().single();
+    const finish = await client
+      .from('lobbies')
+      .update({ status: 'finished' })
+      .eq('id', params.lobbyId)
+      .select()
+      .single();
     if (!finish.error && finish.data) {
       updated = finish.data as LobbyRecord;
     } else if (finish.error) {
@@ -1292,7 +1450,9 @@ export async function createGameRecord(params: {
       player_id: toUuidOrNull(player.playerId),
       player_name: player.playerName,
     }));
-    const { error: playerError } = await client.from('game_players').insert(payload);
+    const { error: playerError } = await client
+      .from('game_players')
+      .insert(payload);
     if (playerError) {
       throw new Error(playerError.message);
     }
@@ -1316,15 +1476,26 @@ export async function persistGameEvents(params: {
     cards: event.cards ?? null,
     score_change: event.scoreChange ?? 0,
     score_breakdown: event.scoreBreakdown ?? null,
-    timestamp: event.timestamp instanceof Date ? event.timestamp.toISOString() : new Date(event.timestamp).toISOString(),
+    timestamp:
+      event.timestamp instanceof Date
+        ? event.timestamp.toISOString()
+        : new Date(event.timestamp).toISOString(),
   }));
 
-  const { data, error } = await client.from('game_events').insert(rows).select('id, snapshot_id');
+  const { data, error } = await client
+    .from('game_events')
+    .insert(rows)
+    .select('id, snapshot_id');
   if (error) {
     throw new Error(error.message);
   }
 
-  const snapshotsPayload: Array<{ game_id: string; snapshot_id: number; game_state: GameState; game_event_id: string }> = [];
+  const snapshotsPayload: Array<{
+    game_id: string;
+    snapshot_id: number;
+    game_state: GameState;
+    game_event_id: string;
+  }> = [];
   if (data) {
     data.forEach((insertedRow: any, index: number) => {
       const config = params.events[index];
@@ -1339,7 +1510,9 @@ export async function persistGameEvents(params: {
   }
 
   if (snapshotsPayload.length > 0) {
-    const { error: snapError } = await client.from('game_snapshots').insert(snapshotsPayload);
+    const { error: snapError } = await client
+      .from('game_snapshots')
+      .insert(snapshotsPayload);
     if (snapError) {
       throw new Error(snapError.message);
     }
@@ -1350,7 +1523,12 @@ export async function completeGameRecord(params: {
   gameId: string;
   winnerId?: string | null;
   finalState?: GameState | null;
-  finalScores?: Array<{ playerId: string | null; playerName: string; score: number; isWinner?: boolean }>;
+  finalScores?: Array<{
+    playerId: string | null;
+    playerName: string;
+    score: number;
+    isWinner?: boolean;
+  }>;
   roundCount?: number;
   endedAt?: Date;
 }): Promise<void> {
@@ -1372,7 +1550,10 @@ export async function completeGameRecord(params: {
   if (params.finalScores?.length) {
     for (const score of params.finalScores) {
       const matchFilter = toUuidOrNull(score.playerId ?? undefined)
-        ? { game_id: params.gameId, player_id: toUuidOrNull(score.playerId ?? undefined) }
+        ? {
+            game_id: params.gameId,
+            player_id: toUuidOrNull(score.playerId ?? undefined),
+          }
         : { game_id: params.gameId, player_name: score.playerName };
       const { error: updateError } = await client
         .from('game_players')
@@ -1388,7 +1569,10 @@ export async function completeGameRecord(params: {
   }
 }
 
-async function ensureGameMembership(gameId: string, userId: string): Promise<void> {
+async function ensureGameMembership(
+  gameId: string,
+  userId: string
+): Promise<void> {
   const client = getServiceClient();
   const membership = await client
     .from('game_players')
@@ -1434,7 +1618,10 @@ export async function listUserGames(userId: string): Promise<GameListRow[]> {
   }));
 }
 
-export async function getGameEventsForUser(gameId: string, userId: string): Promise<any[]> {
+export async function getGameEventsForUser(
+  gameId: string,
+  userId: string
+): Promise<any[]> {
   await ensureGameMembership(gameId, userId);
   const client = getServiceClient();
   const { data, error } = await client
@@ -1448,7 +1635,10 @@ export async function getGameEventsForUser(gameId: string, userId: string): Prom
   return data ?? [];
 }
 
-export async function getGameSnapshotsForUser(gameId: string, userId: string): Promise<any[]> {
+export async function getGameSnapshotsForUser(
+  gameId: string,
+  userId: string
+): Promise<any[]> {
   await ensureGameMembership(gameId, userId);
   const client = getServiceClient();
   const { data, error } = await client

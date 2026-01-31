@@ -15,7 +15,11 @@ import { WebSocketAgent } from './agents/WebSocketAgent';
 import { ExhaustiveSimpleAgent } from './agents/ExhaustiveSimpleAgent';
 import dotenv from 'dotenv';
 import { logger } from './utils/logger';
-import { uniqueNamesGenerator, adjectives, animals } from 'unique-names-generator';
+import {
+  uniqueNamesGenerator,
+  adjectives,
+  animals,
+} from 'unique-names-generator';
 import { v4 as uuidv4 } from 'uuid';
 import { registerHttpApi } from './httpApi';
 import {
@@ -45,7 +49,8 @@ dotenv.config();
 const PORT = process.env.PORT || 3002;
 const WEB_APP_ORIGIN = process.env.WEB_APP_ORIGIN || 'http://localhost:3000';
 const SUPABASE_AUTH_ENABLED = process.env.SUPABASE_AUTH_ENABLED === 'true';
-const SUPABASE_LOBBIES_ENABLED = process.env.SUPABASE_LOBBIES_ENABLED === 'true';
+const SUPABASE_LOBBIES_ENABLED =
+  process.env.SUPABASE_LOBBIES_ENABLED === 'true';
 
 logger.info('PORT:', PORT);
 logger.info('WEB_APP_ORIGIN:', WEB_APP_ORIGIN);
@@ -54,19 +59,30 @@ logger.info('cribbage-core server starting...');
 
 // Support multiple origins or wildcard for development
 // Also automatically supports both HTTP and HTTPS versions of origins
-const getAllowedOrigins = (): string | string[] | ((origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => void) => {
+const getAllowedOrigins = ():
+  | string
+  | string[]
+  | ((
+      origin: string | undefined,
+      callback: (err: Error | null, allow?: boolean) => void
+    ) => void) => {
   if (!WEB_APP_ORIGIN) {
     // If no origin specified, allow all (development only)
-    logger.warn('WEB_APP_ORIGIN not set - allowing all origins (development only)');
+    logger.warn(
+      'WEB_APP_ORIGIN not set - allowing all origins (development only)'
+    );
     // Return a function that always allows
-    return (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    return (
+      origin: string | undefined,
+      callback: (err: Error | null, allow?: boolean) => void
+    ) => {
       callback(null, true);
     };
   }
-  
+
   // Support comma-separated origins
   const origins = WEB_APP_ORIGIN.split(',').map(o => o.trim());
-  
+
   // Expand origins to include both HTTP and HTTPS versions
   const expandedOrigins: string[] = [];
   origins.forEach(origin => {
@@ -80,25 +96,28 @@ const getAllowedOrigins = (): string | string[] | ((origin: string | undefined, 
       expandedOrigins.push(origin.replace('https://', 'http://'));
     }
   });
-  
+
   // Remove duplicates
   const uniqueOrigins = [...new Set(expandedOrigins)];
-  
+
   // Check if any origin contains a wildcard - if so, use dynamic matcher
   const hasWildcard = uniqueOrigins.some(origin => origin.startsWith('*.'));
-  
+
   // If single origin and no wildcard, return string directly for exact match
   if (uniqueOrigins.length === 1 && !hasWildcard) {
     return uniqueOrigins[0];
   }
-  
+
   // Multiple origins or wildcard present - use function to check dynamically
-  return (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+  return (
+    origin: string | undefined,
+    callback: (err: Error | null, allow?: boolean) => void
+  ) => {
     if (!origin) {
       callback(null, true); // Allow requests with no origin (e.g., mobile apps, Postman)
       return;
     }
-    
+
     // Extract hostname from origin URL for proper comparison
     let originHostname: string;
     try {
@@ -108,7 +127,7 @@ const getAllowedOrigins = (): string | string[] | ((origin: string | undefined, 
       // If origin is not a valid URL, fall back to treating it as hostname
       originHostname = origin.replace(/^https?:\/\//, '').split('/')[0];
     }
-    
+
     const isAllowed = uniqueOrigins.some(allowedOrigin => {
       // Support wildcard subdomains
       if (allowedOrigin.startsWith('*.')) {
@@ -123,7 +142,10 @@ const getAllowedOrigins = (): string | string[] | ((origin: string | undefined, 
           allowedHostname = domain.replace(/^https?:\/\//, '').split('/')[0];
         }
         // Enforce dot boundary to prevent matches like badexample.com for *.example.com
-        return originHostname === allowedHostname || originHostname.endsWith('.' + allowedHostname);
+        return (
+          originHostname === allowedHostname ||
+          originHostname.endsWith('.' + allowedHostname)
+        );
       }
       // Exact match
       if (origin === allowedOrigin) {
@@ -179,40 +201,55 @@ io.use((socket, next) => {
   // Direct console.log to verify middleware is being called
   console.log('>>> AUTH MIDDLEWARE CALLED <<<', socket.id);
   const socketId = socket.id || 'pending';
-  logger.info(`[Auth Middleware] 🔐 Processing connection for socket ${socketId}`, {
-    hasAuth: !!socket.handshake.auth,
-    authKeys: socket.handshake.auth ? Object.keys(socket.handshake.auth) : [],
-    authValues: socket.handshake.auth,
-    origin: socket.handshake.headers.origin,
-    SUPABASE_AUTH_ENABLED,
-  });
-  
+  logger.info(
+    `[Auth Middleware] 🔐 Processing connection for socket ${socketId}`,
+    {
+      hasAuth: !!socket.handshake.auth,
+      authKeys: socket.handshake.auth ? Object.keys(socket.handshake.auth) : [],
+      authValues: socket.handshake.auth,
+      origin: socket.handshake.headers.origin,
+      SUPABASE_AUTH_ENABLED,
+    }
+  );
+
   if (!SUPABASE_AUTH_ENABLED) {
-    logger.info(`[Auth Middleware] ✅ Auth disabled, allowing connection for socket ${socketId}`);
+    logger.info(
+      `[Auth Middleware] ✅ Auth disabled, allowing connection for socket ${socketId}`
+    );
     return next();
   }
-  const token = (socket.handshake.auth as { accessToken?: string } | undefined)?.accessToken;
+  const token = (socket.handshake.auth as { accessToken?: string } | undefined)
+    ?.accessToken;
   if (!token) {
-    logger.warn(`[Auth Middleware] ❌ Missing access token from socket ${socketId}`, {
-      handshakeAuth: socket.handshake.auth,
-    });
+    logger.warn(
+      `[Auth Middleware] ❌ Missing access token from socket ${socketId}`,
+      {
+        handshakeAuth: socket.handshake.auth,
+      }
+    );
     return next(new Error('Missing access token'));
   }
-  
+
   logger.info(`[Auth Middleware] 🔍 Verifying token for socket ${socketId}`, {
     tokenLength: token.length,
     tokenPreview: token.substring(0, 20) + '...',
   });
-  
+
   verifyAccessToken(token)
     .then(({ userId }) => {
       (socket.data as { userId?: string }).userId = userId;
-      logger.info(`[Auth Middleware] ✅✅✅ Socket ${socketId} authenticated as user ${userId}`);
+      logger.info(
+        `[Auth Middleware] ✅✅✅ Socket ${socketId} authenticated as user ${userId}`
+      );
       next();
     })
     .catch(err => {
-      const tokenPreview = token.length > 20 ? `${token.substring(0, 20)}...` : token;
-      logger.error(`[Auth Middleware] ❌❌❌ Socket auth failed for socket ${socketId}. Token preview: ${tokenPreview}`, err);
+      const tokenPreview =
+        token.length > 20 ? `${token.substring(0, 20)}...` : token;
+      logger.error(
+        `[Auth Middleware] ❌❌❌ Socket auth failed for socket ${socketId}. Token preview: ${tokenPreview}`,
+        err
+      );
       next(new Error('Invalid token'));
     });
 });
@@ -306,14 +343,20 @@ function removeLobbyFromCache(lobbyId: string): void {
   lobbiesById.delete(lobbyId);
 }
 
-function mapPlayersForGameRecord(players: PlayerIdAndName[]): Array<{ playerId: string | null; playerName: string }> {
+function mapPlayersForGameRecord(
+  players: PlayerIdAndName[]
+): Array<{ playerId: string | null; playerName: string }> {
   return players.map(player => ({
     playerId: toUuidOrNull(player.id),
     playerName: player.name,
   }));
 }
 
-async function createSupabaseGameForLobby(lobby: Lobby, playersInfo: PlayerIdAndName[], gameLoop: GameLoop): Promise<string | null> {
+async function createSupabaseGameForLobby(
+  lobby: Lobby,
+  playersInfo: PlayerIdAndName[],
+  gameLoop: GameLoop
+): Promise<string | null> {
   if (!SUPABASE_AUTH_ENABLED) return null;
   try {
     const gameId = await createGameRecord({
@@ -338,31 +381,45 @@ function shouldStoreSnapshotForEvent(event: GameEvent): boolean {
   );
 }
 
-function snapshotForEvent(event: GameEvent, latestSnapshot: GameSnapshot, roundStartSnapshot?: GameSnapshot): GameSnapshot | undefined {
+function snapshotForEvent(
+  event: GameEvent,
+  latestSnapshot: GameSnapshot,
+  roundStartSnapshot?: GameSnapshot
+): GameSnapshot | undefined {
   if (event.actionType === ActionType.START_ROUND) {
     return roundStartSnapshot ?? latestSnapshot;
   }
-  if (event.actionType === ActionType.READY_FOR_NEXT_ROUND || event.actionType === ActionType.WIN) {
+  if (
+    event.actionType === ActionType.READY_FOR_NEXT_ROUND ||
+    event.actionType === ActionType.WIN
+  ) {
     return latestSnapshot;
   }
   return undefined;
 }
 
-async function persistRoundHistory(lobbyId: string, latestSnapshot: GameSnapshot): Promise<void> {
+async function persistRoundHistory(
+  lobbyId: string,
+  latestSnapshot: GameSnapshot
+): Promise<void> {
   const supabaseGameId = supabaseGameIdByLobbyId.get(lobbyId);
   if (!SUPABASE_AUTH_ENABLED || !supabaseGameId) return;
-  
+
   // Atomically capture and clear events to prevent race conditions
   // If START_ROUND fires during persistence, it won't be lost
   const roundEvents = currentRoundGameEventsByLobbyId.get(lobbyId) ?? [];
   if (roundEvents.length === 0) return;
-  
+
   // Clear immediately before async operation to prevent race conditions
   currentRoundGameEventsByLobbyId.set(lobbyId, []);
 
   const roundStartSnapshot = roundStartSnapshotByLobbyId.get(lobbyId);
   const eventsWithSnapshots = roundEvents.map(event => {
-    const snapshot = snapshotForEvent(event, latestSnapshot, roundStartSnapshot);
+    const snapshot = snapshotForEvent(
+      event,
+      latestSnapshot,
+      roundStartSnapshot
+    );
     return {
       event,
       snapshot,
@@ -371,7 +428,10 @@ async function persistRoundHistory(lobbyId: string, latestSnapshot: GameSnapshot
   });
 
   try {
-    await persistGameEvents({ gameId: supabaseGameId, events: eventsWithSnapshots });
+    await persistGameEvents({
+      gameId: supabaseGameId,
+      events: eventsWithSnapshots,
+    });
   } catch (error) {
     logger.error('[Supabase] Failed to persist round history', error);
     // Note: Events are already cleared, so they won't be retried
@@ -496,7 +556,10 @@ function clearActiveGameArtifacts(lobbyId: string): Lobby | undefined {
   return lobby;
 }
 
-function handleDisconnectGracePeriodExpired(playerId: string, lobbyId: string): void {
+function handleDisconnectGracePeriodExpired(
+  playerId: string,
+  lobbyId: string
+): void {
   disconnectGraceTimeouts.delete(playerId);
   const lobby = clearActiveGameArtifacts(lobbyId);
   if (!lobby) {
@@ -504,7 +567,9 @@ function handleDisconnectGracePeriodExpired(playerId: string, lobbyId: string): 
   }
 
   const wasTracked = lobby.disconnectedPlayerIds.includes(playerId);
-  lobby.disconnectedPlayerIds = lobby.disconnectedPlayerIds.filter(id => id !== playerId);
+  lobby.disconnectedPlayerIds = lobby.disconnectedPlayerIds.filter(
+    id => id !== playerId
+  );
 
   const playerIndex = lobby.players.findIndex(p => p.playerId === playerId);
   if (playerIndex !== -1) {
@@ -515,18 +580,24 @@ function handleDisconnectGracePeriodExpired(playerId: string, lobbyId: string): 
   if (lobby.players.length === 0) {
     lobby.status = 'finished';
     lobby.finishedAt = Date.now();
-    logger.warn(`[Disconnect] Lobby ${lobbyId} is now empty after grace expiry; closing lobby.`);
+    logger.warn(
+      `[Disconnect] Lobby ${lobbyId} is now empty after grace expiry; closing lobby.`
+    );
     io.emit('lobbyClosed', { lobbyId });
     return;
   }
 
   if (lobby.hostId === playerId) {
     lobby.hostId = lobby.players[0].playerId;
-    logger.warn(`[Disconnect] Host ${playerId} dropped. Transferring host to ${lobby.hostId} for lobby ${lobbyId}.`);
+    logger.warn(
+      `[Disconnect] Host ${playerId} dropped. Transferring host to ${lobby.hostId} for lobby ${lobbyId}.`
+    );
   }
 
   if (wasTracked) {
-    logger.warn(`[Disconnect] Grace period expired for player ${playerId} in lobby ${lobbyId}`);
+    logger.warn(
+      `[Disconnect] Grace period expired for player ${playerId} in lobby ${lobbyId}`
+    );
   }
 
   lobby.status = 'waiting';
@@ -539,7 +610,10 @@ function handleDisconnectGracePeriodExpired(playerId: string, lobbyId: string): 
   });
 }
 
-function schedulePlayerDisconnectTimer(lobbyId: string, playerId: string): void {
+function schedulePlayerDisconnectTimer(
+  lobbyId: string,
+  playerId: string
+): void {
   clearPlayerDisconnectTimer(playerId);
   const timeout = setTimeout(() => {
     handleDisconnectGracePeriodExpired(playerId, lobbyId);
@@ -621,14 +695,18 @@ function lobbyFromSupabase(payload: any): Lobby {
       displayName: p.displayName,
     })),
     status: payload.status ?? 'waiting',
-    createdAt: payload.created_at ? new Date(payload.created_at).getTime() : Date.now(),
+    createdAt: payload.created_at
+      ? new Date(payload.created_at).getTime()
+      : Date.now(),
     finishedAt: payload.finished_at ?? null,
     disconnectedPlayerIds: [],
     isFixedSize: payload.is_fixed_size ?? true,
   };
 }
 
-async function refreshLobbyFromSupabase(lobbyId: string): Promise<Lobby | null> {
+async function refreshLobbyFromSupabase(
+  lobbyId: string
+): Promise<Lobby | null> {
   try {
     const payload = await getLobbyWithPlayers(lobbyId);
     if (!payload) return null;
@@ -645,7 +723,7 @@ function getUniquePlayerId(username: string, socketId: string): string {
   if (!connectedPlayers.has(username)) {
     return username;
   }
-  
+
   // If username is taken, append socket ID to make it unique
   // This allows multiple users with the same username
   const uniqueId = `${username}_${socketId}`;
@@ -655,25 +733,34 @@ function getUniquePlayerId(username: string, socketId: string): string {
 io.on('connection', socket => {
   const origin = socket.handshake.headers.origin;
   const address = socket.handshake.address;
-  
-  logger.info(`[Connection] 🔌 Connection event received for socket ${socket.id}`, {
-    origin: origin || 'proxy',
-    address,
-    hasUserId: !!(socket.data as { userId?: string }).userId,
-  });
-  
+
+  logger.info(
+    `[Connection] 🔌 Connection event received for socket ${socket.id}`,
+    {
+      origin: origin || 'proxy',
+      address,
+      hasUserId: !!(socket.data as { userId?: string }).userId,
+    }
+  );
+
   if (SUPABASE_AUTH_ENABLED) {
     const userId = (socket.data as { userId?: string }).userId;
     if (!userId) {
-      logger.warn(`[Connection] ❌ Connection without userId, disconnecting socket ${socket.id}`);
+      logger.warn(
+        `[Connection] ❌ Connection without userId, disconnecting socket ${socket.id}`
+      );
       socket.disconnect(true);
       return;
     }
     logger.info(`[Connection] ✅ Socket ${socket.id} has userId: ${userId}`);
   }
-  
+
   // Auth was already checked in middleware, so this socket is authenticated
-  logger.info(`[Connection] ✓ Socket connected: ${socket.id} from ${origin || 'proxy'} (${address})`);
+  logger.info(
+    `[Connection] ✓ Socket connected: ${socket.id} from ${
+      origin || 'proxy'
+    } (${address})`
+  );
 
   // send the connected players to the clients even before login
   // so they can see who is already connected
@@ -683,53 +770,135 @@ io.on('connection', socket => {
     logger.info('Received login event from socket:', socket.id);
     handleLogin(socket, data).catch(err => {
       logger.error('Login failed', err);
-      socket.emit('loginRejected', { reason: 'INVALID_TOKEN', message: 'Login failed' });
+      socket.emit('loginRejected', {
+        reason: 'INVALID_TOKEN',
+        message: 'Login failed',
+      });
     });
   });
 
-  socket.on('createLobby', (data: { playerCount: number; name?: string; visibility?: 'public' | 'private' | 'friends'; isFixedSize?: boolean }, callback?: (response: any) => void) => {
-    logger.info('Received createLobby event from socket:', socket.id, 'playerCount:', data?.playerCount);
-    handleCreateLobby(socket, data, callback);
-  });
+  socket.on(
+    'createLobby',
+    (
+      data: {
+        playerCount: number;
+        name?: string;
+        visibility?: 'public' | 'private' | 'friends';
+        isFixedSize?: boolean;
+      },
+      callback?: (response: any) => void
+    ) => {
+      logger.info(
+        'Received createLobby event from socket:',
+        socket.id,
+        'playerCount:',
+        data?.playerCount
+      );
+      handleCreateLobby(socket, data, callback);
+    }
+  );
 
-  socket.on('joinLobby', (data: { lobbyId: string }, callback?: (response: any) => void) => {
-    logger.info('Received joinLobby event from socket:', socket.id, 'lobbyId:', data?.lobbyId);
-    handleJoinLobby(socket, data, callback);
-  });
+  socket.on(
+    'joinLobby',
+    (data: { lobbyId: string }, callback?: (response: any) => void) => {
+      logger.info(
+        'Received joinLobby event from socket:',
+        socket.id,
+        'lobbyId:',
+        data?.lobbyId
+      );
+      handleJoinLobby(socket, data, callback);
+    }
+  );
 
-  socket.on('leaveLobby', (data: { lobbyId: string }, callback?: (response: any) => void) => {
-    logger.info('Received leaveLobby event from socket:', socket.id, 'lobbyId:', data?.lobbyId);
-    handleLeaveLobby(socket, data, callback);
-  });
+  socket.on(
+    'leaveLobby',
+    (data: { lobbyId: string }, callback?: (response: any) => void) => {
+      logger.info(
+        'Received leaveLobby event from socket:',
+        socket.id,
+        'lobbyId:',
+        data?.lobbyId
+      );
+      handleLeaveLobby(socket, data, callback);
+    }
+  );
 
-  socket.on('kickPlayer', (data: { lobbyId: string; targetPlayerId: string }, callback?: (response: any) => void) => {
-    logger.info('Received kickPlayer event from socket:', socket.id, 'lobbyId:', data?.lobbyId, 'target:', data?.targetPlayerId);
-    handleKickPlayer(socket, data, callback);
-  });
+  socket.on(
+    'kickPlayer',
+    (
+      data: { lobbyId: string; targetPlayerId: string },
+      callback?: (response: any) => void
+    ) => {
+      logger.info(
+        'Received kickPlayer event from socket:',
+        socket.id,
+        'lobbyId:',
+        data?.lobbyId,
+        'target:',
+        data?.targetPlayerId
+      );
+      handleKickPlayer(socket, data, callback);
+    }
+  );
 
-  socket.on('updateLobbySize', (data: { lobbyId: string; playerCount: number }, callback?: (response: any) => void) => {
-    logger.info('Received updateLobbySize event from socket:', socket.id, 'lobbyId:', data?.lobbyId, 'playerCount:', data?.playerCount);
-    handleUpdateLobbySize(socket, data, callback);
-  });
+  socket.on(
+    'updateLobbySize',
+    (
+      data: { lobbyId: string; playerCount: number },
+      callback?: (response: any) => void
+    ) => {
+      logger.info(
+        'Received updateLobbySize event from socket:',
+        socket.id,
+        'lobbyId:',
+        data?.lobbyId,
+        'playerCount:',
+        data?.playerCount
+      );
+      handleUpdateLobbySize(socket, data, callback);
+    }
+  );
 
-  socket.on('updateLobbyName', (data: { lobbyId: string; name: string }, callback?: (response: any) => void) => {
-    logger.info('Received updateLobbyName event from socket:', socket.id, 'lobbyId:', data?.lobbyId, 'name:', data?.name);
-    handleUpdateLobbyName(socket, data, callback);
-  });
+  socket.on(
+    'updateLobbyName',
+    (
+      data: { lobbyId: string; name: string },
+      callback?: (response: any) => void
+    ) => {
+      logger.info(
+        'Received updateLobbyName event from socket:',
+        socket.id,
+        'lobbyId:',
+        data?.lobbyId,
+        'name:',
+        data?.name
+      );
+      handleUpdateLobbyName(socket, data, callback);
+    }
+  );
 
   socket.on('listLobbies', () => {
     logger.info('Received listLobbies request from socket:', socket.id);
     handleListLobbies(socket);
   });
 
-  socket.on('startLobbyGame', (data: { lobbyId: string }, callback?: (response: any) => void) => {
-    logger.info('Received startLobbyGame event from socket:', socket.id, 'lobbyId:', data?.lobbyId);
-    handleStartLobbyGame(socket, data, callback).catch(error => {
-      logger.error('Error starting lobby game:', error);
-      if (callback) callback({ error: 'Failed to start game' });
-      socket.emit('error', { message: 'Failed to start game' });
-    });
-  });
+  socket.on(
+    'startLobbyGame',
+    (data: { lobbyId: string }, callback?: (response: any) => void) => {
+      logger.info(
+        'Received startLobbyGame event from socket:',
+        socket.id,
+        'lobbyId:',
+        data?.lobbyId
+      );
+      handleStartLobbyGame(socket, data, callback).catch(error => {
+        logger.error('Error starting lobby game:', error);
+        if (callback) callback({ error: 'Failed to start game' });
+        socket.emit('error', { message: 'Failed to start game' });
+      });
+    }
+  );
 
   socket.on('restartGame', () => {
     logger.info('Received restartGame event from socket:', socket.id);
@@ -765,7 +934,10 @@ io.on('connection', socket => {
         playersIdAndName.push({ id: playerInfo.id, name: playerInfo.name });
       }
     });
-    logger.info('Sending connected players to requesting client:', playersIdAndName);
+    logger.info(
+      'Sending connected players to requesting client:',
+      playersIdAndName
+    );
     socket.emit('connectedPlayers', playersIdAndName);
   });
 
@@ -774,10 +946,10 @@ io.on('connection', socket => {
 
   // NOTE: playAgain handler removed - use lobby system for rematch.
 
-  socket.on('disconnect', (reason) => {
+  socket.on('disconnect', reason => {
     logger.info(`A socket disconnected: ${socket.id}, Reason: ${reason}`);
     const playerId = socketIdToPlayerId.get(socket.id);
-    
+
     if (playerId) {
       // If player is in a lobby, remove them and handle cleanup
       const lobbyId = lobbyIdByPlayerId.get(playerId);
@@ -788,18 +960,24 @@ io.on('connection', socket => {
             // For waiting lobbies, don't remove players immediately on disconnect
             // They can reconnect and resume. Only remove if they explicitly leave or are kicked.
             // Keep the lobbyIdByPlayerId mapping so handleLogin can restore them
-            logger.info(`Player ${playerId} disconnected from waiting lobby ${lobby.name} - keeping lobby membership for reconnection`);
+            logger.info(
+              `Player ${playerId} disconnected from waiting lobby ${lobby.name} - keeping lobby membership for reconnection`
+            );
             // Don't remove from lobby or delete mapping - let them reconnect
           } else if (lobby.status === 'in_progress') {
-            logger.info(`Player ${playerId} disconnected during an active game in lobby ${lobby.name}`);
+            logger.info(
+              `Player ${playerId} disconnected during an active game in lobby ${lobby.name}`
+            );
             handlePlayerInGameDisconnect(lobby, playerId);
           }
         }
       }
-      
+
       // Only remove the player if they are not part of an active lobby game
       const playerLobbyId = lobbyIdByPlayerId.get(playerId);
-      const playerInActiveGame = playerLobbyId ? gameLoopsByLobbyId.has(playerLobbyId) : false;
+      const playerInActiveGame = playerLobbyId
+        ? gameLoopsByLobbyId.has(playerLobbyId)
+        : false;
       if (!playerInActiveGame) {
         connectedPlayers.delete(playerId);
         playerIdToSocketId.delete(playerId);
@@ -808,7 +986,9 @@ io.on('connection', socket => {
         // send updated connected players to all clients
         emitConnectedPlayers();
       } else {
-        logger.info('Player is part of an active game. Keeping player record for reconnection.');
+        logger.info(
+          'Player is part of an active game. Keeping player record for reconnection.'
+        );
       }
     }
   });
@@ -818,7 +998,11 @@ io.on('connection', socket => {
   });
 });
 
-function handleJoinLobby(socket: Socket, data: { lobbyId: string }, callback?: (response: any) => void): void {
+function handleJoinLobby(
+  socket: Socket,
+  data: { lobbyId: string },
+  callback?: (response: any) => void
+): void {
   const playerId = socketIdToPlayerId.get(socket.id);
   if (!playerId) {
     logger.error('Player ID not found for socket:', socket.id);
@@ -846,9 +1030,12 @@ function handleJoinLobby(socket: Socket, data: { lobbyId: string }, callback?: (
       lobbyIdByPlayerId.set(playerId, lobbyId);
       socket.join(lobbyId);
       if (mappedLobby.disconnectedPlayerIds.length) {
-        mappedLobby.disconnectedPlayerIds = mappedLobby.disconnectedPlayerIds.filter(id => id !== playerId);
+        mappedLobby.disconnectedPlayerIds =
+          mappedLobby.disconnectedPlayerIds.filter(id => id !== playerId);
       }
-      logger.info(`Player ${playerId} joined lobby ${mappedLobby.name ?? lobbyId}`);
+      logger.info(
+        `Player ${playerId} joined lobby ${mappedLobby.name ?? lobbyId}`
+      );
       if (callback) {
         callback({ lobby: mappedLobby });
       }
@@ -865,7 +1052,11 @@ function handleJoinLobby(socket: Socket, data: { lobbyId: string }, callback?: (
   void joinLobby();
 }
 
-function handleLeaveLobby(socket: Socket, data: { lobbyId: string }, callback?: (response: any) => void): void {
+function handleLeaveLobby(
+  socket: Socket,
+  data: { lobbyId: string },
+  callback?: (response: any) => void
+): void {
   const playerId = socketIdToPlayerId.get(socket.id);
   if (!playerId) {
     logger.error('Player ID not found for socket:', socket.id);
@@ -903,7 +1094,8 @@ function handleLeaveLobby(socket: Socket, data: { lobbyId: string }, callback?: 
         io.emit('lobbyClosed', { lobbyId });
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to leave lobby';
+      const message =
+        error instanceof Error ? error.message : 'Failed to leave lobby';
       logger.error('Failed to leave lobby via Supabase', message);
       const response = { error: message };
       if (callback) callback(response);
@@ -914,7 +1106,11 @@ function handleLeaveLobby(socket: Socket, data: { lobbyId: string }, callback?: 
   void leave();
 }
 
-function handleKickPlayer(socket: Socket, data: { lobbyId: string; targetPlayerId: string }, callback?: (response: any) => void): void {
+function handleKickPlayer(
+  socket: Socket,
+  data: { lobbyId: string; targetPlayerId: string },
+  callback?: (response: any) => void
+): void {
   const playerId = socketIdToPlayerId.get(socket.id);
   if (!playerId) {
     logger.error('Player ID not found for socket:', socket.id);
@@ -946,7 +1142,9 @@ function handleKickPlayer(socket: Socket, data: { lobbyId: string; targetPlayerI
   }
 
   // Check if target is in this lobby
-  const targetIndex = lobby.players.findIndex(p => p.playerId === targetPlayerId);
+  const targetIndex = lobby.players.findIndex(
+    p => p.playerId === targetPlayerId
+  );
   if (targetIndex === -1) {
     logger.error('Target player not in lobby:', targetPlayerId, lobbyId);
     const error = { error: 'Player not in this lobby' };
@@ -959,11 +1157,19 @@ function handleKickPlayer(socket: Socket, data: { lobbyId: string; targetPlayerI
 
   void (async () => {
     try {
-      const updated = await removeLobbyPlayer({ lobbyId, hostId: playerId, targetPlayerId });
+      const updated = await removeLobbyPlayer({
+        lobbyId,
+        hostId: playerId,
+        targetPlayerId,
+      });
       lobbyIdByPlayerId.delete(targetPlayerId);
-      lobby.disconnectedPlayerIds = lobby.disconnectedPlayerIds.filter(id => id !== targetPlayerId);
+      lobby.disconnectedPlayerIds = lobby.disconnectedPlayerIds.filter(
+        id => id !== targetPlayerId
+      );
 
-      logger.info(`Player ${targetPlayerName} was kicked from lobby ${lobby.name} (${lobbyId}) by host ${playerId}`);
+      logger.info(
+        `Player ${targetPlayerName} was kicked from lobby ${lobby.name} (${lobbyId}) by host ${playerId}`
+      );
 
       if (callback) {
         callback({ success: true });
@@ -973,7 +1179,10 @@ function handleKickPlayer(socket: Socket, data: { lobbyId: string; targetPlayerI
       if (targetSocketId) {
         const targetSocket = io.sockets.sockets.get(targetSocketId);
         targetSocket?.leave(lobbyId);
-        io.to(targetSocketId).emit('kickedFromLobby', { lobbyId, reason: 'You were kicked by the host' });
+        io.to(targetSocketId).emit('kickedFromLobby', {
+          lobbyId,
+          reason: 'You were kicked by the host',
+        });
       }
 
       const mapped = cacheLobbyFromPayload(updated);
@@ -987,7 +1196,8 @@ function handleKickPlayer(socket: Socket, data: { lobbyId: string; targetPlayerI
 
       io.emit('lobbyUpdated', mapped);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to kick player';
+      const message =
+        error instanceof Error ? error.message : 'Failed to kick player';
       logger.error('[handleKickPlayer] Supabase remove failed', message);
       if (callback) callback({ error: message });
       socket.emit('error', { message });
@@ -995,7 +1205,10 @@ function handleKickPlayer(socket: Socket, data: { lobbyId: string; targetPlayerI
   })();
 }
 
-async function startLobbyGameForHost(lobbyId: string, hostId: string): Promise<{ lobby: LobbyPayload; gameId: string }> {
+async function startLobbyGameForHost(
+  lobbyId: string,
+  hostId: string
+): Promise<{ lobby: LobbyPayload; gameId: string }> {
   if (gameLoopsByLobbyId.has(lobbyId)) {
     throw new Error('GAME_IN_PROGRESS');
   }
@@ -1009,12 +1222,18 @@ async function startLobbyGameForHost(lobbyId: string, hostId: string): Promise<{
     cleanupBots(lobby.id);
 
     // Build playersInfo from lobby members (humans only, no bots yet)
-    const playersInfo: PlayerIdAndName[] = lobby.players.map(p => ({ id: p.playerId, name: p.displayName }));
+    const playersInfo: PlayerIdAndName[] = lobby.players.map(p => ({
+      id: p.playerId,
+      name: p.displayName,
+    }));
 
     // Calculate bots needed
-    const targetCount = lobby.maxPlayers ?? lobby.playerCount ?? playersInfo.length;
+    const targetCount =
+      lobby.maxPlayers ?? lobby.playerCount ?? playersInfo.length;
     const botsNeeded = Math.max(0, targetCount - playersInfo.length);
-    logger.info(`Starting lobby game: ${lobby.name} with ${playersInfo.length} humans and ${botsNeeded} bots needed`);
+    logger.info(
+      `Starting lobby game: ${lobby.name} with ${playersInfo.length} humans and ${botsNeeded} bots needed`
+    );
 
     // Create bots
     const botNames = ['Bot Alex', 'Bot Morgan', 'Bot Jordan'];
@@ -1052,7 +1271,13 @@ async function startLobbyGameForHost(lobbyId: string, hostId: string): Promise<{
     const validPlayersInfo = playersInfo.filter(p => agents.has(p.id));
     if (validPlayersInfo.length !== playersInfo.length) {
       const disconnectedPlayers = playersInfo.filter(p => !agents.has(p.id));
-      logger.warn(`[startLobbyGameForHost] Filtering out ${disconnectedPlayers.length} disconnected players: ${disconnectedPlayers.map(p => p.name).join(', ')}`);
+      logger.warn(
+        `[startLobbyGameForHost] Filtering out ${
+          disconnectedPlayers.length
+        } disconnected players: ${disconnectedPlayers
+          .map(p => p.name)
+          .join(', ')}`
+      );
     }
     if (validPlayersInfo.length < 2) {
       throw new Error('Not enough connected players to start game');
@@ -1071,10 +1296,14 @@ async function startLobbyGameForHost(lobbyId: string, hostId: string): Promise<{
     let firstSnapshotEmitted = false;
     gameLoop.on('gameSnapshot', (newSnapshot: GameSnapshot) => {
       mostRecentGameSnapshotByLobbyId.set(lobby.id, newSnapshot);
-      const existingEvents = currentRoundGameEventsByLobbyId.get(lobby.id) || [];
+      const existingEvents =
+        currentRoundGameEventsByLobbyId.get(lobby.id) || [];
       const updatedEvents = [...existingEvents, newSnapshot.gameEvent];
-      const isStartRound = newSnapshot.gameEvent.actionType === ActionType.START_ROUND;
-      const roundEvents = isStartRound ? [newSnapshot.gameEvent] : updatedEvents;
+      const isStartRound =
+        newSnapshot.gameEvent.actionType === ActionType.START_ROUND;
+      const roundEvents = isStartRound
+        ? [newSnapshot.gameEvent]
+        : updatedEvents;
       if (isStartRound) {
         roundStartSnapshotByLobbyId.set(lobby.id, newSnapshot);
         currentRoundGameEventsByLobbyId.set(lobby.id, roundEvents);
@@ -1082,13 +1311,21 @@ async function startLobbyGameForHost(lobbyId: string, hostId: string): Promise<{
         currentRoundGameEventsByLobbyId.set(lobby.id, updatedEvents);
       }
 
-      if (newSnapshot.gameEvent.actionType === ActionType.READY_FOR_NEXT_ROUND || newSnapshot.gameEvent.actionType === ActionType.WIN) {
+      if (
+        newSnapshot.gameEvent.actionType === ActionType.READY_FOR_NEXT_ROUND ||
+        newSnapshot.gameEvent.actionType === ActionType.WIN
+      ) {
         void persistRoundHistory(lobby.id, newSnapshot);
       }
-      
+
       // Send redacted snapshots to all players
-      sendRedactedSnapshotToAllPlayers(gameLoop, newSnapshot, roundEvents, lobby.id);
-      
+      sendRedactedSnapshotToAllPlayers(
+        gameLoop,
+        newSnapshot,
+        roundEvents,
+        lobby.id
+      );
+
       // After the first snapshot, ensure all clients received it by re-emitting
       // This helps clients that reset state after gameStartedFromLobby
       if (!firstSnapshotEmitted) {
@@ -1096,10 +1333,18 @@ async function startLobbyGameForHost(lobbyId: string, hostId: string): Promise<{
         // Small delay to ensure clients have processed gameStartedFromLobby and set up listeners
         setTimeout(() => {
           const latestSnapshot = mostRecentGameSnapshotByLobbyId.get(lobby.id);
-          const latestEvents = currentRoundGameEventsByLobbyId.get(lobby.id) || [];
+          const latestEvents =
+            currentRoundGameEventsByLobbyId.get(lobby.id) || [];
           if (latestSnapshot === newSnapshot) {
-            logger.info('Re-emitting first game snapshot to ensure all clients received it');
-            sendRedactedSnapshotToAllPlayers(gameLoop, latestSnapshot, latestEvents, lobby.id);
+            logger.info(
+              'Re-emitting first game snapshot to ensure all clients received it'
+            );
+            sendRedactedSnapshotToAllPlayers(
+              gameLoop,
+              latestSnapshot,
+              latestEvents,
+              lobby.id
+            );
           }
         }, 100);
       }
@@ -1116,7 +1361,11 @@ async function startLobbyGameForHost(lobbyId: string, hostId: string): Promise<{
     io.emit('lobbyUpdated', lobby);
 
     // Notify lobby members of the game start
-    io.emit('gameStartedFromLobby', { lobbyId: lobby.id, gameId, players: validPlayersInfo });
+    io.emit('gameStartedFromLobby', {
+      lobbyId: lobby.id,
+      gameId,
+      players: validPlayersInfo,
+    });
 
     // Start the game loop (this will emit snapshots as the game progresses)
     // Don't await - let it run in the background
@@ -1129,10 +1378,18 @@ async function startLobbyGameForHost(lobbyId: string, hostId: string): Promise<{
     // Rollback lobby status to 'waiting' if game start fails
     try {
       const client = getServiceClient();
-      await client.from('lobbies').update({ status: 'waiting' }).eq('id', lobbyId);
-      logger.info(`[startLobbyGameForHost] Rolled back lobby ${lobbyId} status to 'waiting' due to error`);
+      await client
+        .from('lobbies')
+        .update({ status: 'waiting' })
+        .eq('id', lobbyId);
+      logger.info(
+        `[startLobbyGameForHost] Rolled back lobby ${lobbyId} status to 'waiting' due to error`
+      );
     } catch (rollbackError) {
-      logger.error(`[startLobbyGameForHost] Failed to rollback lobby ${lobbyId} status:`, rollbackError);
+      logger.error(
+        `[startLobbyGameForHost] Failed to rollback lobby ${lobbyId} status:`,
+        rollbackError
+      );
     }
 
     // Clean up any bots that were created
@@ -1140,7 +1397,9 @@ async function startLobbyGameForHost(lobbyId: string, hostId: string): Promise<{
       connectedPlayers.delete(botId);
     });
     if (newBotIds.length > 0) {
-      logger.info(`[startLobbyGameForHost] Cleaned up ${newBotIds.length} bots after error`);
+      logger.info(
+        `[startLobbyGameForHost] Cleaned up ${newBotIds.length} bots after error`
+      );
     }
 
     // Clean up any partial game state that may have been created
@@ -1156,7 +1415,11 @@ async function startLobbyGameForHost(lobbyId: string, hostId: string): Promise<{
   }
 }
 
-function handleUpdateLobbySize(socket: Socket, data: { lobbyId: string; playerCount: number }, callback?: (response: any) => void): void {
+function handleUpdateLobbySize(
+  socket: Socket,
+  data: { lobbyId: string; playerCount: number },
+  callback?: (response: any) => void
+): void {
   const playerId = socketIdToPlayerId.get(socket.id);
   if (!playerId) {
     logger.error('Player ID not found for socket:', socket.id);
@@ -1197,7 +1460,9 @@ function handleUpdateLobbySize(socket: Socket, data: { lobbyId: string; playerCo
   if (lobby.status !== 'waiting') {
     const error = { error: 'Cannot change size after game has started' };
     if (callback) callback(error);
-    socket.emit('error', { message: 'Cannot change size after game has started' });
+    socket.emit('error', {
+      message: 'Cannot change size after game has started',
+    });
     return;
   }
 
@@ -1209,13 +1474,16 @@ function handleUpdateLobbySize(socket: Socket, data: { lobbyId: string; playerCo
         maxPlayers: playerCount,
       });
       const mapped = cacheLobbyFromPayload(updated);
-      logger.info(`Lobby ${lobby.name} size updated to ${playerCount} by host ${playerId}`);
+      logger.info(
+        `Lobby ${lobby.name} size updated to ${playerCount} by host ${playerId}`
+      );
       if (callback) {
         callback({ lobby: mapped });
       }
       io.emit('lobbyUpdated', mapped);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to update lobby size';
+      const message =
+        error instanceof Error ? error.message : 'Failed to update lobby size';
       logger.error('[handleUpdateLobbySize] Supabase update failed', message);
       if (callback) callback({ error: message });
       socket.emit('error', { message });
@@ -1223,7 +1491,11 @@ function handleUpdateLobbySize(socket: Socket, data: { lobbyId: string; playerCo
   })();
 }
 
-function handleUpdateLobbyName(socket: Socket, data: { lobbyId: string; name: string }, callback?: (response: any) => void): void {
+function handleUpdateLobbyName(
+  socket: Socket,
+  data: { lobbyId: string; name: string },
+  callback?: (response: any) => void
+): void {
   const playerId = socketIdToPlayerId.get(socket.id);
   if (!playerId) {
     logger.error('Player ID not found for socket:', socket.id);
@@ -1247,7 +1519,9 @@ function handleUpdateLobbyName(socket: Socket, data: { lobbyId: string; name: st
   if (trimmedName.length > 50) {
     const error = { error: 'Lobby name must be 50 characters or less' };
     if (callback) callback(error);
-    socket.emit('error', { message: 'Lobby name must be 50 characters or less' });
+    socket.emit('error', {
+      message: 'Lobby name must be 50 characters or less',
+    });
     return;
   }
 
@@ -1272,21 +1546,30 @@ function handleUpdateLobbyName(socket: Socket, data: { lobbyId: string; name: st
   if (lobby.status !== 'waiting') {
     const error = { error: 'Cannot change name after game has started' };
     if (callback) callback(error);
-    socket.emit('error', { message: 'Cannot change name after game has started' });
+    socket.emit('error', {
+      message: 'Cannot change name after game has started',
+    });
     return;
   }
 
   void (async () => {
     try {
-      const updated = await updateLobbyName({ lobbyId, hostId: playerId, name: trimmedName });
+      const updated = await updateLobbyName({
+        lobbyId,
+        hostId: playerId,
+        name: trimmedName,
+      });
       const mapped = cacheLobbyFromPayload(updated);
-      logger.info(`Lobby ${lobbyId} name updated to "${trimmedName}" by host ${playerId}`);
+      logger.info(
+        `Lobby ${lobbyId} name updated to "${trimmedName}" by host ${playerId}`
+      );
       if (callback) {
         callback({ lobby: mapped });
       }
       io.emit('lobbyUpdated', mapped);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to update lobby name';
+      const message =
+        error instanceof Error ? error.message : 'Failed to update lobby name';
       logger.error('[handleUpdateLobbyName] Supabase update failed', message);
       if (callback) callback({ error: message });
       socket.emit('error', { message });
@@ -1303,7 +1586,9 @@ function handleListLobbies(socket: Socket): void {
         .filter(l => l.status === 'waiting')
         .map(lobby => {
           const hostId = lobby.host_id as string | undefined;
-          const hostPlayerInfo = hostId ? connectedPlayers.get(hostId) : undefined;
+          const hostPlayerInfo = hostId
+            ? connectedPlayers.get(hostId)
+            : undefined;
           const hostDisplayName = hostPlayerInfo?.name || 'Unknown';
           return {
             id: lobby.id,
@@ -1311,20 +1596,27 @@ function handleListLobbies(socket: Socket): void {
             hostDisplayName,
             currentPlayers: lobby.current_players ?? lobby.players?.length ?? 0,
             playerCount: lobby.max_players ?? (lobby as any).playerCount,
-            createdAt: lobby.created_at ? new Date(lobby.created_at).getTime() : Date.now(),
+            createdAt: lobby.created_at
+              ? new Date(lobby.created_at).getTime()
+              : Date.now(),
           };
         });
       logger.info(`Sending ${waitingLobbies.length} waiting lobbies to client`);
       socket.emit('lobbyList', { lobbies: waitingLobbies });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to list lobbies';
+      const message =
+        error instanceof Error ? error.message : 'Failed to list lobbies';
       logger.error('[handleListLobbies] Supabase list failed', message);
       socket.emit('error', { message: 'Failed to list lobbies' });
     }
   })();
 }
 
-async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, callback?: (response: any) => void): Promise<void> {
+async function handleStartLobbyGame(
+  socket: Socket,
+  data: { lobbyId: string },
+  callback?: (response: any) => void
+): Promise<void> {
   const playerId = socketIdToPlayerId.get(socket.id);
   if (!playerId) {
     logger.error('Player ID not found for socket:', socket.id);
@@ -1338,7 +1630,8 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, c
 
   const { lobbyId } = data;
 
-  const lobby = lobbiesById.get(lobbyId) ?? (await refreshLobbyFromSupabase(lobbyId));
+  const lobby =
+    lobbiesById.get(lobbyId) ?? (await refreshLobbyFromSupabase(lobbyId));
   if (!lobby) {
     const errorMsg = 'Lobby not found';
     socket.emit('error', { message: errorMsg });
@@ -1363,7 +1656,8 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, c
       callback({ success: true, gameId });
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to start game';
+    const message =
+      error instanceof Error ? error.message : 'Failed to start game';
     logger.error('Error starting lobby game:', message);
     if (callback) {
       callback({ error: message });
@@ -1374,12 +1668,19 @@ async function handleStartLobbyGame(socket: Socket, data: { lobbyId: string }, c
 
 function handleCreateLobby(
   socket: Socket,
-  data: { playerCount: number; name?: string; visibility?: 'public' | 'private' | 'friends'; isFixedSize?: boolean },
+  data: {
+    playerCount: number;
+    name?: string;
+    visibility?: 'public' | 'private' | 'friends';
+    isFixedSize?: boolean;
+  },
   callback?: (response: any) => void
 ): void {
   const playerId = socketIdToPlayerId.get(socket.id);
-  logger.info(`[handleCreateLobby] Starting for player: ${playerId}, callback present: ${!!callback}`);
-  
+  logger.info(
+    `[handleCreateLobby] Starting for player: ${playerId}, callback present: ${!!callback}`
+  );
+
   if (!playerId) {
     logger.error('Player ID not found for socket:', socket.id);
     const error = { error: 'Not logged in' };
@@ -1394,17 +1695,26 @@ function handleCreateLobby(
   // Check if player is already in a lobby
   if (lobbyIdByPlayerId.has(playerId)) {
     const existingLobbyId = lobbyIdByPlayerId.get(playerId);
-    logger.error(`[handleCreateLobby] Player ${playerId} already in lobby ${existingLobbyId}`);
+    logger.error(
+      `[handleCreateLobby] Player ${playerId} already in lobby ${existingLobbyId}`
+    );
     const error = { error: 'Already in a lobby' };
     if (callback) {
-      logger.info('[handleCreateLobby] Sending error callback: Already in a lobby');
+      logger.info(
+        '[handleCreateLobby] Sending error callback: Already in a lobby'
+      );
       callback(error);
     }
     socket.emit('error', { message: 'Already in a lobby' });
     return;
   }
 
-  const { playerCount, name: customName, visibility = 'public', isFixedSize = true } = data;
+  const {
+    playerCount,
+    name: customName,
+    visibility = 'public',
+    isFixedSize = true,
+  } = data;
 
   // Validate player count
   if (!playerCount || playerCount < 2 || playerCount > 4) {
@@ -1435,17 +1745,23 @@ function handleCreateLobby(
       lobbyIdByPlayerId.set(playerId, mapped.id);
       socket.join(mapped.id);
 
-      logger.info(`[handleCreateLobby] Lobby created: ${mapped.name} (${mapped.id}) by ${hostDisplayName}`);
+      logger.info(
+        `[handleCreateLobby] Lobby created: ${mapped.name} (${mapped.id}) by ${hostDisplayName}`
+      );
 
       if (callback) {
-        logger.info('[handleCreateLobby] Sending success callback with lobby:', mapped.id);
+        logger.info(
+          '[handleCreateLobby] Sending success callback with lobby:',
+          mapped.id
+        );
         callback({ lobby: mapped });
       }
 
       io.emit('lobbyUpdated', mapped);
       socket.emit('lobbyCreated', { lobbyId: mapped.id, name: mapped.name });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to create lobby';
+      const message =
+        error instanceof Error ? error.message : 'Failed to create lobby';
       logger.error('[handleCreateLobby] Supabase create failed', message);
       const response = { error: message };
       if (callback) callback(response);
@@ -1468,7 +1784,9 @@ async function handleLogin(socket: Socket, data: LoginData): Promise<void> {
   try {
     const socketAuthedUserId = (socket.data as { userId?: string }).userId;
     if (!socketAuthedUserId) {
-      logger.warn(`[handleLogin] Missing middleware-authenticated userId for socket ${socket.id}`);
+      logger.warn(
+        `[handleLogin] Missing middleware-authenticated userId for socket ${socket.id}`
+      );
       socket.emit('loginRejected', {
         reason: 'INVALID_TOKEN',
         message: 'Socket is not authenticated',
@@ -1498,7 +1816,7 @@ async function handleLogin(socket: Socket, data: LoginData): Promise<void> {
         // bad/expired payload token to block login as the authenticated user.
         logger.warn(
           `[handleLogin] Ignoring invalid login token for socket ${socket.id} ` +
-            `(socket already authenticated)`,
+            '(socket already authenticated)',
           error
         );
       }
@@ -1512,11 +1830,16 @@ async function handleLogin(socket: Socket, data: LoginData): Promise<void> {
     // Check if this playerId already has an agent (reconnection scenario)
     const existingPlayerInfo = connectedPlayers.get(playerId);
 
-    if (existingPlayerInfo && existingPlayerInfo.agent instanceof WebSocketAgent) {
+    if (
+      existingPlayerInfo &&
+      existingPlayerInfo.agent instanceof WebSocketAgent
+    ) {
       agent = existingPlayerInfo.agent;
       // If the socket ID is different, this is a reconnection - update the socket
       if (existingPlayerInfo.agent.socket.id !== socket.id) {
-        logger.info(`[handleLogin] Player ${playerId} reconnecting: old socket ${existingPlayerInfo.agent.socket.id}, new socket ${socket.id}`);
+        logger.info(
+          `[handleLogin] Player ${playerId} reconnecting: old socket ${existingPlayerInfo.agent.socket.id}, new socket ${socket.id}`
+        );
         // Disconnect the old socket if it's still connected
         if (existingPlayerInfo.agent.socket.connected) {
           existingPlayerInfo.agent.socket.disconnect(true);
@@ -1537,7 +1860,9 @@ async function handleLogin(socket: Socket, data: LoginData): Promise<void> {
     connectedPlayers.set(playerId, playerInfo);
 
     let reconnectLobbyId = lobbyIdByPlayerId.get(playerId);
-    let reconnectLobby = reconnectLobbyId ? lobbiesById.get(reconnectLobbyId) : null;
+    let reconnectLobby = reconnectLobbyId
+      ? lobbiesById.get(reconnectLobbyId)
+      : null;
 
     // If not found in memory, check database (handles server restart scenario)
     if (!reconnectLobby) {
@@ -1556,19 +1881,28 @@ async function handleLogin(socket: Socket, data: LoginData): Promise<void> {
         try {
           const dbLobbyId = await getPlayerActiveLobbyId(playerId);
           if (dbLobbyId) {
-            logger.info(`[handleLogin] Found active lobby ${dbLobbyId} in database for player ${playerId}, restoring...`);
+            logger.info(
+              `[handleLogin] Found active lobby ${dbLobbyId} in database for player ${playerId}, restoring...`
+            );
             reconnectLobbyId = dbLobbyId;
             reconnectLobby = await refreshLobbyFromSupabase(dbLobbyId);
             if (reconnectLobby) {
               lobbyIdByPlayerId.set(playerId, dbLobbyId);
-              logger.info(`[handleLogin] Successfully restored lobby ${reconnectLobby.name} from database`);
+              logger.info(
+                `[handleLogin] Successfully restored lobby ${reconnectLobby.name} from database`
+              );
             } else {
-              logger.warn(`[handleLogin] Failed to load lobby ${dbLobbyId} from database`);
+              logger.warn(
+                `[handleLogin] Failed to load lobby ${dbLobbyId} from database`
+              );
               reconnectLobbyId = undefined;
             }
           }
         } catch (error) {
-          logger.error(`[handleLogin] Error checking database for active lobby:`, error);
+          logger.error(
+            '[handleLogin] Error checking database for active lobby:',
+            error
+          );
           // Continue without restoring lobby - player can still create/join new lobbies
         }
       }
@@ -1577,21 +1911,29 @@ async function handleLogin(socket: Socket, data: LoginData): Promise<void> {
     if (reconnectLobbyId && reconnectLobby) {
       if (reconnectLobby.disconnectedPlayerIds.includes(playerId)) {
         clearPlayerDisconnectTimer(playerId);
-        reconnectLobby.disconnectedPlayerIds = reconnectLobby.disconnectedPlayerIds.filter(id => id !== playerId);
+        reconnectLobby.disconnectedPlayerIds =
+          reconnectLobby.disconnectedPlayerIds.filter(id => id !== playerId);
       }
 
-      const playerInLobby = reconnectLobby.players.some(p => p.playerId === playerId);
+      const playerInLobby = reconnectLobby.players.some(
+        p => p.playerId === playerId
+      );
       if (!playerInLobby) {
         reconnectLobby.players.push({
           playerId,
           displayName,
         });
-        logger.info(`Restored player ${displayName} to lobby ${reconnectLobby.name}`);
+        logger.info(
+          `Restored player ${displayName} to lobby ${reconnectLobby.name}`
+        );
       }
 
       const hasActiveGame = gameLoopsByLobbyId.has(reconnectLobbyId);
-      const hasGameSnapshot = mostRecentGameSnapshotByLobbyId.has(reconnectLobbyId);
-      const gameWasFinished = reconnectLobby.status === 'finished' && (hasGameSnapshot || reconnectLobby.finishedAt);
+      const hasGameSnapshot =
+        mostRecentGameSnapshotByLobbyId.has(reconnectLobbyId);
+      const gameWasFinished =
+        reconnectLobby.status === 'finished' &&
+        (hasGameSnapshot || reconnectLobby.finishedAt);
 
       // If lobby is 'in_progress' but no active game is running (server restart scenario),
       // reset to 'waiting' so players can start a new game
@@ -1601,17 +1943,33 @@ async function handleLogin(socket: Socket, data: LoginData): Promise<void> {
         // Update database to reflect the status change
         try {
           const client = getServiceClient();
-          await client.from('lobbies').update({ status: 'waiting' }).eq('id', reconnectLobbyId);
-          logger.info(`[handleLogin] Reset lobby ${reconnectLobby.name} from 'in_progress' to 'waiting' (no active game after server restart)`);
+          await client
+            .from('lobbies')
+            .update({ status: 'waiting' })
+            .eq('id', reconnectLobbyId);
+          logger.info(
+            `[handleLogin] Reset lobby ${reconnectLobby.name} from 'in_progress' to 'waiting' (no active game after server restart)`
+          );
         } catch (error) {
-          logger.error(`[handleLogin] Failed to update lobby status in database:`, error);
+          logger.error(
+            '[handleLogin] Failed to update lobby status in database:',
+            error
+          );
         }
-      } else if (reconnectLobby.status === 'finished' && reconnectLobby.players.length > 0 && !gameWasFinished) {
+      } else if (
+        reconnectLobby.status === 'finished' &&
+        reconnectLobby.players.length > 0 &&
+        !gameWasFinished
+      ) {
         reconnectLobby.status = 'waiting';
         reconnectLobby.finishedAt = null;
-        logger.info(`Restored lobby ${reconnectLobby.name} to waiting status (was empty, now has players)`);
+        logger.info(
+          `Restored lobby ${reconnectLobby.name} to waiting status (was empty, now has players)`
+        );
       } else if (gameWasFinished) {
-        logger.info(`Lobby ${reconnectLobby.name} has finished game - keeping 'finished' status to allow restart`);
+        logger.info(
+          `Lobby ${reconnectLobby.name} has finished game - keeping 'finished' status to allow restart`
+        );
       }
 
       socket.join(reconnectLobbyId);
@@ -1657,7 +2015,11 @@ function emitConnectedPlayers(): void {
   io.emit('connectedPlayers', playersIdAndName);
 }
 
-function emitToLobbyPlayers(lobbyId: string, event: string, payload?: unknown): void {
+function emitToLobbyPlayers(
+  lobbyId: string,
+  event: string,
+  payload?: unknown
+): void {
   io.to(lobbyId).emit(event, payload);
 }
 
@@ -1686,7 +2048,12 @@ async function handleRestartGame(socket: Socket): Promise<void> {
 
   // Only allow the host to restart the game
   if (playerId !== lobby.hostId) {
-    logger.error('Cannot restart game - player is not the host:', playerId, 'host:', lobby.hostId);
+    logger.error(
+      'Cannot restart game - player is not the host:',
+      playerId,
+      'host:',
+      lobby.hostId
+    );
     socket.emit('error', { message: 'Only the host can restart the game' });
     return;
   }
@@ -1712,12 +2079,18 @@ async function handleRestartGame(socket: Socket): Promise<void> {
   cleanupBots(lobby.id);
 
   // Build playersInfo from lobby members (humans only, no bots yet)
-  const playersInfo: PlayerIdAndName[] = lobby.players.map(p => ({ id: p.playerId, name: p.displayName }));
+  const playersInfo: PlayerIdAndName[] = lobby.players.map(p => ({
+    id: p.playerId,
+    name: p.displayName,
+  }));
 
   // Calculate bots needed
-  const targetCount = lobby.maxPlayers ?? lobby.playerCount ?? playersInfo.length;
+  const targetCount =
+    lobby.maxPlayers ?? lobby.playerCount ?? playersInfo.length;
   const botsNeeded = Math.max(0, targetCount - playersInfo.length);
-  logger.info(`Restarting lobby game: ${lobby.name} with ${playersInfo.length} humans and ${botsNeeded} bots needed`);
+  logger.info(
+    `Restarting lobby game: ${lobby.name} with ${playersInfo.length} humans and ${botsNeeded} bots needed`
+  );
 
   // Create bots
   const botNames = ['Bot Alex', 'Bot Morgan', 'Bot Jordan'];
@@ -1759,7 +2132,13 @@ async function handleRestartGame(socket: Socket): Promise<void> {
   const validPlayersInfo = playersInfo.filter(p => agents.has(p.id));
   if (validPlayersInfo.length !== playersInfo.length) {
     const disconnectedPlayers = playersInfo.filter(p => !agents.has(p.id));
-    logger.warn(`[handleRestartGame] Filtering out ${disconnectedPlayers.length} disconnected players: ${disconnectedPlayers.map(p => p.name).join(', ')}`);
+    logger.warn(
+      `[handleRestartGame] Filtering out ${
+        disconnectedPlayers.length
+      } disconnected players: ${disconnectedPlayers
+        .map(p => p.name)
+        .join(', ')}`
+    );
   }
   if (validPlayersInfo.length < 2) {
     throw new Error('Not enough connected players to restart game');
@@ -1777,7 +2156,8 @@ async function handleRestartGame(socket: Socket): Promise<void> {
     mostRecentGameSnapshotByLobbyId.set(lobby.id, newSnapshot);
     const existingEvents = currentRoundGameEventsByLobbyId.get(lobby.id) || [];
     const updatedEvents = [...existingEvents, newSnapshot.gameEvent];
-    const isStartRound = newSnapshot.gameEvent.actionType === ActionType.START_ROUND;
+    const isStartRound =
+      newSnapshot.gameEvent.actionType === ActionType.START_ROUND;
     const roundEvents = isStartRound ? [newSnapshot.gameEvent] : updatedEvents;
     if (isStartRound) {
       roundStartSnapshotByLobbyId.set(lobby.id, newSnapshot);
@@ -1786,22 +2166,38 @@ async function handleRestartGame(socket: Socket): Promise<void> {
       currentRoundGameEventsByLobbyId.set(lobby.id, updatedEvents);
     }
 
-    if (newSnapshot.gameEvent.actionType === ActionType.READY_FOR_NEXT_ROUND || newSnapshot.gameEvent.actionType === ActionType.WIN) {
+    if (
+      newSnapshot.gameEvent.actionType === ActionType.READY_FOR_NEXT_ROUND ||
+      newSnapshot.gameEvent.actionType === ActionType.WIN
+    ) {
       void persistRoundHistory(lobby.id, newSnapshot);
     }
-    
+
     // Send redacted snapshots to all players
-    sendRedactedSnapshotToAllPlayers(gameLoop, newSnapshot, roundEvents, lobby.id);
-    
+    sendRedactedSnapshotToAllPlayers(
+      gameLoop,
+      newSnapshot,
+      roundEvents,
+      lobby.id
+    );
+
     // After the first snapshot, ensure all clients received it by re-emitting
     if (!firstSnapshotEmitted) {
       firstSnapshotEmitted = true;
       setTimeout(() => {
         const latestSnapshot = mostRecentGameSnapshotByLobbyId.get(lobby.id);
-        const latestEvents = currentRoundGameEventsByLobbyId.get(lobby.id) || [];
+        const latestEvents =
+          currentRoundGameEventsByLobbyId.get(lobby.id) || [];
         if (latestSnapshot === newSnapshot) {
-          logger.info('Re-emitting first game snapshot to ensure all clients received it');
-          sendRedactedSnapshotToAllPlayers(gameLoop, latestSnapshot, latestEvents, lobby.id);
+          logger.info(
+            'Re-emitting first game snapshot to ensure all clients received it'
+          );
+          sendRedactedSnapshotToAllPlayers(
+            gameLoop,
+            latestSnapshot,
+            latestEvents,
+            lobby.id
+          );
         }
       }, 100);
     }
@@ -1820,7 +2216,11 @@ async function handleRestartGame(socket: Socket): Promise<void> {
   // Notify lobby members of the game restart (same as game start)
   // Small delay to ensure clients have processed gameReset
   setTimeout(() => {
-    io.emit('gameStartedFromLobby', { lobbyId: lobby.id, gameId, players: validPlayersInfo });
+    io.emit('gameStartedFromLobby', {
+      lobbyId: lobby.id,
+      gameId,
+      players: validPlayersInfo,
+    });
   }, 50);
 
   // Start the game loop (this will emit snapshots as the game progresses)
@@ -1838,10 +2238,10 @@ function sendRedactedSnapshotToAllPlayers(
   gameLoop: GameLoop,
   snapshot: GameSnapshot,
   roundEvents: GameEvent[],
-  lobbyId: string,
+  lobbyId: string
 ): void {
   const gameState = gameLoop.cribbageGame.getGameState();
-  
+
   // Send redacted snapshot to each player
   gameState.players.forEach(player => {
     const socketId = playerIdToSocketId.get(player.id);
@@ -1849,21 +2249,23 @@ function sendRedactedSnapshotToAllPlayers(
       // Player might be a bot or disconnected - skip
       return;
     }
-    
+
     const socket = io.sockets.sockets.get(socketId);
     if (!socket) {
       // Socket not found - skip
       return;
     }
-    
+
     // Update WebSocketAgent with the latest snapshot if this is a human player
     const playerInfo = connectedPlayers.get(player.id);
     if (playerInfo && playerInfo.agent instanceof WebSocketAgent) {
       playerInfo.agent.updateGameSnapshot(snapshot);
     }
-    
+
     // Get redacted state and event for this player
-    const redactedGameState = gameLoop.cribbageGame.getRedactedGameState(player.id);
+    const redactedGameState = gameLoop.cribbageGame.getRedactedGameState(
+      player.id
+    );
     const redactedGameEvent = gameLoop.cribbageGame.getRedactedGameEvent(
       snapshot.gameEvent,
       player.id
@@ -1873,10 +2275,10 @@ function sendRedactedSnapshotToAllPlayers(
       gameEvent: redactedGameEvent,
       pendingDecisionRequests: snapshot.pendingDecisionRequests,
     };
-    
+
     // Send redacted snapshot
     socket.emit('gameSnapshot', redactedSnapshot);
-    
+
     // Send redacted round events
     const redactedRoundEvents = roundEvents.map(event =>
       gameLoop.cribbageGame.getRedactedGameEvent(event, player.id)
@@ -1887,7 +2289,7 @@ function sendRedactedSnapshotToAllPlayers(
 
 function sendMostRecentGameData(socket: Socket): void {
   logger.info('Sending most recent game data to client');
-  
+
   // Find which player this socket belongs to
   const playerId = socketIdToPlayerId.get(socket.id);
 
@@ -1898,7 +2300,9 @@ function sendMostRecentGameData(socket: Socket): void {
 
   const lobbyId = lobbyIdByPlayerId.get(playerId);
   if (!lobbyId) {
-    logger.warn(`Player ${playerId} is not in a lobby; skipping game state send.`);
+    logger.warn(
+      `Player ${playerId} is not in a lobby; skipping game state send.`
+    );
     socket.emit('currentRoundGameEvents', []);
     return;
   }
@@ -1908,7 +2312,9 @@ function sendMostRecentGameData(socket: Socket): void {
   const roundEvents = currentRoundGameEventsByLobbyId.get(lobbyId) || [];
 
   if (!activeGameLoop || !mostRecentGameSnapshot) {
-    logger.warn(`No active game loop or snapshot for lobby ${lobbyId} when attempting to send game data`);
+    logger.warn(
+      `No active game loop or snapshot for lobby ${lobbyId} when attempting to send game data`
+    );
     socket.emit('currentRoundGameEvents', []);
     return;
   }
@@ -1934,7 +2340,8 @@ function sendMostRecentGameData(socket: Socket): void {
     playerInfo.agent.updateGameSnapshot(mostRecentGameSnapshot);
   }
 
-  const redactedGameState = activeGameLoop.cribbageGame.getRedactedGameState(playerId);
+  const redactedGameState =
+    activeGameLoop.cribbageGame.getRedactedGameState(playerId);
   const redactedGameEvent = activeGameLoop.cribbageGame.getRedactedGameEvent(
     mostRecentGameSnapshot.gameEvent,
     playerId
@@ -1960,20 +2367,20 @@ async function startGame(lobbyId: string): Promise<void> {
     );
     return;
   }
-  
+
   // Store reference to current game loop to check if it was cancelled or replaced
   const currentGameLoop = gameLoop;
-  
+
   try {
     logger.info('Starting game loop...');
     const winner = await currentGameLoop.playGame();
-    
+
     // Check if this game loop was cancelled (replaced by a new one)
     if (gameLoopsByLobbyId.get(lobbyId) !== currentGameLoop) {
       logger.info('[startGame()] Game loop was replaced, ignoring completion');
       return;
     }
-    
+
     const supabaseGameId = supabaseGameIdByLobbyId.get(lobbyId);
     if (supabaseGameId) {
       const latestSnapshot = mostRecentGameSnapshotByLobbyId.get(lobbyId);
@@ -2003,7 +2410,9 @@ async function startGame(lobbyId: string): Promise<void> {
 
     // Check again if game loop was replaced during the wait
     if (gameLoopsByLobbyId.get(lobbyId) !== currentGameLoop) {
-      logger.info('[startGame()] Game loop was replaced during wait, ignoring completion');
+      logger.info(
+        '[startGame()] Game loop was replaced during wait, ignoring completion'
+      );
       return;
     }
 
@@ -2014,7 +2423,9 @@ async function startGame(lobbyId: string): Promise<void> {
       currentGameLoop.removeAllListeners();
       gameLoopsByLobbyId.delete(lobbyId);
     } else {
-      logger.info('[startGame()] Game loop was replaced, not clearing (new game already started)');
+      logger.info(
+        '[startGame()] Game loop was replaced, not clearing (new game already started)'
+      );
     }
 
     // Clean up bots that were created for this game
@@ -2034,9 +2445,15 @@ async function startGame(lobbyId: string): Promise<void> {
 
     if (SUPABASE_AUTH_ENABLED) {
       try {
-        await getServiceClient().from('lobbies').update({ status: 'finished' }).eq('id', lobbyId);
+        await getServiceClient()
+          .from('lobbies')
+          .update({ status: 'finished' })
+          .eq('id', lobbyId);
       } catch (updateError) {
-        logger.error('[startGame] Failed to mark lobby finished in Supabase', updateError);
+        logger.error(
+          '[startGame] Failed to mark lobby finished in Supabase',
+          updateError
+        );
       }
     }
 

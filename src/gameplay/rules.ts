@@ -4,8 +4,8 @@
  */
 
 export interface PlayerCountConfig {
-  handSize: number;           // Cards dealt to each player
-  discardPerPlayer: number;   // Cards each player must discard to crib
+  handSize: number; // Cards dealt to each player
+  discardPerPlayer: number; // Cards each player must discard to crib
   autoCribCardsFromDeck: number; // Cards auto-dealt to crib from deck (before player dealing)
 }
 
@@ -35,7 +35,9 @@ export function isValidPlayerCount(playerCount: number): boolean {
 export function getPlayerCountConfig(playerCount: number): PlayerCountConfig {
   if (!isValidPlayerCount(playerCount)) {
     throw new Error(
-      `Unsupported player count: ${playerCount}. Supported counts are: ${getSupportedPlayerCounts().join(', ')}`
+      `Unsupported player count: ${playerCount}. Supported counts are: ${getSupportedPlayerCounts().join(
+        ', '
+      )}`
     );
   }
 

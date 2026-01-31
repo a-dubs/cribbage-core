@@ -4,7 +4,7 @@ import { HeuristicSimpleAgent } from './HeuristicSimpleAgent';
 /**
  * Base class for HeuristicSimpleAgent with configurable delays to simulate human response times.
  * All decision methods are wrapped with a delay before returning.
- * 
+ *
  * Uses HeuristicSimpleAgent as base (fast) rather than SimpleAgent (slow exhaustive simulation).
  */
 export abstract class DelayedSimpleAgent extends HeuristicSimpleAgent {
@@ -23,7 +23,10 @@ export abstract class DelayedSimpleAgent extends HeuristicSimpleAgent {
     return value;
   }
 
-  async makeMove(snapshot: GameSnapshot, playerId: string): Promise<Card | null> {
+  async makeMove(
+    snapshot: GameSnapshot,
+    playerId: string
+  ): Promise<Card | null> {
     const result = await super.makeMove(snapshot, playerId);
     return this.delay(result);
   }
@@ -33,7 +36,11 @@ export abstract class DelayedSimpleAgent extends HeuristicSimpleAgent {
     playerId: string,
     numberOfCardsToDiscard: number
   ): Promise<Card[]> {
-    const result = await super.discard(snapshot, playerId, numberOfCardsToDiscard);
+    const result = await super.discard(
+      snapshot,
+      playerId,
+      numberOfCardsToDiscard
+    );
     return this.delay(result);
   }
 
@@ -72,7 +79,7 @@ export abstract class DelayedSimpleAgent extends HeuristicSimpleAgent {
  * SimpleAgent with random delay between 250ms and 1000ms
  */
 export class RandomDelaySimpleAgent extends DelayedSimpleAgent {
-  playerId: string = 'random-delay-simple-bot-v1.0';
+  playerId = 'random-delay-simple-bot-v1.0';
 
   protected getDelay(): number {
     // Random delay between 250ms and 1000ms
@@ -84,7 +91,7 @@ export class RandomDelaySimpleAgent extends DelayedSimpleAgent {
  * SimpleAgent with fixed 500ms delay
  */
 export class Fixed500msSimpleAgent extends DelayedSimpleAgent {
-  playerId: string = 'fixed-500ms-simple-bot-v1.0';
+  playerId = 'fixed-500ms-simple-bot-v1.0';
 
   protected getDelay(): number {
     return 500;
@@ -95,10 +102,9 @@ export class Fixed500msSimpleAgent extends DelayedSimpleAgent {
  * SimpleAgent with fixed 200ms delay
  */
 export class Fixed200msSimpleAgent extends DelayedSimpleAgent {
-  playerId: string = 'fixed-200ms-simple-bot-v1.0';
+  playerId = 'fixed-200ms-simple-bot-v1.0';
 
   protected getDelay(): number {
     return 200;
   }
 }
-

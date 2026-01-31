@@ -236,7 +236,7 @@ export interface PlayedCard {
 export interface GameAgent {
   playerId: string; // Unique identifier for the agent
   human: boolean; // Whether the agent represents a human player
-  
+
   // Game action decisions
   // Note: snapshot contains redacted gameState and gameEvent, plus all pendingDecisionRequests
   makeMove(snapshot: GameSnapshot, playerId: string): Promise<Card | null>;
@@ -246,14 +246,31 @@ export interface GameAgent {
     numberOfCardsToDiscard: number
   ): Promise<Card[]>;
   deal?(snapshot: GameSnapshot, playerId: string): Promise<void>; // Explicit deal action
-  cutDeck?(snapshot: GameSnapshot, playerId: string, maxIndex: number): Promise<number>; // Cut deck with index
-  selectDealerCard?(snapshot: GameSnapshot, playerId: string, maxIndex: number): Promise<number>; // Select dealer card with index
-  
+  cutDeck?(
+    snapshot: GameSnapshot,
+    playerId: string,
+    maxIndex: number
+  ): Promise<number>; // Cut deck with index
+  selectDealerCard?(
+    snapshot: GameSnapshot,
+    playerId: string,
+    maxIndex: number
+  ): Promise<number>; // Select dealer card with index
+
   // Acknowledgment decisions (parallel, blocking)
-  acknowledgeReadyForGameStart?(snapshot: GameSnapshot, playerId: string): Promise<void>;
-  acknowledgeReadyForCounting?(snapshot: GameSnapshot, playerId: string): Promise<void>;
-  acknowledgeReadyForNextRound?(snapshot: GameSnapshot, playerId: string): Promise<void>;
-  
+  acknowledgeReadyForGameStart?(
+    snapshot: GameSnapshot,
+    playerId: string
+  ): Promise<void>;
+  acknowledgeReadyForCounting?(
+    snapshot: GameSnapshot,
+    playerId: string
+  ): Promise<void>;
+  acknowledgeReadyForNextRound?(
+    snapshot: GameSnapshot,
+    playerId: string
+  ): Promise<void>;
+
   // REMOVED: waitForContinue (replaced by specific acknowledgment methods)
 }
 
@@ -282,43 +299,43 @@ export type ScoreType =
  */
 export type ScoreBreakdownType =
   // Hand/Crib Scoring
-  | 'FIFTEEN'                    // Combination summing to 15
-  | 'PAIR'                       // Two cards of same rank
-  | 'THREE_OF_A_KIND'            // Three cards of same rank
-  | 'FOUR_OF_A_KIND'             // Four cards of same rank
-  | 'RUN_OF_3'                   // Three consecutive cards
-  | 'RUN_OF_4'                   // Four consecutive cards
-  | 'RUN_OF_5'                   // Five consecutive cards
-  | 'DOUBLE_RUN_OF_3'            // Run of 3 with one duplicate (e.g., 2,3,4,4)
-  | 'DOUBLE_RUN_OF_4'             // Run of 4 with one duplicate
-  | 'TRIPLE_RUN_OF_3'            // Run of 3 with two duplicates (e.g., 2,3,4,4,4)
-  | 'QUADRUPLE_RUN_OF_3'         // Run of 3 with three duplicates (e.g., 2,3,3,4,4)
-  | 'FLUSH_4'                    // Four cards of same suit (hand only, not crib)
-  | 'FLUSH_5'                    // Five cards of same suit (including cut card)
-  | 'RIGHT_JACK'                 // Jack in hand matching cut card suit
+  | 'FIFTEEN' // Combination summing to 15
+  | 'PAIR' // Two cards of same rank
+  | 'THREE_OF_A_KIND' // Three cards of same rank
+  | 'FOUR_OF_A_KIND' // Four cards of same rank
+  | 'RUN_OF_3' // Three consecutive cards
+  | 'RUN_OF_4' // Four consecutive cards
+  | 'RUN_OF_5' // Five consecutive cards
+  | 'DOUBLE_RUN_OF_3' // Run of 3 with one duplicate (e.g., 2,3,4,4)
+  | 'DOUBLE_RUN_OF_4' // Run of 4 with one duplicate
+  | 'TRIPLE_RUN_OF_3' // Run of 3 with two duplicates (e.g., 2,3,4,4,4)
+  | 'QUADRUPLE_RUN_OF_3' // Run of 3 with three duplicates (e.g., 2,3,3,4,4)
+  | 'FLUSH_4' // Four cards of same suit (hand only, not crib)
+  | 'FLUSH_5' // Five cards of same suit (including cut card)
+  | 'RIGHT_JACK' // Jack in hand matching cut card suit
   // Pegging Scoring
-  | 'PEGGING_FIFTEEN'            // Pegging stack sums to 15 (all cards in stack)
-  | 'PEGGING_THIRTY_ONE'         // Pegging stack sums to 31 (all cards in stack)
-  | 'PEGGING_PAIR'               // Last 2 cards same rank
-  | 'PEGGING_THREE_OF_A_KIND'    // Last 3 cards same rank
-  | 'PEGGING_FOUR_OF_A_KIND'     // Last 4 cards same rank
-  | 'PEGGING_RUN_OF_3'           // Last 3 cards form run
-  | 'PEGGING_RUN_OF_4'           // Last 4 cards form run
-  | 'PEGGING_RUN_OF_5'           // Last 5 cards form run
-  | 'PEGGING_RUN_OF_6'           // Last 6 cards form run
-  | 'PEGGING_RUN_OF_7'           // Last 7 cards form run (maximum possible)
+  | 'PEGGING_FIFTEEN' // Pegging stack sums to 15 (all cards in stack)
+  | 'PEGGING_THIRTY_ONE' // Pegging stack sums to 31 (all cards in stack)
+  | 'PEGGING_PAIR' // Last 2 cards same rank
+  | 'PEGGING_THREE_OF_A_KIND' // Last 3 cards same rank
+  | 'PEGGING_FOUR_OF_A_KIND' // Last 4 cards same rank
+  | 'PEGGING_RUN_OF_3' // Last 3 cards form run
+  | 'PEGGING_RUN_OF_4' // Last 4 cards form run
+  | 'PEGGING_RUN_OF_5' // Last 5 cards form run
+  | 'PEGGING_RUN_OF_6' // Last 6 cards form run
+  | 'PEGGING_RUN_OF_7' // Last 7 cards form run (maximum possible)
   // Special Scoring
-  | 'LAST_CARD'                  // Player played last card in pegging round
-  | 'HEELS';                     // Dealer got jack as turn card
+  | 'LAST_CARD' // Player played last card in pegging round
+  | 'HEELS'; // Dealer got jack as turn card
 
 /**
  * Individual scoring breakdown item
  */
 export interface ScoreBreakdownItem {
-  type: ScoreBreakdownType;  // Type of scoring (e.g., 'FIFTEEN', 'PAIR', 'DOUBLE_RUN_OF_3')
-  points: number;            // Points awarded for this specific item
-  cards: Card[];             // Cards that contributed to this score
-  description: string;       // Human-readable description (e.g., "Double run of 3")
+  type: ScoreBreakdownType; // Type of scoring (e.g., 'FIFTEEN', 'PAIR', 'DOUBLE_RUN_OF_3')
+  points: number; // Points awarded for this specific item
+  cards: Card[]; // Cards that contributed to this score
+  description: string; // Human-readable description (e.g., "Double run of 3")
 }
 
 ////// Types for Event Emitters //////
@@ -377,7 +394,7 @@ export enum AgentDecisionType {
   DEAL = 'DEAL', // Dealer must deal cards (explicit action)
   CUT_DECK = 'CUT_DECK', // Player must cut deck (explicit action with index)
   SELECT_DEALER_CARD = 'SELECT_DEALER_CARD', // Player selects a card to determine dealer (parallel)
-  
+
   // Acknowledgment decisions (pacing/blocking)
   READY_FOR_GAME_START = 'READY_FOR_GAME_START', // Acknowledge ready to start game (after dealer selection)
   READY_FOR_COUNTING = 'READY_FOR_COUNTING', // Acknowledge ready for counting
@@ -438,7 +455,10 @@ export interface SelectDealerCardResponse {
 export interface AcknowledgeResponse {
   requestId: string;
   playerId: string;
-  decisionType: AgentDecisionType.READY_FOR_GAME_START | AgentDecisionType.READY_FOR_COUNTING | AgentDecisionType.READY_FOR_NEXT_ROUND;
+  decisionType:
+    | AgentDecisionType.READY_FOR_GAME_START
+    | AgentDecisionType.READY_FOR_COUNTING
+    | AgentDecisionType.READY_FOR_NEXT_ROUND;
   // No data needed - just acknowledgment
 }
 

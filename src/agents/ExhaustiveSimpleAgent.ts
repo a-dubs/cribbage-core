@@ -33,7 +33,10 @@ export class ExhaustiveSimpleAgent extends RandomAgent {
       .filter(card => !hand.includes(card));
 
     // Generate all combinations of cards to discard
-    const discardCombinations = this.generateCombinations(hand, numberOfCardsToDiscard);
+    const discardCombinations = this.generateCombinations(
+      hand,
+      numberOfCardsToDiscard
+    );
 
     for (const discards of discardCombinations) {
       const remainingHand = hand.filter(card => !discards.includes(card));
@@ -91,12 +94,15 @@ export class ExhaustiveSimpleAgent extends RandomAgent {
 
     const bestHand = this.getBestHand(player.hand, numberOfCardsToDiscard);
     const discards = player.hand.filter(card => !bestHand.includes(card));
-    
+
     if (DEBUG_TIMING) {
       const duration = Date.now() - startTime;
-      logger.info('[ExhaustiveSimpleAgent.discard]', `${duration}ms for player ${playerId}`);
+      logger.info(
+        '[ExhaustiveSimpleAgent.discard]',
+        `${duration}ms for player ${playerId}`
+      );
     }
-    
+
     return Promise.resolve(discards);
   }
 
@@ -182,13 +188,13 @@ export class ExhaustiveSimpleAgent extends RandomAgent {
       cardNetScores.push({ card, netScore });
     }
     const scoringDuration = DEBUG_TIMING ? Date.now() - scoringStartTime : 0;
-    
+
     const selectStartTime = DEBUG_TIMING ? Date.now() : 0;
     const bestCard = cardNetScores.reduce((a, b) =>
       a.netScore > b.netScore ? a : b
     );
     const selectDuration = DEBUG_TIMING ? Date.now() - selectStartTime : 0;
-    
+
     if (DEBUG_TIMING) {
       const totalDuration = Date.now() - startTime;
       logger.info(
@@ -200,7 +206,7 @@ export class ExhaustiveSimpleAgent extends RandomAgent {
         `Valid cards: ${validPlayedCards.length}, Possible remaining: ${possibleRemainingCards.length}`
       );
     }
-    
+
     return Promise.resolve(bestCard.card);
   }
 }

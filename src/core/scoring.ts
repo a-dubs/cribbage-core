@@ -335,7 +335,7 @@ function createBreakdownItem(
 /**
  * Score hand with detailed breakdown
  * Returns both total score and itemized breakdown
- * 
+ *
  * Detection priority (to prevent duplication):
  * 1. Complex runs (double/triple/quadruple) - highest priority
  * 2. Simple runs (only if cards not in complex run)
@@ -356,7 +356,7 @@ export const scoreHandWithBreakdown = (
   const breakdown: ScoreBreakdownItem[] = [];
   const allCards: Card[] = [...hand, cutCard];
   const sortedCardValues = sortCards(hand, cutCard);
-  
+
   // Map to track which cards are used by complex runs
   // We'll use indices into sortedCardValues array
   const usedIndices = new Set<number>();
@@ -368,7 +368,10 @@ export const scoreHandWithBreakdown = (
       // Find the original card by matching runValue and suit
       return allCards.find(card => {
         const parsed = parseCard(card);
-        return parsed.runValue === cardValue.runValue && parsed.suit === cardValue.suit;
+        return (
+          parsed.runValue === cardValue.runValue &&
+          parsed.suit === cardValue.suit
+        );
       })!;
     });
   };
@@ -378,7 +381,7 @@ export const scoreHandWithBreakdown = (
   // Check for triple run of 3 (e.g., [2, 3, 4, 4, 4])
   // Check for double run of 4 (e.g., [2, 3, 4, 5, 5])
   // Check for double run of 3 (e.g., [2, 3, 4, 4])
-  
+
   // Create frequency map
   const cardFreq: { [key: number]: number[] } = {}; // runValue -> array of indices
   sortedCardValues.forEach((card, idx) => {
@@ -389,10 +392,12 @@ export const scoreHandWithBreakdown = (
   });
 
   // Find longest consecutive run
-  const runValues = Object.keys(cardFreq).map(Number).sort((a, b) => a - b);
+  const runValues = Object.keys(cardFreq)
+    .map(Number)
+    .sort((a, b) => a - b);
   let longestRun: number[] = [];
   let currentRun: number[] = [];
-  
+
   for (let i = 0; i < runValues.length; i++) {
     if (i === 0 || runValues[i] === runValues[i - 1] + 1) {
       currentRun.push(runValues[i]);
@@ -428,7 +433,12 @@ export const scoreHandWithBreakdown = (
     // Pattern: [1, 2, 2] - one value appears once, two values appear twice each
     if (runLength === 3 && totalCardsInRun === 5) {
       const freqCounts = Object.values(runFreq).sort((a, b) => a - b);
-      if (freqCounts.length === 3 && freqCounts[0] === 1 && freqCounts[1] === 2 && freqCounts[2] === 2) {
+      if (
+        freqCounts.length === 3 &&
+        freqCounts[0] === 1 &&
+        freqCounts[1] === 2 &&
+        freqCounts[2] === 2
+      ) {
         const cards = getCardsFromIndices(runIndices);
         breakdown.push(createBreakdownItem('QUADRUPLE_RUN_OF_3', 16, cards));
         runIndices.forEach(idx => usedIndices.add(idx));
@@ -438,7 +448,12 @@ export const scoreHandWithBreakdown = (
       // OR: [1, 2, 2] but already checked above, so this is for [1, 1, 3] only
       else {
         const freqCounts = Object.values(runFreq).sort((a, b) => a - b);
-        if (freqCounts.length === 3 && freqCounts[0] === 1 && freqCounts[1] === 1 && freqCounts[2] === 3) {
+        if (
+          freqCounts.length === 3 &&
+          freqCounts[0] === 1 &&
+          freqCounts[1] === 1 &&
+          freqCounts[2] === 3
+        ) {
           const cards = getCardsFromIndices(runIndices);
           breakdown.push(createBreakdownItem('TRIPLE_RUN_OF_3', 15, cards));
           runIndices.forEach(idx => usedIndices.add(idx));
@@ -449,7 +464,12 @@ export const scoreHandWithBreakdown = (
     else if (runLength === 4 && totalCardsInRun === 5) {
       // Must have 5 cards with 4 distinct run values, one duplicated
       const freqCounts = Object.values(runFreq).sort((a, b) => a - b);
-      if (freqCounts[0] === 1 && freqCounts[1] === 1 && freqCounts[2] === 1 && freqCounts[3] === 2) {
+      if (
+        freqCounts[0] === 1 &&
+        freqCounts[1] === 1 &&
+        freqCounts[2] === 1 &&
+        freqCounts[3] === 2
+      ) {
         const cards = getCardsFromIndices(runIndices);
         breakdown.push(createBreakdownItem('DOUBLE_RUN_OF_4', 10, cards));
         runIndices.forEach(idx => usedIndices.add(idx));
@@ -459,8 +479,10 @@ export const scoreHandWithBreakdown = (
     else if (runLength === 3 && totalCardsInRun === 4) {
       // Must have 4 cards with 3 distinct run values, one duplicated
       const freqCounts = Object.values(runFreq).sort((a, b) => a - b);
-      if ((freqCounts[0] === 1 && freqCounts[1] === 1 && freqCounts[2] === 2) ||
-          (freqCounts[0] === 1 && freqCounts[1] === 2 && freqCounts[2] === 1)) {
+      if (
+        (freqCounts[0] === 1 && freqCounts[1] === 1 && freqCounts[2] === 2) ||
+        (freqCounts[0] === 1 && freqCounts[1] === 2 && freqCounts[2] === 1)
+      ) {
         const cards = getCardsFromIndices(runIndices);
         breakdown.push(createBreakdownItem('DOUBLE_RUN_OF_3', 8, cards));
         runIndices.forEach(idx => usedIndices.add(idx));
@@ -474,7 +496,7 @@ export const scoreHandWithBreakdown = (
     longestRun.forEach(runValue => {
       runIndices.push(...cardFreq[runValue]);
     });
-    
+
     if (longestRun.length === 5) {
       const cards = getCardsFromIndices(runIndices);
       breakdown.push(createBreakdownItem('RUN_OF_5', 5, cards));
@@ -494,7 +516,7 @@ export const scoreHandWithBreakdown = (
   const availableIndices = sortedCardValues
     .map((_, idx) => idx)
     .filter(idx => !usedIndices.has(idx));
-  
+
   // Group available cards by runValue
   const availableByValue: { [key: number]: number[] } = {};
   availableIndices.forEach(idx => {
@@ -537,7 +559,10 @@ export const scoreHandWithBreakdown = (
     if (size === 0) return [[]];
     if (arr.length < size) return [];
     const [first, ...rest] = arr;
-    const withFirst = getCombinations(rest, size - 1).map(combo => [first, ...combo]);
+    const withFirst = getCombinations(rest, size - 1).map(combo => [
+      first,
+      ...combo,
+    ]);
     const withoutFirst = getCombinations(rest, size);
     return [...withFirst, ...withoutFirst];
   };
@@ -546,7 +571,10 @@ export const scoreHandWithBreakdown = (
   for (let size = 2; size <= 5; size++) {
     const combinations = getCombinations(allIndices, size);
     for (const combination of combinations) {
-      const sum = combination.reduce((acc, idx) => acc + sortedCardValues[idx].pegValue, 0);
+      const sum = combination.reduce(
+        (acc, idx) => acc + sortedCardValues[idx].pegValue,
+        0
+      );
       if (sum === 15) {
         const cards = getCardsFromIndices(combination);
         breakdown.push(createBreakdownItem('FIFTEEN', 2, cards));
@@ -558,7 +586,7 @@ export const scoreHandWithBreakdown = (
   const suits = hand.map(card => parseCard(card).suit);
   const allSameSuit = suits.every(suit => suit === suits[0]);
   const cutSuit = parseCard(cutCard).suit;
-  
+
   if (allSameSuit) {
     if (suits[0] === cutSuit) {
       // Flush of 5
@@ -571,8 +599,8 @@ export const scoreHandWithBreakdown = (
 
   // 6. DETECT RIGHT JACK (independent)
   const cutSuitForJack = parseCard(cutCard).suit;
-  const rightJackCard = hand.find(card => 
-    card.startsWith('JACK') && parseCard(card).suit === cutSuitForJack
+  const rightJackCard = hand.find(
+    card => card.startsWith('JACK') && parseCard(card).suit === cutSuitForJack
   );
   if (rightJackCard) {
     breakdown.push(createBreakdownItem('RIGHT_JACK', 1, [rightJackCard]));
@@ -609,7 +637,7 @@ export const scorePeggingWithBreakdown = (
   if (peggingStack.length >= 2) {
     const lastCard = parsedStack[parsedStack.length - 1];
     let sameRankCount = 1;
-    
+
     // Count how many cards from the end have the same rank
     for (let i = parsedStack.length - 2; i >= 0; i--) {
       if (parsedStack[i].runValue === lastCard.runValue) {
@@ -620,11 +648,15 @@ export const scorePeggingWithBreakdown = (
     }
 
     const lastCards = peggingStack.slice(-sameRankCount);
-    
+
     if (sameRankCount === 4) {
-      breakdown.push(createBreakdownItem('PEGGING_FOUR_OF_A_KIND', 12, lastCards));
+      breakdown.push(
+        createBreakdownItem('PEGGING_FOUR_OF_A_KIND', 12, lastCards)
+      );
     } else if (sameRankCount === 3) {
-      breakdown.push(createBreakdownItem('PEGGING_THREE_OF_A_KIND', 6, lastCards));
+      breakdown.push(
+        createBreakdownItem('PEGGING_THREE_OF_A_KIND', 6, lastCards)
+      );
     } else if (sameRankCount === 2) {
       breakdown.push(createBreakdownItem('PEGGING_PAIR', 2, lastCards));
     }
@@ -634,13 +666,13 @@ export const scorePeggingWithBreakdown = (
   // Check from longest to shortest (7 down to 3)
   for (let length = 7; length >= 3; length--) {
     if (peggingStack.length < length) continue;
-    
+
     const lastCards = peggingStack.slice(-length);
     const lastParsed = lastCards.map(parseCard);
-    
+
     // Sort by runValue
     const sorted = [...lastParsed].sort((a, b) => a.runValue - b.runValue);
-    
+
     // Check for duplicates
     let hasDuplicates = false;
     for (let i = 0; i < sorted.length - 1; i++) {
@@ -649,9 +681,9 @@ export const scorePeggingWithBreakdown = (
         break;
       }
     }
-    
+
     if (hasDuplicates) continue;
-    
+
     // Check if consecutive
     let isConsecutive = true;
     for (let i = 0; i < sorted.length - 1; i++) {
@@ -660,15 +692,19 @@ export const scorePeggingWithBreakdown = (
         break;
       }
     }
-    
+
     if (isConsecutive) {
-      const type: ScoreBreakdownType = 
-        length === 7 ? 'PEGGING_RUN_OF_7' :
-        length === 6 ? 'PEGGING_RUN_OF_6' :
-        length === 5 ? 'PEGGING_RUN_OF_5' :
-        length === 4 ? 'PEGGING_RUN_OF_4' :
-        'PEGGING_RUN_OF_3';
-      
+      const type: ScoreBreakdownType =
+        length === 7
+          ? 'PEGGING_RUN_OF_7'
+          : length === 6
+          ? 'PEGGING_RUN_OF_6'
+          : length === 5
+          ? 'PEGGING_RUN_OF_5'
+          : length === 4
+          ? 'PEGGING_RUN_OF_4'
+          : 'PEGGING_RUN_OF_3';
+
       breakdown.push(createBreakdownItem(type, length, lastCards));
       break; // Only count longest run
     }
