@@ -37,8 +37,28 @@ describe('httpApi', () => {
     username: 'testuser',
     display_name: 'Test User',
     avatar_url: null,
+    friend_code: 'ABC123',
     created_at: new Date().toISOString(),
   };
+
+  // Helper to create a mock lobby with all required fields
+  const createMockLobby = (overrides: Record<string, any> = {}) => ({
+    id: 'lobby-123' as string,
+    status: 'waiting' as 'waiting' | 'in_progress' | 'finished',
+    current_players: 1 as number,
+    max_players: 2 as number,
+    host_id: mockUserId as string,
+    name: 'Test Lobby' as string,
+    is_fixed_size: true as boolean,
+    visibility: 'public' as 'public' | 'friends_only' | 'private',
+    settings: null as null,
+    invite_code: null as string | null,
+    game_id: null as string | null,
+    created_at: new Date().toISOString() as string,
+    started_at: null as string | null,
+    players: [] as any[],
+    ...overrides,
+  }) as any;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -66,21 +86,10 @@ describe('httpApi', () => {
     const lobbyId = 'lobby-123';
 
     it('calls onPlayerLeftLobby hook with correct arguments when leaving', async () => {
-      const updatedLobby = {
+      const updatedLobby = createMockLobby({
         id: lobbyId,
-        status: 'waiting' as const,
-        current_players: 1,
-        max_players: 2,
         host_id: 'other-player',
-        name: 'Test Lobby',
-        is_fixed_size: true,
-        visibility: 'public' as const,
-        settings: null,
-        invite_code: null,
-        game_id: null,
-        created_at: new Date().toISOString(),
-        players: [],
-      };
+      });
 
       mockedSupabaseService.leaveLobby.mockResolvedValue(updatedLobby);
 
@@ -103,21 +112,10 @@ describe('httpApi', () => {
         callOrder.push('onLobbyUpdated');
       });
 
-      const updatedLobby = {
+      const updatedLobby = createMockLobby({
         id: lobbyId,
-        status: 'waiting' as const,
-        current_players: 1,
-        max_players: 2,
         host_id: 'other-player',
-        name: 'Test Lobby',
-        is_fixed_size: true,
-        visibility: 'public' as const,
-        settings: null,
-        invite_code: null,
-        game_id: null,
-        created_at: new Date().toISOString(),
-        players: [],
-      };
+      });
 
       mockedSupabaseService.leaveLobby.mockResolvedValue(updatedLobby);
 
@@ -129,21 +127,11 @@ describe('httpApi', () => {
     });
 
     it('calls onLobbyClosed when lobby becomes empty', async () => {
-      const emptyLobby = {
+      const emptyLobby = createMockLobby({
         id: lobbyId,
-        status: 'finished' as const,
+        status: 'finished',
         current_players: 0,
-        max_players: 2,
-        host_id: mockUserId,
-        name: 'Test Lobby',
-        is_fixed_size: true,
-        visibility: 'public' as const,
-        settings: null,
-        invite_code: null,
-        game_id: null,
-        created_at: new Date().toISOString(),
-        players: [],
-      };
+      });
 
       mockedSupabaseService.leaveLobby.mockResolvedValue(emptyLobby);
 
@@ -181,29 +169,19 @@ describe('httpApi', () => {
 
   describe('POST /lobbies', () => {
     it('creates a lobby successfully', async () => {
-      const newLobby = {
+      const newLobby = createMockLobby({
         id: 'new-lobby-123',
-        status: 'waiting' as const,
-        current_players: 1,
-        max_players: 2,
-        host_id: mockUserId,
         name: 'My Game',
-        is_fixed_size: true,
-        visibility: 'public' as const,
-        settings: null,
-        invite_code: null,
-        game_id: null,
-        created_at: new Date().toISOString(),
         players: [
           {
-            odplayerId: mockUserId,
-            odusername: 'testuser',
-            oddisplayName: 'Test User',
-            isavatarUrl: null,
+            playerId: mockUserId,
+            username: 'testuser',
+            displayName: 'Test User',
+            avatarUrl: null,
             isHost: true,
           },
         ],
-      };
+      });
 
       mockedSupabaseService.createLobby.mockResolvedValue(newLobby);
 
@@ -246,21 +224,12 @@ describe('httpApi', () => {
     const lobbyId = 'lobby-to-join';
 
     it('joins a lobby successfully', async () => {
-      const joinedLobby = {
+      const joinedLobby = createMockLobby({
         id: lobbyId,
-        status: 'waiting' as const,
         current_players: 2,
-        max_players: 2,
         host_id: 'host-player',
         name: 'Joinable Lobby',
-        is_fixed_size: true,
-        visibility: 'public' as const,
-        settings: null,
-        invite_code: null,
-        game_id: null,
-        created_at: new Date().toISOString(),
-        players: [],
-      };
+      });
 
       mockedSupabaseService.joinLobby.mockResolvedValue(joinedLobby);
 
@@ -332,36 +301,8 @@ describe('httpApi', () => {
   describe('GET /lobbies', () => {
     it('lists available lobbies', async () => {
       const lobbies = [
-        {
-          id: 'lobby-1',
-          status: 'waiting' as const,
-          current_players: 1,
-          max_players: 2,
-          host_id: 'host-1',
-          name: 'Lobby 1',
-          is_fixed_size: true,
-          visibility: 'public' as const,
-          settings: null,
-          invite_code: null,
-          game_id: null,
-          created_at: new Date().toISOString(),
-          players: [],
-        },
-        {
-          id: 'lobby-2',
-          status: 'waiting' as const,
-          current_players: 1,
-          max_players: 4,
-          host_id: 'host-2',
-          name: 'Lobby 2',
-          is_fixed_size: true,
-          visibility: 'public' as const,
-          settings: null,
-          invite_code: null,
-          game_id: null,
-          created_at: new Date().toISOString(),
-          players: [],
-        },
+        createMockLobby({ id: 'lobby-1', host_id: 'host-1', name: 'Lobby 1' }),
+        createMockLobby({ id: 'lobby-2', host_id: 'host-2', name: 'Lobby 2', max_players: 4 }),
       ];
 
       mockedSupabaseService.listLobbies.mockResolvedValue(lobbies);
@@ -378,21 +319,11 @@ describe('httpApi', () => {
 
   describe('GET /lobbies/current', () => {
     it('returns current lobby when user is in one', async () => {
-      const currentLobby = {
+      const currentLobby = createMockLobby({
         id: 'current-lobby',
-        status: 'waiting' as const,
         current_players: 2,
-        max_players: 2,
-        host_id: mockUserId,
         name: 'My Current Lobby',
-        is_fixed_size: true,
-        visibility: 'public' as const,
-        settings: null,
-        invite_code: null,
-        game_id: null,
-        created_at: new Date().toISOString(),
-        players: [],
-      };
+      });
 
       mockedSupabaseService.getPlayerActiveLobbyId.mockResolvedValue(
         'current-lobby'
@@ -424,21 +355,7 @@ describe('httpApi', () => {
     const targetPlayerId = 'player-to-kick';
 
     it('kicks a player successfully', async () => {
-      const updatedLobby = {
-        id: lobbyId,
-        status: 'waiting' as const,
-        current_players: 1,
-        max_players: 2,
-        host_id: mockUserId,
-        name: 'Test Lobby',
-        is_fixed_size: true,
-        visibility: 'public' as const,
-        settings: null,
-        invite_code: null,
-        game_id: null,
-        created_at: new Date().toISOString(),
-        players: [],
-      };
+      const updatedLobby = createMockLobby({ id: lobbyId });
 
       mockedSupabaseService.removeLobbyPlayer.mockResolvedValue(updatedLobby);
 
@@ -475,21 +392,11 @@ describe('httpApi', () => {
     });
 
     it('calls onLobbyClosed when kicked player was last', async () => {
-      const emptyLobby = {
+      const emptyLobby = createMockLobby({
         id: lobbyId,
-        status: 'finished' as const,
+        status: 'finished',
         current_players: 0,
-        max_players: 2,
-        host_id: mockUserId,
-        name: 'Test Lobby',
-        is_fixed_size: true,
-        visibility: 'public' as const,
-        settings: null,
-        invite_code: null,
-        game_id: null,
-        created_at: new Date().toISOString(),
-        players: [],
-      };
+      });
 
       mockedSupabaseService.removeLobbyPlayer.mockResolvedValue(emptyLobby);
 
@@ -508,21 +415,13 @@ describe('httpApi', () => {
     const lobbyId = 'lobby-123';
 
     it('starts a lobby successfully using hook', async () => {
-      const startedLobby = {
+      const startedLobby = createMockLobby({
         id: lobbyId,
-        status: 'in_progress' as const,
+        status: 'in_progress',
         current_players: 2,
-        max_players: 2,
-        host_id: mockUserId,
         name: 'Started Lobby',
-        is_fixed_size: true,
-        visibility: 'public' as const,
-        settings: null,
-        invite_code: null,
         game_id: 'game-123',
-        created_at: new Date().toISOString(),
-        players: [],
-      };
+      });
 
       hooks.onStartLobbyGame.mockResolvedValue({
         lobby: startedLobby,
@@ -556,21 +455,10 @@ describe('httpApi', () => {
     const lobbyId = 'lobby-123';
 
     it('updates lobby name', async () => {
-      const updatedLobby = {
+      const updatedLobby = createMockLobby({
         id: lobbyId,
-        status: 'waiting' as const,
-        current_players: 1,
-        max_players: 2,
-        host_id: mockUserId,
         name: 'New Name',
-        is_fixed_size: true,
-        visibility: 'public' as const,
-        settings: null,
-        invite_code: null,
-        game_id: null,
-        created_at: new Date().toISOString(),
-        players: [],
-      };
+      });
 
       mockedSupabaseService.updateLobbyName.mockResolvedValue(updatedLobby);
 
@@ -585,21 +473,10 @@ describe('httpApi', () => {
     });
 
     it('updates lobby size', async () => {
-      const updatedLobby = {
+      const updatedLobby = createMockLobby({
         id: lobbyId,
-        status: 'waiting' as const,
-        current_players: 1,
         max_players: 4,
-        host_id: mockUserId,
-        name: 'Test Lobby',
-        is_fixed_size: true,
-        visibility: 'public' as const,
-        settings: null,
-        invite_code: null,
-        game_id: null,
-        created_at: new Date().toISOString(),
-        players: [],
-      };
+      });
 
       mockedSupabaseService.updateLobbySize.mockResolvedValue(updatedLobby);
 
@@ -627,9 +504,10 @@ describe('httpApi', () => {
     describe('POST /auth/signup', () => {
       it('creates a new user', async () => {
         const signupResult = {
-          user: { id: 'new-user', email: 'test@example.com' },
+          userId: 'new-user',
           accessToken: 'access-token',
           refreshToken: 'refresh-token',
+          profile: mockProfile,
         };
 
         mockedSupabaseService.signUpWithEmail.mockResolvedValue(signupResult);
@@ -658,9 +536,10 @@ describe('httpApi', () => {
     describe('POST /auth/login', () => {
       it('logs in a user', async () => {
         const loginResult = {
-          user: { id: mockUserId, email: 'test@example.com' },
+          userId: mockUserId,
           accessToken: 'access-token',
           refreshToken: 'refresh-token',
+          profile: mockProfile,
         };
 
         mockedSupabaseService.signInWithEmail.mockResolvedValue(loginResult);
@@ -706,8 +585,8 @@ describe('httpApi', () => {
     describe('GET /friends', () => {
       it('lists friends', async () => {
         const friends = [
-          { id: 'friend-1', username: 'friend1', display_name: 'Friend 1' },
-          { id: 'friend-2', username: 'friend2', display_name: 'Friend 2' },
+          { id: 'friend-1', username: 'friend1', display_name: 'Friend 1', avatar_url: null, friend_code: 'FC1' },
+          { id: 'friend-2', username: 'friend2', display_name: 'Friend 2', avatar_url: null, friend_code: 'FC2' },
         ];
 
         mockedSupabaseService.listFriends.mockResolvedValue(friends);
@@ -727,7 +606,8 @@ describe('httpApi', () => {
           id: 'request-123',
           sender_id: mockUserId,
           recipient_id: 'recipient-123',
-          status: 'pending',
+          status: 'pending' as const,
+          created_at: new Date().toISOString(),
         };
 
         mockedSupabaseService.sendFriendRequest.mockResolvedValue(friendRequest);
