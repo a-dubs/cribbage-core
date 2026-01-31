@@ -491,6 +491,8 @@ async function persistRoundHistory(
 const PLAYER_DISCONNECT_GRACE_MS = 60 * 1000; // 1 minute to reconnect before cancelling the game
 const FINISHED_LOBBY_TTL_MS = 60 * 60 * 1000; // 1 hour retention for finished lobbies before cleanup
 const FINISHED_LOBBY_SWEEP_INTERVAL_MS = 5 * 60 * 1000; // Sweep finished lobbies every 5 minutes
+const STALE_WAITING_LOBBY_MS = 30 * 60 * 1000; // 30 minutes before a waiting lobby with no connections is stale
+const STALE_IN_PROGRESS_LOBBY_MS = 60 * 60 * 1000; // 1 hour before an in-progress lobby with no connections is stale
 
 // Temporary default lobby ID used until full lobby management is implemented
 const DEFAULT_LOBBY_ID = 'default-lobby';
@@ -683,37 +685,123 @@ function handlePlayerInGameDisconnect(lobby: Lobby, playerId: string): void {
   });
 }
 
+/**
+ * Check if a lobby is stale (all players disconnected with no active connections)
+ */
+function isLobbyStale(lobby: Lobby, now: number): boolean {
+  // Only check waiting and in_progress lobbies
+  if (lobby.status === 'finished') {
+    return false;
+  }
+
+  // If the lobby has no human players, it's stale
+  if (lobby.players.length === 0) {
+    return true;
+  }
+
+  // Check if ALL players have no active socket connection
+  const allPlayersDisconnected = lobby.players.every(
+    player => !connectedPlayers.has(player.playerId)
+  );
+
+  if (!allPlayersDisconnected) {
+    return false; // At least one player is still connected
+  }
+
+  // Determine the stale threshold based on lobby status
+  const staleThreshold =
+    lobby.status === 'waiting'
+      ? STALE_WAITING_LOBBY_MS
+      : STALE_IN_PROGRESS_LOBBY_MS;
+
+  // Check if lobby has been around longer than the stale threshold
+  const lobbyAge = now - lobby.createdAt;
+  if (lobbyAge < staleThreshold) {
+    return false; // Not old enough to be considered stale
+  }
+
+  // Check if any players still have pending disconnect grace timeouts
+  // If they do, we're still within the grace period for reconnection
+  const anyPendingTimeouts = lobby.players.some(player =>
+    disconnectGraceTimeouts.has(player.playerId)
+  );
+
+  if (anyPendingTimeouts) {
+    return false; // Still waiting for grace period to expire
+  }
+
+  return true; // Lobby is stale - all conditions met
+}
+
+/**
+ * Clean up a lobby (shared logic for finished and stale lobbies)
+ */
+async function cleanupLobby(
+  lobbyId: string,
+  lobby: Lobby,
+  reason: 'finished' | 'stale'
+): Promise<void> {
+  lobby.players.forEach(player => {
+    if (lobbyIdByPlayerId.get(player.playerId) === lobbyId) {
+      lobbyIdByPlayerId.delete(player.playerId);
+    }
+  });
+
+  lobby.disconnectedPlayerIds.forEach(clearPlayerDisconnectTimer);
+  cleanupBots(lobbyId);
+  gameLoopsByLobbyId.delete(lobbyId);
+  mostRecentGameSnapshotByLobbyId.delete(lobbyId);
+  currentRoundGameEventsByLobbyId.delete(lobbyId);
+  roundStartSnapshotByLobbyId.delete(lobbyId);
+  supabaseGameIdByLobbyId.delete(lobbyId);
+  currentGameBotIdsByLobbyId.delete(lobbyId);
+
+  lobbiesById.delete(lobbyId);
+  io.emit('lobbyClosed', { lobbyId });
+
+  // Update Supabase if lobby was stale (not already finished in DB)
+  if (reason === 'stale' && SUPABASE_LOBBIES_ENABLED) {
+    try {
+      await getServiceClient()
+        .from('lobbies')
+        .update({ status: 'finished' })
+        .eq('id', lobbyId);
+    } catch (error) {
+      logger.error(`[cleanupLobby] Failed to update stale lobby in DB:`, error);
+    }
+  }
+
+  logger.info(
+    `[cleanupLobby] Removed ${reason} lobby ${lobby.name ?? lobbyId} (${lobbyId})`
+  );
+}
+
 function cleanupFinishedLobbies(): void {
   const now = Date.now();
+
+  // Collect lobbies to cleanup (can't modify map while iterating)
+  const lobbiesToCleanup: Array<{ lobbyId: string; lobby: Lobby; reason: 'finished' | 'stale' }> = [];
+
   lobbiesById.forEach((lobby, lobbyId) => {
-    if (lobby.status !== 'finished') {
+    // Check for stale lobbies (waiting/in_progress with no connections)
+    if (lobby.status !== 'finished' && isLobbyStale(lobby, now)) {
+      lobbiesToCleanup.push({ lobbyId, lobby, reason: 'stale' });
       return;
     }
 
-    const finishedAt = lobby.finishedAt ?? lobby.createdAt;
-    const lobbyIsEmpty = lobby.players.length === 0;
-    if (!lobbyIsEmpty && now - finishedAt < FINISHED_LOBBY_TTL_MS) {
-      return;
-    }
-
-    lobby.players.forEach(player => {
-      if (lobbyIdByPlayerId.get(player.playerId) === lobbyId) {
-        lobbyIdByPlayerId.delete(player.playerId);
+    // Check for finished lobbies past TTL
+    if (lobby.status === 'finished') {
+      const finishedAt = lobby.finishedAt ?? lobby.createdAt;
+      const lobbyIsEmpty = lobby.players.length === 0;
+      if (lobbyIsEmpty || now - finishedAt >= FINISHED_LOBBY_TTL_MS) {
+        lobbiesToCleanup.push({ lobbyId, lobby, reason: 'finished' });
       }
-    });
+    }
+  });
 
-    lobby.disconnectedPlayerIds.forEach(clearPlayerDisconnectTimer);
-    cleanupBots(lobbyId);
-    gameLoopsByLobbyId.delete(lobbyId);
-    mostRecentGameSnapshotByLobbyId.delete(lobbyId);
-    currentRoundGameEventsByLobbyId.delete(lobbyId);
-    roundStartSnapshotByLobbyId.delete(lobbyId);
-    supabaseGameIdByLobbyId.delete(lobbyId);
-    currentGameBotIdsByLobbyId.delete(lobbyId);
-
-    lobbiesById.delete(lobbyId);
-    io.emit('lobbyClosed', { lobbyId });
-    logger.info(`[cleanupFinishedLobbies] Removed finished lobby ${lobbyId}`);
+  // Cleanup collected lobbies
+  lobbiesToCleanup.forEach(({ lobbyId, lobby, reason }) => {
+    void cleanupLobby(lobbyId, lobby, reason);
   });
 }
 
