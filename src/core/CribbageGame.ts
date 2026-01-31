@@ -746,6 +746,46 @@ export class CribbageGame extends EventEmitter {
       return this.startNewPeggingRound();
     }
 
+    // BUG FIX: Check if this player just ran out of cards and all other players have said Go
+    // This handles the case where:
+    // - Player A says "Go" (can't play without exceeding 31)
+    // - Player B plays their last card (now has 0 cards)
+    // - No one can play anymore, so round should end with B getting last card point
+    if (player.peggingHand.length === 0) {
+      // Current player just ran out of cards
+      // Check if all other players with cards have said Go
+      const allOthersWithCardsHaveSaidGo = this.gameState.players
+        .filter(p => p.id !== playerId && p.peggingHand.length > 0)
+        .every(p => this.gameState.peggingGoPlayers.includes(p.id));
+
+      if (allOthersWithCardsHaveSaidGo) {
+        // All other players with cards have said Go, so this player gets last card point
+        logger.info(
+          `Player ${playerId} played their last card and all others with cards have said Go - awarding last card point`
+        );
+        this.updatePlayerScore(player, 1);
+        const lastCardBreakdown: ScoreBreakdownItem[] = [
+          {
+            type: 'LAST_CARD',
+            points: 1,
+            cards:
+              this.gameState.peggingStack.length > 0
+                ? this.gameState.peggingStack
+                : [],
+            description: 'Last card',
+          },
+        ];
+        this.recordGameEvent(
+          ActionType.LAST_CARD,
+          playerId,
+          null,
+          1,
+          lastCardBreakdown
+        );
+        return this.startNewPeggingRound();
+      }
+    }
+
     // if the sum of cards in the pegging stack is 31, end the pegging round
     if (sumOfPeggingStack(this.gameState.peggingStack) === 31) {
       // call resetPeggingRound to reset the pegging round and return the ID of last card player

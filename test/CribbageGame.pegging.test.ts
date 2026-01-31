@@ -849,6 +849,125 @@ describe('CribbageGame - Pegging Logic', () => {
     });
   });
 
+  describe('playCard - Bug: Player plays last card after opponent says Go', () => {
+    // This tests the specific bug where:
+    // 1. Player A says "Go" (can't play without exceeding 31)
+    // 2. Player B plays their last card (total becomes 30, B has 0 cards)
+    // 3. Round should end - B should get last card point
+    // But previously this would cause an infinite loop in GameLoop
+
+    let game: CribbageGame;
+
+    beforeEach(() => {
+      game = new CribbageGame([
+        { id: 'p1', name: 'Player 1' },
+        { id: 'p2', name: 'Player 2' },
+      ]);
+      game.setPhase(Phase.PEGGING, ActionType.BEGIN_PHASE);
+    });
+
+    it('should award last card point when player plays last card after opponent said Go (total < 31)', () => {
+      const state = game.getGameState();
+      const p1 = state.players[0];
+      const p2 = state.players[1];
+
+      // Setup: Stack at 20, p1 has a King (would make 30), p2 has a Ten
+      // p1 says Go, then p2 plays their last card making it 30
+      p1.peggingHand = ['KING_SPADES']; // Has card but can't play after saying Go
+      p2.peggingHand = ['TEN_HEARTS']; // Will play this as their last card
+      state.peggingStack = ['FIVE_SPADES', 'SIX_CLUBS', 'NINE_DIAMONDS']; // Total = 20
+      state.peggingTotal = 20;
+      state.peggingLastCardPlayer = null;
+      state.peggingGoPlayers = [];
+
+      // p1 says Go (King would make 30, which is valid, but let's say they can't play)
+      // Actually, for this test, let's make the stack at 22 so King would exceed 31
+      state.peggingStack = ['FIVE_SPADES', 'SEVEN_CLUBS', 'TEN_DIAMONDS']; // Total = 22
+      state.peggingTotal = 22;
+
+      // p1 says Go (King=10 would make 32 > 31)
+      game.playCard('p1', null);
+      expect(state.peggingGoPlayers).toContain('p1');
+
+      // p2 plays their last card (Ten makes 32, but wait - that's > 31)
+      // Let me fix this: p2 has an 8, making it 30
+      p2.peggingHand = ['EIGHT_HEARTS'];
+      const result = game.playCard('p2', 'EIGHT_HEARTS');
+
+      // p2 played their last card (now has 0 cards)
+      // p1 has already said Go
+      // Round should end - p2 gets last card point
+      expect(result).toBe('p2'); // Round over, p2 was last card player
+      expect(p2.score).toBe(1); // Got 1 point for last card
+      expect(state.peggingStack.length).toBe(0); // Stack cleared
+      expect(state.peggingGoPlayers.length).toBe(0); // Go players cleared
+    });
+
+    it('should award last card point when player plays last card and all others already said Go (stack at 30)', () => {
+      const state = game.getGameState();
+      const p1 = state.players[0];
+      const p2 = state.players[1];
+
+      // The exact bug scenario from the user report:
+      // - Papa (p1) says Go
+      // - User (p2) plays last card making stack = 30
+      // - p2 has 0 cards, p1 said Go, round should end
+
+      p1.peggingHand = ['KING_SPADES']; // Has card but already said Go
+      p2.peggingHand = ['TWO_HEARTS']; // Will play this as their last card
+      state.peggingStack = ['TEN_SPADES', 'EIGHT_CLUBS', 'TEN_DIAMONDS']; // Total = 28
+      state.peggingTotal = 28;
+      state.peggingGoPlayers = [];
+
+      // p1 says Go (King=10 would make 38 > 31)
+      game.playCard('p1', null);
+      expect(state.peggingGoPlayers).toContain('p1');
+
+      // p2 plays their last card (Two makes 30)
+      const result = game.playCard('p2', 'TWO_HEARTS');
+
+      // Stack is now 30, p2 has 0 cards, p1 already said Go
+      // p1 can't play (already said Go)
+      // p2 can't play (has no cards)
+      // Round should end with p2 getting last card point
+      expect(result).toBe('p2'); // Round over
+      expect(p2.score).toBe(1); // Got 1 point for last card
+      expect(state.peggingStack.length).toBe(0); // Stack cleared
+    });
+
+    it('should handle 3-player scenario: one says Go, another plays last card, third has already said Go', () => {
+      game = new CribbageGame([
+        { id: 'p1', name: 'Player 1' },
+        { id: 'p2', name: 'Player 2' },
+        { id: 'p3', name: 'Player 3' },
+      ]);
+      game.setPhase(Phase.PEGGING, ActionType.BEGIN_PHASE);
+      const state = game.getGameState();
+      const p1 = state.players[0];
+      const p2 = state.players[1];
+      const p3 = state.players[2];
+
+      p1.peggingHand = ['KING_SPADES']; // Has card but will say Go
+      p2.peggingHand = ['QUEEN_HEARTS']; // Has card but will say Go
+      p3.peggingHand = ['ACE_CLUBS']; // Will play this as their last card
+      state.peggingStack = ['TEN_SPADES', 'EIGHT_CLUBS', 'TEN_DIAMONDS']; // Total = 28
+      state.peggingTotal = 28;
+      state.peggingGoPlayers = [];
+
+      // p1 says Go
+      game.playCard('p1', null);
+      // p2 says Go
+      game.playCard('p2', null);
+      // p3 plays their last card (Ace makes 29)
+      const result = game.playCard('p3', 'ACE_CLUBS');
+
+      // p3 played last card (0 cards), p1 and p2 said Go
+      // Round should end, p3 gets last card point
+      expect(result).toBe('p3');
+      expect(p3.score).toBe(1);
+    });
+  });
+
   describe('playCard - Players Out of Cards During Turn', () => {
     let game: CribbageGame;
 
