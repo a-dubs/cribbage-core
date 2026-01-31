@@ -357,8 +357,12 @@ async function createSupabaseGameForLobby(
   playersInfo: PlayerIdAndName[],
   gameLoop: GameLoop
 ): Promise<string | null> {
-  if (!SUPABASE_AUTH_ENABLED) return null;
+  if (!SUPABASE_AUTH_ENABLED) {
+    logger.debug('[Supabase] Game record creation skipped: SUPABASE_AUTH_ENABLED is false');
+    return null;
+  }
   try {
+    logger.info(`[Supabase] Creating game record for lobby ${lobby.id} with ${playersInfo.length} players`);
     const gameId = await createGameRecord({
       lobbyId: lobby.id,
       players: mapPlayersForGameRecord(playersInfo),
@@ -366,9 +370,10 @@ async function createSupabaseGameForLobby(
       startedAt: new Date(),
     });
     supabaseGameIdByLobbyId.set(lobby.id, gameId);
+    logger.info(`[Supabase] Created game record ${gameId} for lobby ${lobby.id}`);
     return gameId;
   } catch (error) {
-    logger.error('[Supabase] Failed to create game record', error);
+    logger.error(`[Supabase] Failed to create game record for lobby ${lobby.id}`, error);
     return null;
   }
 }
@@ -403,12 +408,26 @@ async function persistRoundHistory(
   latestSnapshot: GameSnapshot
 ): Promise<void> {
   const supabaseGameId = supabaseGameIdByLobbyId.get(lobbyId);
-  if (!SUPABASE_AUTH_ENABLED || !supabaseGameId) return;
+  if (!SUPABASE_AUTH_ENABLED) {
+    logger.debug('[Supabase] Persistence skipped: SUPABASE_AUTH_ENABLED is false');
+    return;
+  }
+  if (!supabaseGameId) {
+    logger.warn(`[Supabase] Persistence skipped: No game ID found for lobby ${lobbyId}`);
+    return;
+  }
 
   // Atomically capture and clear events to prevent race conditions
   // If START_ROUND fires during persistence, it won't be lost
   const roundEvents = currentRoundGameEventsByLobbyId.get(lobbyId) ?? [];
-  if (roundEvents.length === 0) return;
+  if (roundEvents.length === 0) {
+    logger.debug(`[Supabase] Persistence skipped: No events to persist for lobby ${lobbyId}`);
+    return;
+  }
+
+  logger.info(
+    `[Supabase] Persisting ${roundEvents.length} events for game ${supabaseGameId} (lobby ${lobbyId})`
+  );
 
   // Clear immediately before async operation to prevent race conditions
   currentRoundGameEventsByLobbyId.set(lobbyId, []);
@@ -427,13 +446,24 @@ async function persistRoundHistory(
     };
   });
 
+  const snapshotsToStore = eventsWithSnapshots.filter(e => e.storeSnapshot).length;
+  if (snapshotsToStore > 0) {
+    logger.info(`[Supabase] Will store ${snapshotsToStore} snapshots along with events`);
+  }
+
   try {
     await persistGameEvents({
       gameId: supabaseGameId,
       events: eventsWithSnapshots,
     });
+    logger.info(
+      `[Supabase] Successfully persisted ${roundEvents.length} events for game ${supabaseGameId}`
+    );
   } catch (error) {
-    logger.error('[Supabase] Failed to persist round history', error);
+    logger.error(
+      `[Supabase] Failed to persist round history for game ${supabaseGameId}`,
+      error
+    );
     // Note: Events are already cleared, so they won't be retried
     // This is acceptable since persistence failures are logged for monitoring
   }
@@ -1305,17 +1335,33 @@ async function startLobbyGameForHost(
         ? [newSnapshot.gameEvent]
         : updatedEvents;
       if (isStartRound) {
+        logger.debug(
+          `[Supabase] START_ROUND detected, resetting event collection for lobby ${lobby.id}`
+        );
         roundStartSnapshotByLobbyId.set(lobby.id, newSnapshot);
         currentRoundGameEventsByLobbyId.set(lobby.id, roundEvents);
       } else {
         currentRoundGameEventsByLobbyId.set(lobby.id, updatedEvents);
+        logger.debug(
+          `[Supabase] Collected event ${newSnapshot.gameEvent.actionType} (lobby ${lobby.id}, total events: ${updatedEvents.length})`
+        );
       }
 
       if (
         newSnapshot.gameEvent.actionType === ActionType.READY_FOR_NEXT_ROUND ||
         newSnapshot.gameEvent.actionType === ActionType.WIN
       ) {
-        void persistRoundHistory(lobby.id, newSnapshot);
+        const eventsToPersist = currentRoundGameEventsByLobbyId.get(lobby.id) || [];
+        logger.info(
+          `[Supabase] Triggering persistence for ${newSnapshot.gameEvent.actionType} (lobby ${lobby.id}, ${eventsToPersist.length} events collected)`
+        );
+        // Use void to fire-and-forget, but ensure errors are logged in persistRoundHistory
+        void persistRoundHistory(lobby.id, newSnapshot).catch(error => {
+          logger.error(
+            `[Supabase] Unhandled error in persistRoundHistory for lobby ${lobby.id}`,
+            error
+          );
+        });
       }
 
       // Send redacted snapshots to all players
@@ -2160,17 +2206,33 @@ async function handleRestartGame(socket: Socket): Promise<void> {
       newSnapshot.gameEvent.actionType === ActionType.START_ROUND;
     const roundEvents = isStartRound ? [newSnapshot.gameEvent] : updatedEvents;
     if (isStartRound) {
+      logger.debug(
+        `[Supabase] START_ROUND detected, resetting event collection for lobby ${lobby.id}`
+      );
       roundStartSnapshotByLobbyId.set(lobby.id, newSnapshot);
       currentRoundGameEventsByLobbyId.set(lobby.id, roundEvents);
     } else {
       currentRoundGameEventsByLobbyId.set(lobby.id, updatedEvents);
+      logger.debug(
+        `[Supabase] Collected event ${newSnapshot.gameEvent.actionType} (lobby ${lobby.id}, total events: ${updatedEvents.length})`
+      );
     }
 
     if (
       newSnapshot.gameEvent.actionType === ActionType.READY_FOR_NEXT_ROUND ||
       newSnapshot.gameEvent.actionType === ActionType.WIN
     ) {
-      void persistRoundHistory(lobby.id, newSnapshot);
+      const eventsToPersist = currentRoundGameEventsByLobbyId.get(lobby.id) || [];
+      logger.info(
+        `[Supabase] Triggering persistence for ${newSnapshot.gameEvent.actionType} (lobby ${lobby.id}, ${eventsToPersist.length} events collected)`
+      );
+      // Use void to fire-and-forget, but ensure errors are logged in persistRoundHistory
+      void persistRoundHistory(lobby.id, newSnapshot).catch(error => {
+        logger.error(
+          `[Supabase] Unhandled error in persistRoundHistory for lobby ${lobby.id}`,
+          error
+        );
+      });
     }
 
     // Send redacted snapshots to all players

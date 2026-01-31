@@ -1465,7 +1465,10 @@ export async function persistGameEvents(params: {
   gameId: string;
   events: PersistedEvent[];
 }): Promise<void> {
-  if (!params.events.length) return;
+  if (!params.events.length) {
+    console.log('[Supabase] persistGameEvents called with no events');
+    return;
+  }
   const client = getServiceClient();
   const rows = params.events.map(({ event }) => ({
     game_id: params.gameId,
@@ -1482,13 +1485,24 @@ export async function persistGameEvents(params: {
         : new Date(event.timestamp).toISOString(),
   }));
 
+  console.log(
+    `[Supabase] Inserting ${rows.length} events for game ${params.gameId}. Action types: ${rows.map(r => r.action_type).join(', ')}`
+  );
+
   const { data, error } = await client
     .from('game_events')
     .insert(rows)
     .select('id, snapshot_id');
   if (error) {
-    throw new Error(error.message);
+    console.error('[Supabase] Error inserting game events:', error);
+    throw new Error(`Failed to insert game events: ${error.message}`);
   }
+
+  if (!data || data.length === 0) {
+    throw new Error('No events were inserted (empty response from Supabase)');
+  }
+
+  console.log(`[Supabase] Successfully inserted ${data.length} events`);
 
   const snapshotsPayload: Array<{
     game_id: string;
@@ -1510,12 +1524,15 @@ export async function persistGameEvents(params: {
   }
 
   if (snapshotsPayload.length > 0) {
+    console.log(`[Supabase] Inserting ${snapshotsPayload.length} snapshots`);
     const { error: snapError } = await client
       .from('game_snapshots')
       .insert(snapshotsPayload);
     if (snapError) {
-      throw new Error(snapError.message);
+      console.error('[Supabase] Error inserting snapshots:', snapError);
+      throw new Error(`Failed to insert snapshots: ${snapError.message}`);
     }
+    console.log(`[Supabase] Successfully inserted ${snapshotsPayload.length} snapshots`);
   }
 }
 
