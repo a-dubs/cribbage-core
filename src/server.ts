@@ -1076,17 +1076,43 @@ function handleJoinLobby(
 
   const { lobbyId } = data;
 
-  // Check if player is already in a lobby
-  if (lobbyIdByPlayerId.has(playerId)) {
-    logger.error('Player already in a lobby:', playerId);
-    const error = { error: 'Already in a lobby' };
-    if (callback) callback(error);
-    socket.emit('error', { message: 'Already in a lobby' });
-    return;
+  // Check if player is already in a lobby (in-memory check first for speed)
+  const memoryLobbyId = lobbyIdByPlayerId.get(playerId);
+  if (memoryLobbyId) {
+    // Allow rejoining the same lobby (idempotent)
+    if (memoryLobbyId === lobbyId) {
+      logger.info(
+        `[handleJoinLobby] Player ${playerId} rejoining same lobby ${lobbyId}`
+      );
+      // Fall through to allow the join (will be idempotent in Supabase)
+    } else {
+      logger.error(
+        `[handleJoinLobby] Player ${playerId} already in lobby ${memoryLobbyId} (in-memory)`
+      );
+      const error = { error: 'Already in a lobby', lobbyId: memoryLobbyId };
+      if (callback) callback(error);
+      socket.emit('error', { message: 'Already in a lobby' });
+      return;
+    }
   }
 
   const joinLobby = async (): Promise<void> => {
     try {
+      // Defense in depth: Check DB for existing lobby membership in a DIFFERENT lobby
+      // Exclude the target lobby since joining the same lobby is allowed (idempotent)
+      const existingLobbyId = await getPlayerActiveLobbyId(playerId, lobbyId);
+      if (existingLobbyId) {
+        // Sync in-memory map with DB state
+        lobbyIdByPlayerId.set(playerId, existingLobbyId);
+        logger.warn(
+          `[handleJoinLobby] Player ${playerId} already in different lobby ${existingLobbyId} (DB check)`
+        );
+        const error = { error: 'Already in a lobby', lobbyId: existingLobbyId };
+        if (callback) callback(error);
+        socket.emit('error', { message: 'Already in a lobby' });
+        return;
+      }
+
       const joined = await joinLobbyInSupabase({ lobbyId, playerId });
       const mappedLobby = cacheLobbyFromPayload(joined);
       lobbyIdByPlayerId.set(playerId, lobbyId);
@@ -1130,6 +1156,11 @@ function handleLeaveLobby(
 
   const { lobbyId } = data;
 
+  // Get current lobby state to detect host transfer
+  const lobbyBefore = lobbiesById.get(lobbyId);
+  const previousHostId = lobbyBefore?.hostId;
+  const wasHost = previousHostId === playerId;
+
   const leave = async (): Promise<void> => {
     try {
       const updatedLobby = await leaveLobbyInSupabase({ lobbyId, playerId });
@@ -1149,6 +1180,21 @@ function handleLeaveLobby(
           removeLobbyFromCache(lobbyId);
           io.emit('lobbyClosed', { lobbyId });
         } else {
+          // Check if host was transferred
+          if (wasHost && mapped.hostId && mapped.hostId !== previousHostId) {
+            const newHostPlayer = mapped.players.find(
+              p => p.playerId === mapped.hostId
+            );
+            logger.info(
+              `[handleLeaveLobby] Host transferred from ${previousHostId} to ${mapped.hostId} (${newHostPlayer?.displayName})`
+            );
+            io.to(lobbyId).emit('hostTransferred', {
+              lobbyId,
+              newHostId: mapped.hostId,
+              newHostName: newHostPlayer?.displayName ?? 'Unknown',
+              previousHostId,
+            });
+          }
           io.emit('lobbyUpdated', mapped);
         }
       } else {
@@ -1771,13 +1817,13 @@ function handleCreateLobby(
     return;
   }
 
-  // Check if player is already in a lobby
+  // Check if player is already in a lobby (in-memory check first for speed)
   if (lobbyIdByPlayerId.has(playerId)) {
     const existingLobbyId = lobbyIdByPlayerId.get(playerId);
     logger.error(
-      `[handleCreateLobby] Player ${playerId} already in lobby ${existingLobbyId}`
+      `[handleCreateLobby] Player ${playerId} already in lobby ${existingLobbyId} (in-memory)`
     );
-    const error = { error: 'Already in a lobby' };
+    const error = { error: 'Already in a lobby', lobbyId: existingLobbyId };
     if (callback) {
       logger.info(
         '[handleCreateLobby] Sending error callback: Already in a lobby'
@@ -1813,6 +1859,21 @@ function handleCreateLobby(
 
   const createLobbyAsync = async (): Promise<void> => {
     try {
+      // Defense in depth: Check DB for existing lobby membership
+      // This catches cases where in-memory map is out of sync (e.g., after server restart)
+      const existingLobbyId = await getPlayerActiveLobbyId(playerId);
+      if (existingLobbyId) {
+        // Sync in-memory map with DB state
+        lobbyIdByPlayerId.set(playerId, existingLobbyId);
+        logger.warn(
+          `[handleCreateLobby] Player ${playerId} already in lobby ${existingLobbyId} (DB check)`
+        );
+        const error = { error: 'Already in a lobby', lobbyId: existingLobbyId };
+        if (callback) callback(error);
+        socket.emit('error', { message: 'Already in a lobby' });
+        return;
+      }
+
       const created = await createLobby({
         hostId: playerId,
         name: lobbyName,
