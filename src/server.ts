@@ -358,11 +358,15 @@ async function createSupabaseGameForLobby(
   gameLoop: GameLoop
 ): Promise<string | null> {
   if (!SUPABASE_AUTH_ENABLED) {
-    logger.debug('[Supabase] Game record creation skipped: SUPABASE_AUTH_ENABLED is false');
+    logger.debug(
+      '[Supabase] Game record creation skipped: SUPABASE_AUTH_ENABLED is false'
+    );
     return null;
   }
   try {
-    logger.info(`[Supabase] Creating game record for lobby ${lobby.id} with ${playersInfo.length} players`);
+    logger.info(
+      `[Supabase] Creating game record for lobby ${lobby.id} with ${playersInfo.length} players`
+    );
     const gameId = await createGameRecord({
       lobbyId: lobby.id,
       players: mapPlayersForGameRecord(playersInfo),
@@ -370,10 +374,15 @@ async function createSupabaseGameForLobby(
       startedAt: new Date(),
     });
     supabaseGameIdByLobbyId.set(lobby.id, gameId);
-    logger.info(`[Supabase] Created game record ${gameId} for lobby ${lobby.id}`);
+    logger.info(
+      `[Supabase] Created game record ${gameId} for lobby ${lobby.id}`
+    );
     return gameId;
   } catch (error) {
-    logger.error(`[Supabase] Failed to create game record for lobby ${lobby.id}`, error);
+    logger.error(
+      `[Supabase] Failed to create game record for lobby ${lobby.id}`,
+      error
+    );
     return null;
   }
 }
@@ -409,11 +418,15 @@ async function persistRoundHistory(
 ): Promise<void> {
   const supabaseGameId = supabaseGameIdByLobbyId.get(lobbyId);
   if (!SUPABASE_AUTH_ENABLED) {
-    logger.debug('[Supabase] Persistence skipped: SUPABASE_AUTH_ENABLED is false');
+    logger.debug(
+      '[Supabase] Persistence skipped: SUPABASE_AUTH_ENABLED is false'
+    );
     return;
   }
   if (!supabaseGameId) {
-    logger.warn(`[Supabase] Persistence skipped: No game ID found for lobby ${lobbyId}`);
+    logger.warn(
+      `[Supabase] Persistence skipped: No game ID found for lobby ${lobbyId}`
+    );
     return;
   }
 
@@ -421,7 +434,9 @@ async function persistRoundHistory(
   // If START_ROUND fires during persistence, it won't be lost
   const roundEvents = currentRoundGameEventsByLobbyId.get(lobbyId) ?? [];
   if (roundEvents.length === 0) {
-    logger.debug(`[Supabase] Persistence skipped: No events to persist for lobby ${lobbyId}`);
+    logger.debug(
+      `[Supabase] Persistence skipped: No events to persist for lobby ${lobbyId}`
+    );
     return;
   }
 
@@ -446,9 +461,13 @@ async function persistRoundHistory(
     };
   });
 
-  const snapshotsToStore = eventsWithSnapshots.filter(e => e.storeSnapshot).length;
+  const snapshotsToStore = eventsWithSnapshots.filter(
+    e => e.storeSnapshot
+  ).length;
   if (snapshotsToStore > 0) {
-    logger.info(`[Supabase] Will store ${snapshotsToStore} snapshots along with events`);
+    logger.info(
+      `[Supabase] Will store ${snapshotsToStore} snapshots along with events`
+    );
   }
 
   try {
@@ -708,6 +727,19 @@ registerHttpApi(app, {
   onLobbyClosed: lobbyId => {
     removeLobbyFromCache(lobbyId);
     io.emit('lobbyClosed', { lobbyId });
+  },
+  onPlayerLeftLobby: (playerId, lobbyId) => {
+    // Clear in-memory lobby membership when player leaves via HTTP API
+    lobbyIdByPlayerId.delete(playerId);
+    // Make the player's socket leave the lobby room
+    const socketId = playerIdToSocketId.get(playerId);
+    if (socketId) {
+      const socket = io.sockets.sockets.get(socketId);
+      socket?.leave(lobbyId);
+    }
+    logger.info(
+      `Player ${playerId} left lobby ${lobbyId} via HTTP API - cleared in-memory state`
+    );
   },
   onStartLobbyGame: (lobbyId, hostId) => startLobbyGameForHost(lobbyId, hostId),
 });
@@ -1351,7 +1383,8 @@ async function startLobbyGameForHost(
         newSnapshot.gameEvent.actionType === ActionType.READY_FOR_NEXT_ROUND ||
         newSnapshot.gameEvent.actionType === ActionType.WIN
       ) {
-        const eventsToPersist = currentRoundGameEventsByLobbyId.get(lobby.id) || [];
+        const eventsToPersist =
+          currentRoundGameEventsByLobbyId.get(lobby.id) || [];
         logger.info(
           `[Supabase] Triggering persistence for ${newSnapshot.gameEvent.actionType} (lobby ${lobby.id}, ${eventsToPersist.length} events collected)`
         );
@@ -2222,7 +2255,8 @@ async function handleRestartGame(socket: Socket): Promise<void> {
       newSnapshot.gameEvent.actionType === ActionType.READY_FOR_NEXT_ROUND ||
       newSnapshot.gameEvent.actionType === ActionType.WIN
     ) {
-      const eventsToPersist = currentRoundGameEventsByLobbyId.get(lobby.id) || [];
+      const eventsToPersist =
+        currentRoundGameEventsByLobbyId.get(lobby.id) || [];
       logger.info(
         `[Supabase] Triggering persistence for ${newSnapshot.gameEvent.actionType} (lobby ${lobby.id}, ${eventsToPersist.length} events collected)`
       );

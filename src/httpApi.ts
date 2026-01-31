@@ -53,6 +53,7 @@ const SUPABASE_LOBBIES_ENABLED =
 type HttpApiHooks = {
   onLobbyUpdated?: (lobby: LobbyPayload) => void;
   onLobbyClosed?: (lobbyId: string) => void;
+  onPlayerLeftLobby?: (playerId: string, lobbyId: string) => void;
   onStartLobbyGame?: (
     lobbyId: string,
     hostId: string
@@ -393,6 +394,8 @@ export function registerHttpApi(
       }
       try {
         const lobby = await leaveLobby({ lobbyId, playerId: req.userId });
+        // Clear in-memory state for this player leaving the lobby
+        hooks?.onPlayerLeftLobby?.(req.userId, lobbyId);
         if (
           lobby?.status === 'finished' ||
           (lobby?.current_players ?? 0) === 0
