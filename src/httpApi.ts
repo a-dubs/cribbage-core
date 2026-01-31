@@ -756,12 +756,24 @@ export function registerHttpApi(
         const message =
           error instanceof Error ? error.message : 'Failed to send request';
         let status = 400;
+        let errorType = 'FRIEND_REQUEST_FAILED';
+
         if (message === 'NOT_FOUND') {
           status = 404;
         } else if (message === 'CANNOT_ADD_SELF') {
           status = 400;
+        } else if (message === 'ALREADY_FRIENDS') {
+          status = 409;
+          errorType = 'ALREADY_FRIENDS';
+        } else if (message === 'ALREADY_SENT_REQUEST') {
+          status = 409;
+          errorType = 'ALREADY_SENT_REQUEST';
+        } else if (message === 'INCOMING_REQUEST_EXISTS') {
+          status = 409;
+          errorType = 'INCOMING_REQUEST_EXISTS';
         }
-        res.status(status).json({ error: 'FRIEND_REQUEST_FAILED', message });
+
+        res.status(status).json({ error: errorType, message });
       }
     }
   );
@@ -797,12 +809,24 @@ export function registerHttpApi(
             ? error.message
             : 'Failed to send request from lobby';
         let status = 400;
+        let errorType = 'FRIEND_REQUEST_FAILED';
+
         if (message === 'NOT_IN_LOBBY') {
           status = 403;
         } else if (message === 'CANNOT_ADD_SELF') {
           status = 400;
+        } else if (message === 'ALREADY_FRIENDS') {
+          status = 409;
+          errorType = 'ALREADY_FRIENDS';
+        } else if (message === 'ALREADY_SENT_REQUEST') {
+          status = 409;
+          errorType = 'ALREADY_SENT_REQUEST';
+        } else if (message === 'INCOMING_REQUEST_EXISTS') {
+          status = 409;
+          errorType = 'INCOMING_REQUEST_EXISTS';
         }
-        res.status(status).json({ error: 'FRIEND_REQUEST_FAILED', message });
+
+        res.status(status).json({ error: errorType, message });
       }
     }
   );

@@ -643,6 +643,125 @@ describe('httpApi', () => {
 
         expect(response.status).toBe(404);
       });
+
+      it('returns 409 ALREADY_FRIENDS when already friends', async () => {
+        mockedSupabaseService.sendFriendRequest.mockRejectedValue(
+          new Error('ALREADY_FRIENDS')
+        );
+
+        const response = await request(app)
+          .post('/friends/requests')
+          .set('Authorization', 'Bearer valid-token')
+          .send({ recipientUsername: 'existingfriend' });
+
+        expect(response.status).toBe(409);
+        expect(response.body.error).toBe('ALREADY_FRIENDS');
+      });
+
+      it('returns 409 ALREADY_SENT_REQUEST when request already sent', async () => {
+        mockedSupabaseService.sendFriendRequest.mockRejectedValue(
+          new Error('ALREADY_SENT_REQUEST')
+        );
+
+        const response = await request(app)
+          .post('/friends/requests')
+          .set('Authorization', 'Bearer valid-token')
+          .send({ recipientUsername: 'targetuser' });
+
+        expect(response.status).toBe(409);
+        expect(response.body.error).toBe('ALREADY_SENT_REQUEST');
+      });
+
+      it('returns 409 INCOMING_REQUEST_EXISTS when target already sent a request', async () => {
+        mockedSupabaseService.sendFriendRequest.mockRejectedValue(
+          new Error('INCOMING_REQUEST_EXISTS')
+        );
+
+        const response = await request(app)
+          .post('/friends/requests')
+          .set('Authorization', 'Bearer valid-token')
+          .send({ recipientUsername: 'targetuser' });
+
+        expect(response.status).toBe(409);
+        expect(response.body.error).toBe('INCOMING_REQUEST_EXISTS');
+      });
+    });
+
+    describe('POST /friends/requests/from-lobby', () => {
+      it('sends a friend request from lobby', async () => {
+        const friendRequest = {
+          id: 'request-123',
+          sender_id: mockUserId,
+          recipient_id: 'target-123',
+          status: 'pending' as const,
+          created_at: new Date().toISOString(),
+        };
+
+        mockedSupabaseService.sendFriendRequestFromLobby.mockResolvedValue(friendRequest);
+
+        const response = await request(app)
+          .post('/friends/requests/from-lobby')
+          .set('Authorization', 'Bearer valid-token')
+          .send({ lobbyId: 'lobby-123', targetUserId: 'target-123' });
+
+        expect(response.status).toBe(201);
+        expect(response.body.request.status).toBe('pending');
+      });
+
+      it('returns 409 ALREADY_FRIENDS when already friends', async () => {
+        mockedSupabaseService.sendFriendRequestFromLobby.mockRejectedValue(
+          new Error('ALREADY_FRIENDS')
+        );
+
+        const response = await request(app)
+          .post('/friends/requests/from-lobby')
+          .set('Authorization', 'Bearer valid-token')
+          .send({ lobbyId: 'lobby-123', targetUserId: 'target-123' });
+
+        expect(response.status).toBe(409);
+        expect(response.body.error).toBe('ALREADY_FRIENDS');
+      });
+
+      it('returns 409 ALREADY_SENT_REQUEST when request already sent', async () => {
+        mockedSupabaseService.sendFriendRequestFromLobby.mockRejectedValue(
+          new Error('ALREADY_SENT_REQUEST')
+        );
+
+        const response = await request(app)
+          .post('/friends/requests/from-lobby')
+          .set('Authorization', 'Bearer valid-token')
+          .send({ lobbyId: 'lobby-123', targetUserId: 'target-123' });
+
+        expect(response.status).toBe(409);
+        expect(response.body.error).toBe('ALREADY_SENT_REQUEST');
+      });
+
+      it('returns 409 INCOMING_REQUEST_EXISTS when target already sent a request', async () => {
+        mockedSupabaseService.sendFriendRequestFromLobby.mockRejectedValue(
+          new Error('INCOMING_REQUEST_EXISTS')
+        );
+
+        const response = await request(app)
+          .post('/friends/requests/from-lobby')
+          .set('Authorization', 'Bearer valid-token')
+          .send({ lobbyId: 'lobby-123', targetUserId: 'target-123' });
+
+        expect(response.status).toBe(409);
+        expect(response.body.error).toBe('INCOMING_REQUEST_EXISTS');
+      });
+
+      it('returns 403 when not in lobby', async () => {
+        mockedSupabaseService.sendFriendRequestFromLobby.mockRejectedValue(
+          new Error('NOT_IN_LOBBY')
+        );
+
+        const response = await request(app)
+          .post('/friends/requests/from-lobby')
+          .set('Authorization', 'Bearer valid-token')
+          .send({ lobbyId: 'lobby-123', targetUserId: 'target-123' });
+
+        expect(response.status).toBe(403);
+      });
     });
 
     describe('POST /friends/requests/:id/respond', () => {

@@ -180,6 +180,31 @@ async function areFriends(
   return !!data;
 }
 
+/**
+ * Check for existing pending friend request between two users (either direction)
+ * Returns the request if found, null otherwise
+ */
+async function findPendingFriendRequest(
+  userId1: string,
+  userId2: string,
+  client: SupabaseClient = getServiceClient()
+): Promise<FriendRequest | null> {
+  const { data, error } = await client
+    .from('friend_requests')
+    .select('*')
+    .eq('status', 'pending')
+    .or(
+      `and(sender_id.eq.${userId1},recipient_id.eq.${userId2}),and(sender_id.eq.${userId2},recipient_id.eq.${userId1})`
+    )
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as FriendRequest | null;
+}
+
 function publicAvatarUrl(path: string): string {
   const supabase = getServiceClient();
   const { data } = supabase.storage.from('avatars').getPublicUrl(path);
@@ -1040,16 +1065,40 @@ export async function sendFriendRequest(params: {
     throw new Error('NOT_FOUND');
   }
 
+  const recipientId = recipientProfile.id;
+
   // Prevent self-friending
-  if (params.senderId === recipientProfile.id) {
+  if (params.senderId === recipientId) {
     throw new Error('CANNOT_ADD_SELF');
+  }
+
+  // Check if already friends
+  const alreadyFriends = await areFriends(params.senderId, recipientId, client);
+  if (alreadyFriends) {
+    throw new Error('ALREADY_FRIENDS');
+  }
+
+  // Check for existing pending request in either direction
+  const existingRequest = await findPendingFriendRequest(
+    params.senderId,
+    recipientId,
+    client
+  );
+  if (existingRequest) {
+    if (existingRequest.sender_id === params.senderId) {
+      // Sender already sent a request to this recipient
+      throw new Error('ALREADY_SENT_REQUEST');
+    } else {
+      // Recipient already sent a request to sender - they should accept instead
+      throw new Error('INCOMING_REQUEST_EXISTS');
+    }
   }
 
   const { data, error } = await client
     .from('friend_requests')
     .insert({
       sender_id: params.senderId,
-      recipient_id: recipientProfile.id,
+      recipient_id: recipientId,
     })
     .select('*')
     .single();
@@ -1095,6 +1144,23 @@ export async function respondToFriendRequest(params: {
     });
     if (friendshipError) {
       throw new Error(friendshipError.message);
+    }
+
+    // Clean up all pending requests between these two users (handles edge case
+    // where both users sent requests to each other)
+    const { error: cleanupError } = await client
+      .from('friend_requests')
+      .delete()
+      .eq('status', 'pending')
+      .or(
+        `and(sender_id.eq.${params.recipientId},recipient_id.eq.${senderId}),and(sender_id.eq.${senderId},recipient_id.eq.${params.recipientId})`
+      );
+    if (cleanupError) {
+      // Log but don't fail - friendship was created successfully
+      console.warn(
+        'Failed to cleanup pending friend requests:',
+        cleanupError.message
+      );
     }
   }
 }
@@ -1144,6 +1210,33 @@ export async function sendFriendRequestFromLobby(params: {
   if (!senderInLobby || !targetInLobby) {
     throw new Error('NOT_IN_LOBBY');
   }
+
+  // Check if already friends
+  const alreadyFriends = await areFriends(
+    params.senderId,
+    params.targetUserId,
+    client
+  );
+  if (alreadyFriends) {
+    throw new Error('ALREADY_FRIENDS');
+  }
+
+  // Check for existing pending request in either direction
+  const existingRequest = await findPendingFriendRequest(
+    params.senderId,
+    params.targetUserId,
+    client
+  );
+  if (existingRequest) {
+    if (existingRequest.sender_id === params.senderId) {
+      // Sender already sent a request to this target
+      throw new Error('ALREADY_SENT_REQUEST');
+    } else {
+      // Target already sent a request to sender - they should accept instead
+      throw new Error('INCOMING_REQUEST_EXISTS');
+    }
+  }
+
   const { data, error } = await client
     .from('friend_requests')
     .insert({
@@ -1486,7 +1579,9 @@ export async function persistGameEvents(params: {
   }));
 
   console.log(
-    `[Supabase] Inserting ${rows.length} events for game ${params.gameId}. Action types: ${rows.map(r => r.action_type).join(', ')}`
+    `[Supabase] Inserting ${rows.length} events for game ${
+      params.gameId
+    }. Action types: ${rows.map(r => r.action_type).join(', ')}`
   );
 
   const { data, error } = await client
@@ -1532,7 +1627,9 @@ export async function persistGameEvents(params: {
       console.error('[Supabase] Error inserting snapshots:', snapError);
       throw new Error(`Failed to insert snapshots: ${snapError.message}`);
     }
-    console.log(`[Supabase] Successfully inserted ${snapshotsPayload.length} snapshots`);
+    console.log(
+      `[Supabase] Successfully inserted ${snapshotsPayload.length} snapshots`
+    );
   }
 }
 
