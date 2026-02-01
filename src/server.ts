@@ -302,6 +302,173 @@ app.get('/connected-players', (_req, res) => {
   res.status(200).json(playersIdAndName);
 });
 
+// Test-only endpoint for resetting server state between E2E tests
+// Only available in non-production environments
+if (process.env.NODE_ENV !== 'production') {
+  interface TestResetRequest {
+    userId?: string;
+    scopes: Array<'lobbies' | 'games' | 'connections' | 'all'>;
+  }
+
+  interface TestResetResponse {
+    success: boolean;
+    cleared: {
+      lobbies?: number;
+      games?: number;
+      connections?: number;
+      players?: string[];
+    };
+  }
+
+  app.post('/api/test/reset', (req, res) => {
+    const { userId, scopes = ['all'] } = req.body as TestResetRequest;
+
+    logger.info(
+      `[TEST] Reset requested - userId: ${userId ?? 'all'}, scopes: ${scopes.join(', ')}`
+    );
+
+    const response: TestResetResponse = {
+      success: true,
+      cleared: {},
+    };
+
+    const shouldClear = (scope: 'lobbies' | 'games' | 'connections'): boolean =>
+      scopes.includes('all') || scopes.includes(scope);
+
+    // Helper to check if a player matches the target (or if no target, match all)
+    const matchesTarget = (playerId: string): boolean =>
+      !userId || playerId === userId;
+
+    // Clear lobby state
+    if (shouldClear('lobbies')) {
+      let lobbiesCleared = 0;
+      const playersCleared: string[] = [];
+
+      if (userId) {
+        // Clear specific user's lobby membership
+        const lobbyId = lobbyIdByPlayerId.get(userId);
+        if (lobbyId) {
+          lobbyIdByPlayerId.delete(userId);
+          playersCleared.push(userId);
+
+          // Also leave the socket room
+          const socketId = playerIdToSocketId.get(userId);
+          if (socketId) {
+            const socket = io.sockets.sockets.get(socketId);
+            socket?.leave(lobbyId);
+          }
+
+          // Check if lobby should be cleaned up
+          const lobby = lobbiesById.get(lobbyId);
+          if (lobby) {
+            // Remove player from lobby's player list
+            lobby.players = lobby.players.filter(p => p.playerId !== userId);
+            lobby.disconnectedPlayerIds = lobby.disconnectedPlayerIds.filter(
+              id => id !== userId
+            );
+
+            // If lobby is now empty, remove it
+            if (lobby.players.length === 0) {
+              lobbiesById.delete(lobbyId);
+              lobbiesCleared++;
+              logger.info(`[TEST] Removed empty lobby: ${lobbyId}`);
+            }
+          }
+          logger.info(`[TEST] Cleared lobby membership for user: ${userId}`);
+        }
+      } else {
+        // Clear all lobby state
+        lobbiesById.forEach((_, lobbyId) => {
+          lobbiesById.delete(lobbyId);
+          lobbiesCleared++;
+        });
+        lobbyIdByPlayerId.forEach((_, playerId) => {
+          playersCleared.push(playerId);
+        });
+        lobbyIdByPlayerId.clear();
+        logger.info(`[TEST] Cleared all lobbies: ${lobbiesCleared}`);
+      }
+
+      response.cleared.lobbies = lobbiesCleared;
+      if (playersCleared.length > 0) {
+        response.cleared.players = playersCleared;
+      }
+    }
+
+    // Clear game state
+    if (shouldClear('games')) {
+      let gamesCleared = 0;
+
+      if (userId) {
+        // Find and clear games the user is in
+        const lobbyId = lobbyIdByPlayerId.get(userId);
+        if (lobbyId && gameLoopsByLobbyId.has(lobbyId)) {
+          clearActiveGameArtifacts(lobbyId);
+          gamesCleared++;
+          logger.info(`[TEST] Cleared game for user ${userId} in lobby ${lobbyId}`);
+        }
+      } else {
+        // Clear all games
+        gameLoopsByLobbyId.forEach((gameLoop, lobbyId) => {
+          clearActiveGameArtifacts(lobbyId);
+          gamesCleared++;
+        });
+        logger.info(`[TEST] Cleared all games: ${gamesCleared}`);
+      }
+
+      response.cleared.games = gamesCleared;
+    }
+
+    // Clear connection state
+    if (shouldClear('connections')) {
+      let connectionsCleared = 0;
+
+      if (userId) {
+        // Disconnect specific user
+        const socketId = playerIdToSocketId.get(userId);
+        if (socketId) {
+          const socket = io.sockets.sockets.get(socketId);
+          if (socket) {
+            socket.disconnect(true);
+            connectionsCleared++;
+          }
+        }
+        connectedPlayers.delete(userId);
+        playerIdToSocketId.delete(userId);
+        if (socketId) {
+          socketIdToPlayerId.delete(socketId);
+        }
+        clearPlayerDisconnectTimer(userId);
+        logger.info(`[TEST] Cleared connection for user: ${userId}`);
+      } else {
+        // Disconnect all users
+        connectedPlayers.forEach((_, playerId) => {
+          const socketId = playerIdToSocketId.get(playerId);
+          if (socketId) {
+            const socket = io.sockets.sockets.get(socketId);
+            if (socket) {
+              socket.disconnect(true);
+              connectionsCleared++;
+            }
+            socketIdToPlayerId.delete(socketId);
+          }
+          clearPlayerDisconnectTimer(playerId);
+        });
+        connectedPlayers.clear();
+        playerIdToSocketId.clear();
+        logger.info(`[TEST] Cleared all connections: ${connectionsCleared}`);
+      }
+
+      response.cleared.connections = connectionsCleared;
+    }
+
+    logger.info(`[TEST] Reset complete:`, response.cleared);
+    res.status(200).json(response);
+  });
+
+  logger.info('[TEST] Test reset endpoint enabled at POST /api/test/reset');
+}
+
 // In-memory lobby state (foundational data structures for future lobby support)
 const lobbiesById: Map<string, Lobby> = new Map();
 const lobbyIdByPlayerId: Map<string, string> = new Map(); // Each player can be in at most one lobby
