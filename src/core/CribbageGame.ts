@@ -28,6 +28,33 @@ import {
 } from '../gameplay/rules';
 import { logger } from '../utils/logger';
 
+/**
+ * Serialized state for CribbageGame restoration
+ * Dates are serialized as ISO strings for JSON compatibility
+ */
+export interface SerializedCribbageGameState {
+  gameState: GameState;
+  gameSnapshotHistory: Array<{
+    gameState: GameState;
+    gameEvent: Omit<GameEvent, 'timestamp'> & { timestamp: string };
+    pendingDecisionRequests: Array<
+      Omit<DecisionRequest, 'timestamp' | 'expiresAt'> & {
+        timestamp: string;
+        expiresAt?: string | null;
+      }
+    >;
+  }>;
+  pendingDecisionRequests: Array<
+    Omit<DecisionRequest, 'timestamp' | 'expiresAt'> & {
+      timestamp: string;
+      expiresAt?: string | null;
+    }
+  >;
+  dealerSelectionCards: Array<
+    [string, { cardIndex: number; card: Card; timestamp: number }]
+  >;
+}
+
 export class CribbageGame extends EventEmitter {
   private gameState: GameState;
   // private gameEventRecords: GameEvent[]; // Log of all game actions
@@ -1257,5 +1284,69 @@ export class CribbageGame extends EventEmitter {
 
   public getGameSnapshotHistory(): GameSnapshot[] {
     return this.gameSnapshotHistory;
+  }
+
+  /**
+   * Serialize game state to JSON-safe format
+   * Converts Date objects to ISO strings
+   * @returns Serialized game state
+   */
+  public serialize(): SerializedCribbageGameState {
+    return {
+      gameState: { ...this.gameState },
+      gameSnapshotHistory: this.gameSnapshotHistory.map(snapshot => ({
+        gameState: snapshot.gameState,
+        gameEvent: {
+          ...snapshot.gameEvent,
+          timestamp: snapshot.gameEvent.timestamp.toISOString(),
+        },
+        pendingDecisionRequests: snapshot.pendingDecisionRequests.map(req => ({
+          ...req,
+          timestamp: req.timestamp.toISOString(),
+          expiresAt: req.expiresAt?.toISOString() ?? null,
+        })),
+      })),
+      pendingDecisionRequests: this.pendingDecisionRequests.map(req => ({
+        ...req,
+        timestamp: req.timestamp.toISOString(),
+        expiresAt: req.expiresAt?.toISOString() ?? null,
+      })),
+      dealerSelectionCards: Array.from(this.dealerSelectionCards.entries()),
+    };
+  }
+
+  /**
+   * Restore game state from serialized data
+   * @param serialized - Serialized game state with Date fields as ISO strings
+   */
+  public restoreState(serialized: SerializedCribbageGameState): void {
+    // Restore gameState (no Date fields in GameState itself)
+    this.gameState = { ...serialized.gameState };
+
+    // Restore gameSnapshotHistory with Date parsing
+    this.gameSnapshotHistory = serialized.gameSnapshotHistory.map(snapshot => ({
+      gameState: snapshot.gameState,
+      gameEvent: {
+        ...snapshot.gameEvent,
+        timestamp: new Date(snapshot.gameEvent.timestamp),
+      },
+      pendingDecisionRequests: snapshot.pendingDecisionRequests.map(req => ({
+        ...req,
+        timestamp: new Date(req.timestamp),
+        expiresAt: req.expiresAt ? new Date(req.expiresAt) : undefined,
+      })),
+    }));
+
+    // Restore pendingDecisionRequests with Date parsing
+    this.pendingDecisionRequests = serialized.pendingDecisionRequests.map(
+      req => ({
+        ...req,
+        timestamp: new Date(req.timestamp),
+        expiresAt: req.expiresAt ? new Date(req.expiresAt) : undefined,
+      })
+    );
+
+    // Restore dealerSelectionCards Map
+    this.dealerSelectionCards = new Map(serialized.dealerSelectionCards);
   }
 }
