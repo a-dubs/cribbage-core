@@ -1765,3 +1765,59 @@ export async function getGameSnapshotsForUser(
   }
   return data ?? [];
 }
+
+/**
+ * Test-only function to get game history counts by lobbyId.
+ * Uses service role client and does not require user authentication.
+ * Returns counts of events and snapshots for the game associated with the lobby.
+ */
+export async function getGameHistoryCountsByLobbyId(
+  lobbyId: string
+): Promise<{ gameId: string | null; eventsCount: number; snapshotsCount: number }> {
+  const client = getServiceClient();
+  
+  // First, find the game ID for this lobby
+  const { data: gameData, error: gameError } = await client
+    .from('games')
+    .select('id')
+    .eq('lobby_id', lobbyId)
+    .order('started_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  
+  if (gameError) {
+    throw new Error(`Failed to find game for lobby: ${gameError.message}`);
+  }
+  
+  if (!gameData) {
+    return { gameId: null, eventsCount: 0, snapshotsCount: 0 };
+  }
+  
+  const gameId = gameData.id as string;
+  
+  // Count events
+  const { count: eventsCount, error: eventsError } = await client
+    .from('game_events')
+    .select('*', { count: 'exact', head: true })
+    .eq('game_id', gameId);
+  
+  if (eventsError) {
+    throw new Error(`Failed to count events: ${eventsError.message}`);
+  }
+  
+  // Count snapshots
+  const { count: snapshotsCount, error: snapshotsError } = await client
+    .from('game_snapshots')
+    .select('*', { count: 'exact', head: true })
+    .eq('game_id', gameId);
+  
+  if (snapshotsError) {
+    throw new Error(`Failed to count snapshots: ${snapshotsError.message}`);
+  }
+  
+  return {
+    gameId,
+    eventsCount: eventsCount ?? 0,
+    snapshotsCount: snapshotsCount ?? 0,
+  };
+}

@@ -16,6 +16,7 @@ import {
   getPlayerActiveLobbyId,
   getProfile,
   getServiceClient,
+  getGameHistoryCountsByLobbyId,
   verifyAccessToken,
   type LobbyPayload,
 } from '../services/supabaseService';
@@ -446,6 +447,33 @@ export class WebSocketServer {
       });
 
       logger.info('[TEST] Test reset endpoint enabled at POST /api/test/reset');
+
+      // Test-only endpoint for fetching game history counts
+      this.app.get('/api/test/game-history', async (req, res) => {
+        const { lobbyId } = req.query;
+
+        if (!lobbyId || typeof lobbyId !== 'string') {
+          res.status(400).json({
+            error: 'VALIDATION_ERROR',
+            message: 'lobbyId query parameter is required',
+          });
+          return;
+        }
+
+        try {
+          const counts = await getGameHistoryCountsByLobbyId(lobbyId);
+          res.status(200).json(counts);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Failed to fetch game history';
+          logger.error(`[TEST] Error fetching game history for lobby ${lobbyId}:`, error);
+          res.status(500).json({
+            error: 'GAME_HISTORY_FETCH_FAILED',
+            message,
+          });
+        }
+      });
+
+      logger.info('[TEST] Test game history endpoint enabled at GET /api/test/game-history');
     }
   }
 
