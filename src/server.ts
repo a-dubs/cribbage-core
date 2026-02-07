@@ -43,6 +43,7 @@ import {
   type LobbyPayload,
 } from './services/supabaseService';
 import { applyAuthMiddleware } from './server/AuthMiddleware';
+import { ConnectionManager } from './server/ConnectionManager';
 import {
   PlayerInfo,
   PlayerInLobby,
@@ -214,9 +215,8 @@ const io = new Server(server, {
 // Apply authentication middleware
 applyAuthMiddleware(io);
 
-const connectedPlayers: Map<string, PlayerInfo> = new Map();
-const playerIdToSocketId: Map<string, string> = new Map();
-const socketIdToPlayerId: Map<string, string> = new Map(); // Track socket -> player ID mapping for reconnection
+// Connection manager for player/socket tracking
+const connectionManager = new ConnectionManager(io, logger);
 
 app.get('/ping', (_req, res) => {
   res.status(200).send('pong');
@@ -224,7 +224,7 @@ app.get('/ping', (_req, res) => {
 
 app.get('/connected-players', (_req, res) => {
   const playersIdAndName: PlayerIdAndName[] = [];
-  connectedPlayers.forEach(playerInfo => {
+  connectionManager.getConnectedPlayers().forEach(playerInfo => {
     playersIdAndName.push({ id: playerInfo.id, name: playerInfo.name });
   });
   res.status(200).json(playersIdAndName);
@@ -265,7 +265,7 @@ if (process.env.NODE_ENV !== 'production') {
           playersCleared.push(userId);
 
           // Also leave the socket room
-          const socketId = playerIdToSocketId.get(userId);
+          const socketId = connectionManager.getSocketId(userId);
           if (socketId) {
             const socket = io.sockets.sockets.get(socketId);
             socket?.leave(lobbyId);
@@ -338,7 +338,7 @@ if (process.env.NODE_ENV !== 'production') {
 
       if (userId) {
         // Disconnect specific user
-        const socketId = playerIdToSocketId.get(userId);
+        const socketId = connectionManager.getSocketId(userId);
         if (socketId) {
           const socket = io.sockets.sockets.get(socketId);
           if (socket) {
@@ -346,29 +346,28 @@ if (process.env.NODE_ENV !== 'production') {
             connectionsCleared++;
           }
         }
-        connectedPlayers.delete(userId);
-        playerIdToSocketId.delete(userId);
+        connectionManager.deletePlayer(userId);
+        connectionManager.deleteSocketId(userId);
         if (socketId) {
-          socketIdToPlayerId.delete(socketId);
+          connectionManager.deletePlayerId(socketId);
         }
         clearPlayerDisconnectTimer(userId);
         logger.info(`[TEST] Cleared connection for user: ${userId}`);
       } else {
         // Disconnect all users
-        connectedPlayers.forEach((_, playerId) => {
-          const socketId = playerIdToSocketId.get(playerId);
+        connectionManager.getConnectedPlayers().forEach((_, playerId) => {
+          const socketId = connectionManager.getSocketId(playerId);
           if (socketId) {
             const socket = io.sockets.sockets.get(socketId);
             if (socket) {
               socket.disconnect(true);
               connectionsCleared++;
             }
-            socketIdToPlayerId.delete(socketId);
+            connectionManager.deletePlayerId(socketId);
           }
           clearPlayerDisconnectTimer(playerId);
         });
-        connectedPlayers.clear();
-        playerIdToSocketId.clear();
+        connectionManager.clearAll();
         logger.info(`[TEST] Cleared all connections: ${connectionsCleared}`);
       }
 
@@ -599,18 +598,7 @@ const disconnectGraceTimeouts: Map<string, NodeJS.Timeout> = new Map();
  * Clean up bots from connectedPlayers and related maps
  */
 function cleanupBots(lobbyId: string): void {
-  const botIds = currentGameBotIdsByLobbyId.get(lobbyId);
-  if (!botIds || botIds.length === 0) {
-    return;
-  }
-  logger.info(`Cleaning up ${botIds.length} bots for lobby ${lobbyId}`);
-  botIds.forEach(botId => {
-    connectedPlayers.delete(botId);
-    playerIdToSocketId.delete(botId);
-    socketIdToPlayerId.delete(botId);
-    logger.info(`Removed bot: ${botId}`);
-  });
-  currentGameBotIdsByLobbyId.delete(lobbyId);
+  connectionManager.cleanupBots(lobbyId, currentGameBotIdsByLobbyId);
   emitConnectedPlayers();
 }
 
@@ -618,33 +606,10 @@ function cleanupBots(lobbyId: string): void {
  * Clean up bots that are not part of any active game
  */
 function cleanupInactiveBots(): void {
-  // Collect all bot IDs that are part of active games
-  const activeBotIds = new Set<string>();
-  currentGameBotIdsByLobbyId.forEach((botIds, lobbyId) => {
-    // Only include bots from lobbies with active games
-    if (gameLoopsByLobbyId.has(lobbyId)) {
-      botIds.forEach(botId => activeBotIds.add(botId));
-    }
-  });
-
-  // Find and remove bots that aren't part of active games
-  const botsToRemove: string[] = [];
-  connectedPlayers.forEach((playerInfo, playerId) => {
-    const isBot = !(playerInfo.agent instanceof WebSocketAgent);
-    if (isBot && !activeBotIds.has(playerId)) {
-      botsToRemove.push(playerId);
-    }
-  });
-
-  if (botsToRemove.length > 0) {
-    logger.info(`Cleaning up ${botsToRemove.length} inactive bots`);
-    botsToRemove.forEach(botId => {
-      connectedPlayers.delete(botId);
-      playerIdToSocketId.delete(botId);
-      socketIdToPlayerId.delete(botId);
-      logger.info(`Removed inactive bot: ${botId}`);
-    });
-  }
+  connectionManager.cleanupInactiveBots(
+    currentGameBotIdsByLobbyId,
+    gameLoopsByLobbyId
+  );
 }
 
 function clearPlayerDisconnectTimer(playerId: string): void {
@@ -772,7 +737,7 @@ function isLobbyStale(lobby: Lobby, now: number): boolean {
 
   // Check if ALL players have no active socket connection
   const allPlayersDisconnected = lobby.players.every(
-    player => !connectedPlayers.has(player.playerId)
+    player => !connectionManager.hasPlayer(player.playerId)
   );
 
   if (!allPlayersDisconnected) {
@@ -891,7 +856,7 @@ registerHttpApi(app, {
     // Clear in-memory lobby membership when player leaves via HTTP API
     lobbyIdByPlayerId.delete(playerId);
     // Make the player's socket leave the lobby room
-    const socketId = playerIdToSocketId.get(playerId);
+    const socketId = connectionManager.getSocketId(playerId);
     if (socketId) {
       const socket = io.sockets.sockets.get(socketId);
       socket?.leave(lobbyId);
@@ -940,15 +905,7 @@ async function refreshLobbyFromSupabase(
 
 // Generate unique player ID from username, handling conflicts
 function getUniquePlayerId(username: string, socketId: string): string {
-  // First, try using the username directly
-  if (!connectedPlayers.has(username)) {
-    return username;
-  }
-
-  // If username is taken, append socket ID to make it unique
-  // This allows multiple users with the same username
-  const uniqueId = `${username}_${socketId}`;
-  return uniqueId;
+  return connectionManager.getUniquePlayerId(username, socketId);
 }
 
 io.on('connection', socket => {
@@ -1134,7 +1091,7 @@ io.on('connection', socket => {
     // Clean up inactive bots before responding
     cleanupInactiveBots();
 
-    const playerId = socketIdToPlayerId.get(socket.id);
+    const playerId = connectionManager.getPlayerId(socket.id);
     const playerLobbyId = playerId ? lobbyIdByPlayerId.get(playerId) : null;
 
     // Collect bot IDs from the requesting player's lobby (if they're in a lobby with an active game)
@@ -1148,7 +1105,7 @@ io.on('connection', socket => {
 
     // Send current connected players to this specific client
     const playersIdAndName: PlayerIdAndName[] = [];
-    connectedPlayers.forEach(playerInfo => {
+    connectionManager.getConnectedPlayers().forEach(playerInfo => {
       const isBot = !(playerInfo.agent instanceof WebSocketAgent);
       // Include all human players, and only bots from the requesting player's lobby
       if (!isBot || activeBotIds.has(playerInfo.id)) {
@@ -1169,7 +1126,7 @@ io.on('connection', socket => {
 
   socket.on('disconnect', reason => {
     logger.info(`A socket disconnected: ${socket.id}, Reason: ${reason}`);
-    const playerId = socketIdToPlayerId.get(socket.id);
+    const playerId = connectionManager.getPlayerId(socket.id);
 
     if (playerId) {
       // If player is in a lobby, remove them and handle cleanup
@@ -1200,9 +1157,9 @@ io.on('connection', socket => {
         ? gameLoopsByLobbyId.has(playerLobbyId)
         : false;
       if (!playerInActiveGame) {
-        connectedPlayers.delete(playerId);
-        playerIdToSocketId.delete(playerId);
-        socketIdToPlayerId.delete(socket.id);
+        connectionManager.deletePlayer(playerId);
+        connectionManager.deleteSocketId(playerId);
+        connectionManager.deletePlayerId(socket.id);
         logger.info(`Removed player ${playerId} (socket ${socket.id})`);
         // send updated connected players to all clients
         emitConnectedPlayers();
@@ -1224,7 +1181,7 @@ function handleJoinLobby(
   data: { lobbyId: string },
   callback?: (response: any) => void
 ): void {
-  const playerId = socketIdToPlayerId.get(socket.id);
+  const playerId = connectionManager.getPlayerId(socket.id);
   if (!playerId) {
     logger.error('Player ID not found for socket:', socket.id);
     const error = { error: 'Not logged in' };
@@ -1304,7 +1261,7 @@ function handleLeaveLobby(
   data: { lobbyId: string },
   callback?: (response: any) => void
 ): void {
-  const playerId = socketIdToPlayerId.get(socket.id);
+  const playerId = connectionManager.getPlayerId(socket.id);
   if (!playerId) {
     logger.error('Player ID not found for socket:', socket.id);
     const error = { error: 'Not logged in' };
@@ -1378,7 +1335,7 @@ function handleKickPlayer(
   data: { lobbyId: string; targetPlayerId: string },
   callback?: (response: any) => void
 ): void {
-  const playerId = socketIdToPlayerId.get(socket.id);
+  const playerId = connectionManager.getPlayerId(socket.id);
   if (!playerId) {
     logger.error('Player ID not found for socket:', socket.id);
     const error = { error: 'Not logged in' };
@@ -1442,7 +1399,7 @@ function handleKickPlayer(
         callback({ success: true });
       }
 
-      const targetSocketId = playerIdToSocketId.get(targetPlayerId);
+      const targetSocketId = connectionManager.getSocketId(targetPlayerId);
       if (targetSocketId) {
         const targetSocket = io.sockets.sockets.get(targetSocketId);
         targetSocket?.leave(lobbyId);
@@ -1516,7 +1473,7 @@ async function startLobbyGameForHost(
         name: botName,
         agent: botAgent,
       };
-      connectedPlayers.set(botId, botPlayerInfo);
+      connectionManager.setPlayer(botId, botPlayerInfo);
       newBotIds.push(botId);
       logger.info(`Added bot: ${botName} (ID: ${botId})`);
     }
@@ -1525,12 +1482,12 @@ async function startLobbyGameForHost(
     const agents: Map<string, GameAgent> = new Map();
     // Populate human agents
     lobby.players.forEach(p => {
-      const info = connectedPlayers.get(p.playerId);
+      const info = connectionManager.getPlayer(p.playerId);
       if (info) agents.set(info.id, info.agent);
     });
     // Populate bot agents
     newBotIds.forEach(id => {
-      const info = connectedPlayers.get(id);
+      const info = connectionManager.getPlayer(id);
       if (info) agents.set(info.id, info.agent);
     });
 
@@ -1678,7 +1635,7 @@ async function startLobbyGameForHost(
 
     // Clean up any bots that were created
     newBotIds.forEach(botId => {
-      connectedPlayers.delete(botId);
+      connectionManager.deletePlayer(botId);
     });
     if (newBotIds.length > 0) {
       logger.info(
@@ -1704,7 +1661,7 @@ function handleUpdateLobbySize(
   data: { lobbyId: string; playerCount: number },
   callback?: (response: any) => void
 ): void {
-  const playerId = socketIdToPlayerId.get(socket.id);
+  const playerId = connectionManager.getPlayerId(socket.id);
   if (!playerId) {
     logger.error('Player ID not found for socket:', socket.id);
     const error = { error: 'Not logged in' };
@@ -1780,7 +1737,7 @@ function handleUpdateLobbyName(
   data: { lobbyId: string; name: string },
   callback?: (response: any) => void
 ): void {
-  const playerId = socketIdToPlayerId.get(socket.id);
+  const playerId = connectionManager.getPlayerId(socket.id);
   if (!playerId) {
     logger.error('Player ID not found for socket:', socket.id);
     const error = { error: 'Not logged in' };
@@ -1871,7 +1828,7 @@ function handleListLobbies(socket: Socket): void {
         .map(lobby => {
           const hostId = lobby.host_id as string | undefined;
           const hostPlayerInfo = hostId
-            ? connectedPlayers.get(hostId)
+            ? connectionManager.getPlayer(hostId)
             : undefined;
           const hostDisplayName = hostPlayerInfo?.name || 'Unknown';
           return {
@@ -1901,7 +1858,7 @@ async function handleStartLobbyGame(
   data: { lobbyId: string },
   callback?: (response: any) => void
 ): Promise<void> {
-  const playerId = socketIdToPlayerId.get(socket.id);
+  const playerId = connectionManager.getPlayerId(socket.id);
   if (!playerId) {
     logger.error('Player ID not found for socket:', socket.id);
     const errorMsg = 'Not logged in';
@@ -1960,7 +1917,7 @@ function handleCreateLobby(
   },
   callback?: (response: any) => void
 ): void {
-  const playerId = socketIdToPlayerId.get(socket.id);
+  const playerId = connectionManager.getPlayerId(socket.id);
   logger.info(
     `[handleCreateLobby] Starting for player: ${playerId}, callback present: ${!!callback}`
   );
@@ -2010,7 +1967,7 @@ function handleCreateLobby(
   }
 
   // Get player info for host display name
-  const playerInfo = connectedPlayers.get(playerId);
+  const playerInfo = connectionManager.getPlayer(playerId);
   const hostDisplayName = playerInfo?.name || 'Unknown';
 
   // Generate lobby name (either custom or default to "<host's name>'s lobby")
@@ -2127,7 +2084,7 @@ async function handleLogin(socket: Socket, data: LoginData): Promise<void> {
 
     let agent: WebSocketAgent | null = null;
     // Check if this playerId already has an agent (reconnection scenario)
-    const existingPlayerInfo = connectedPlayers.get(playerId);
+    const existingPlayerInfo = connectionManager.getPlayer(playerId);
 
     if (
       existingPlayerInfo &&
@@ -2154,9 +2111,9 @@ async function handleLogin(socket: Socket, data: LoginData): Promise<void> {
 
     const playerInfo: PlayerInfo = { id: playerId, name: displayName, agent };
 
-    playerIdToSocketId.set(playerId, socket.id);
-    socketIdToPlayerId.set(socket.id, playerId);
-    connectedPlayers.set(playerId, playerInfo);
+    connectionManager.setSocketId(playerId, socket.id);
+    connectionManager.setPlayerId(socket.id, playerId);
+    connectionManager.setPlayer(playerId, playerInfo);
 
     let reconnectLobbyId = lobbyIdByPlayerId.get(playerId);
     let reconnectLobby = reconnectLobbyId
@@ -2298,20 +2255,10 @@ async function handleLogin(socket: Socket, data: LoginData): Promise<void> {
 // create function that emits the current connected players to all clients
 // Note: Only includes human players. Bots are included per-lobby in getConnectedPlayers handler.
 function emitConnectedPlayers(): void {
-  // Clean up inactive bots before emitting
-  cleanupInactiveBots();
-
-  const playersIdAndName: PlayerIdAndName[] = [];
-  connectedPlayers.forEach(playerInfo => {
-    // Only include human players in global broadcast
-    // Bots are included per-lobby when players request connectedPlayers
-    const isBot = !(playerInfo.agent instanceof WebSocketAgent);
-    if (!isBot) {
-      playersIdAndName.push({ id: playerInfo.id, name: playerInfo.name });
-    }
-  });
-  logger.info('Emitting connected players to all clients:', playersIdAndName);
-  io.emit('connectedPlayers', playersIdAndName);
+  connectionManager.emitConnectedPlayers(
+    currentGameBotIdsByLobbyId,
+    gameLoopsByLobbyId
+  );
 }
 
 function emitToLobbyPlayers(
@@ -2323,7 +2270,7 @@ function emitToLobbyPlayers(
 }
 
 async function handleRestartGame(socket: Socket): Promise<void> {
-  const playerId = socketIdToPlayerId.get(socket.id);
+  const playerId = connectionManager.getPlayerId(socket.id);
   if (!playerId) {
     logger.error('Player ID not found for socket:', socket.id);
     socket.emit('error', { message: 'Not logged in' });
@@ -2406,7 +2353,7 @@ async function handleRestartGame(socket: Socket): Promise<void> {
       name: botName,
       agent: botAgent,
     };
-    connectedPlayers.set(botId, botPlayerInfo);
+    connectionManager.setPlayer(botId, botPlayerInfo);
     newBotIds.push(botId);
     logger.info(`Added bot: ${botName} (ID: ${botId})`);
   }
@@ -2415,12 +2362,12 @@ async function handleRestartGame(socket: Socket): Promise<void> {
   const agents: Map<string, GameAgent> = new Map();
   // Populate human agents
   lobby.players.forEach(p => {
-    const info = connectedPlayers.get(p.playerId);
+    const info = connectionManager.getPlayer(p.playerId);
     if (info) agents.set(info.id, info.agent);
   });
   // Populate bot agents
   newBotIds.forEach(id => {
-    const info = connectedPlayers.get(id);
+    const info = connectionManager.getPlayer(id);
     if (info) agents.set(info.id, info.agent);
   });
 
@@ -2560,7 +2507,7 @@ function sendRedactedSnapshotToAllPlayers(
 
   // Send redacted snapshot to each player
   gameState.players.forEach(player => {
-    const socketId = playerIdToSocketId.get(player.id);
+    const socketId = connectionManager.getSocketId(player.id);
     if (!socketId) {
       // Player might be a bot or disconnected - skip
       return;
@@ -2573,7 +2520,7 @@ function sendRedactedSnapshotToAllPlayers(
     }
 
     // Update WebSocketAgent with the latest snapshot if this is a human player
-    const playerInfo = connectedPlayers.get(player.id);
+    const playerInfo = connectionManager.getPlayer(player.id);
     if (playerInfo && playerInfo.agent instanceof WebSocketAgent) {
       playerInfo.agent.updateGameSnapshot(snapshot);
     }
@@ -2607,7 +2554,7 @@ function sendMostRecentGameData(socket: Socket): void {
   logger.info('Sending most recent game data to client');
 
   // Find which player this socket belongs to
-  const playerId = socketIdToPlayerId.get(socket.id);
+  const playerId = connectionManager.getPlayerId(socket.id);
 
   if (!playerId) {
     logger.error('Could not find player ID for socket:', socket.id);
@@ -2651,7 +2598,7 @@ function sendMostRecentGameData(socket: Socket): void {
   }
 
   // Update WebSocketAgent with the latest snapshot
-  const playerInfo = connectedPlayers.get(playerId);
+  const playerInfo = connectionManager.getPlayer(playerId);
   if (playerInfo && playerInfo.agent instanceof WebSocketAgent) {
     playerInfo.agent.updateGameSnapshot(mostRecentGameSnapshot);
   }
