@@ -44,6 +44,7 @@ import {
 } from './services/supabaseService';
 import { applyAuthMiddleware } from './server/AuthMiddleware';
 import { ConnectionManager } from './server/ConnectionManager';
+import { LobbyManager } from './server/LobbyManager';
 import {
   PlayerInfo,
   PlayerInLobby,
@@ -218,6 +219,16 @@ applyAuthMiddleware(io);
 // Connection manager for player/socket tracking
 const connectionManager = new ConnectionManager(io, logger);
 
+// Game state maps (shared with LobbyManager for cleanup)
+const gameIdByLobbyId: Map<string, string> = new Map();
+const gameLoopsByLobbyId: Map<string, GameLoop> = new Map();
+const mostRecentGameSnapshotByLobbyId: Map<string, GameSnapshot> = new Map();
+const currentRoundGameEventsByLobbyId: Map<string, GameEvent[]> = new Map();
+const roundStartSnapshotByLobbyId: Map<string, GameSnapshot> = new Map();
+const supabaseGameIdByLobbyId: Map<string, string> = new Map();
+const currentGameBotIdsByLobbyId: Map<string, string[]> = new Map();
+const disconnectGraceTimeouts: Map<string, NodeJS.Timeout> = new Map();
+
 app.get('/ping', (_req, res) => {
   res.status(200).send('pong');
 });
@@ -259,9 +270,9 @@ if (process.env.NODE_ENV !== 'production') {
 
       if (userId) {
         // Clear specific user's lobby membership
-        const lobbyId = lobbyIdByPlayerId.get(userId);
+        const lobbyId = lobbyManager.getLobbyIdForPlayer(userId);
         if (lobbyId) {
-          lobbyIdByPlayerId.delete(userId);
+          lobbyManager.removePlayerFromLobbyMapping(userId);
           playersCleared.push(userId);
 
           // Also leave the socket room
@@ -272,7 +283,7 @@ if (process.env.NODE_ENV !== 'production') {
           }
 
           // Check if lobby should be cleaned up
-          const lobby = lobbiesById.get(lobbyId);
+          const lobby = lobbyManager.getLobby(lobbyId);
           if (lobby) {
             // Remove player from lobby's player list
             lobby.players = lobby.players.filter(p => p.playerId !== userId);
@@ -282,7 +293,7 @@ if (process.env.NODE_ENV !== 'production') {
 
             // If lobby is now empty, remove it
             if (lobby.players.length === 0) {
-              lobbiesById.delete(lobbyId);
+              lobbyManager.removeLobbyFromCache(lobbyId);
               lobbiesCleared++;
               logger.info(`[TEST] Removed empty lobby: ${lobbyId}`);
             }
@@ -291,14 +302,13 @@ if (process.env.NODE_ENV !== 'production') {
         }
       } else {
         // Clear all lobby state
-        lobbiesById.forEach((_, lobbyId) => {
-          lobbiesById.delete(lobbyId);
+        const allLobbies = lobbyManager.getAllLobbies();
+        allLobbies.forEach((_, lobbyId) => {
+          lobbyManager.removeLobbyFromCache(lobbyId);
           lobbiesCleared++;
         });
-        lobbyIdByPlayerId.forEach((_, playerId) => {
-          playersCleared.push(playerId);
-        });
-        lobbyIdByPlayerId.clear();
+        // Note: lobbyIdByPlayerId is internal to LobbyManager, so we clear via removeLobbyFromCache
+        // which already handles clearing player mappings
         logger.info(`[TEST] Cleared all lobbies: ${lobbiesCleared}`);
       }
 
@@ -314,7 +324,7 @@ if (process.env.NODE_ENV !== 'production') {
 
       if (userId) {
         // Find and clear games the user is in
-        const lobbyId = lobbyIdByPlayerId.get(userId);
+        const lobbyId = lobbyManager.getLobbyIdForPlayer(userId);
         if (lobbyId && gameLoopsByLobbyId.has(lobbyId)) {
           clearActiveGameArtifacts(lobbyId);
           gamesCleared++;
@@ -381,46 +391,59 @@ if (process.env.NODE_ENV !== 'production') {
   logger.info('[TEST] Test reset endpoint enabled at POST /api/test/reset');
 }
 
-// In-memory lobby state (foundational data structures for future lobby support)
-const lobbiesById: Map<string, Lobby> = new Map();
-const lobbyIdByPlayerId: Map<string, string> = new Map(); // Each player can be in at most one lobby
-const gameIdByLobbyId: Map<string, string> = new Map();
-
-const gameLoopsByLobbyId: Map<string, GameLoop> = new Map();
-const mostRecentGameSnapshotByLobbyId: Map<string, GameSnapshot> = new Map();
-const currentRoundGameEventsByLobbyId: Map<string, GameEvent[]> = new Map();
-const roundStartSnapshotByLobbyId: Map<string, GameSnapshot> = new Map();
-const supabaseGameIdByLobbyId: Map<string, string> = new Map();
-const currentGameBotIdsByLobbyId: Map<string, string[]> = new Map();
-
-function cacheLobbyFromPayload(payload: LobbyPayload): Lobby {
-  const mapped = lobbyFromSupabase(payload);
-  const playerIds = new Set(mapped.players.map(p => p.playerId));
-  mapped.players.forEach(p => lobbyIdByPlayerId.set(p.playerId, mapped.id));
-  // Collect entries to delete first to avoid modifying Map during iteration
-  const playerIdsToDelete: string[] = [];
-  for (const [playerId, lobbyId] of lobbyIdByPlayerId.entries()) {
-    if (lobbyId === mapped.id && !playerIds.has(playerId)) {
-      playerIdsToDelete.push(playerId);
-    }
-  }
-  // Delete collected entries after iteration completes
-  playerIdsToDelete.forEach(playerId => lobbyIdByPlayerId.delete(playerId));
-  lobbiesById.set(mapped.id, mapped);
-  return mapped;
+// Helper function to convert Supabase payload to Lobby (used by LobbyManager and elsewhere)
+function lobbyFromSupabase(payload: any): Lobby {
+  return {
+    id: payload.id,
+    name: payload.name ?? undefined,
+    hostId: payload.host_id ?? '',
+    maxPlayers: payload.max_players ?? payload.playerCount ?? 2,
+    playerCount: payload.max_players ?? payload.playerCount ?? 2,
+    currentPlayers: payload.current_players ?? payload.players?.length ?? 0,
+    players: (payload.players ?? []).map((p: any) => ({
+      playerId: p.playerId,
+      displayName: p.displayName,
+    })),
+    status: payload.status ?? 'waiting',
+    createdAt: payload.created_at
+      ? new Date(payload.created_at).getTime()
+      : Date.now(),
+    finishedAt: payload.finished_at ?? null,
+    disconnectedPlayerIds: [],
+    isFixedSize: payload.is_fixed_size ?? true,
+  };
 }
 
-function removeLobbyFromCache(lobbyId: string): void {
-  const lobby = lobbiesById.get(lobbyId);
-  if (lobby) {
-    lobby.players.forEach(player => {
-      if (lobbyIdByPlayerId.get(player.playerId) === lobbyId) {
-        lobbyIdByPlayerId.delete(player.playerId);
-      }
-    });
-  }
-  lobbiesById.delete(lobbyId);
+// Helper functions for cleanup (used by LobbyManager and elsewhere)
+function cleanupBots(lobbyId: string): void {
+  connectionManager.cleanupBots(lobbyId, currentGameBotIdsByLobbyId);
+  emitConnectedPlayers();
 }
+
+function clearPlayerDisconnectTimer(playerId: string): void {
+  const timeout = disconnectGraceTimeouts.get(playerId);
+  if (timeout) {
+    clearTimeout(timeout);
+    disconnectGraceTimeouts.delete(playerId);
+  }
+}
+
+// Create LobbyManager instance
+const lobbyManager = new LobbyManager({
+  io,
+  connectionManager,
+  disconnectGraceTimeouts,
+  gameLoopsByLobbyId,
+  mostRecentGameSnapshotByLobbyId,
+  currentRoundGameEventsByLobbyId,
+  roundStartSnapshotByLobbyId,
+  supabaseGameIdByLobbyId,
+  currentGameBotIdsByLobbyId,
+  cleanupBots,
+  clearPlayerDisconnectTimer,
+  lobbyFromSupabase,
+  SUPABASE_LOBBIES_ENABLED,
+});
 
 function mapPlayersForGameRecord(
   players: PlayerIdAndName[]
@@ -567,40 +590,6 @@ async function persistRoundHistory(
   }
 }
 
-// Generate a unique lobby name (adjective-animal) that doesn't collide with active lobbies
-function generateUniqueLobbyName(): string {
-  const maxAttempts = 50;
-  for (let i = 0; i < maxAttempts; i++) {
-    const name = uniqueNamesGenerator({
-      dictionaries: [adjectives, animals],
-      separator: ' ',
-      style: 'capital',
-    });
-    // Check if this name is already in use by a waiting or in_progress lobby
-    const nameInUse = Array.from(lobbiesById.values()).some(
-      lobby => lobby.name === name && lobby.status !== 'finished'
-    );
-    if (!nameInUse) {
-      return name;
-    }
-  }
-  // Fallback: append timestamp to guarantee uniqueness
-  return `${uniqueNamesGenerator({
-    dictionaries: [adjectives, animals],
-    separator: ' ',
-    style: 'capital',
-  })} ${Date.now()}`;
-}
-
-const disconnectGraceTimeouts: Map<string, NodeJS.Timeout> = new Map();
-
-/**
- * Clean up bots from connectedPlayers and related maps
- */
-function cleanupBots(lobbyId: string): void {
-  connectionManager.cleanupBots(lobbyId, currentGameBotIdsByLobbyId);
-  emitConnectedPlayers();
-}
 
 /**
  * Clean up bots that are not part of any active game
@@ -610,14 +599,6 @@ function cleanupInactiveBots(): void {
     currentGameBotIdsByLobbyId,
     gameLoopsByLobbyId
   );
-}
-
-function clearPlayerDisconnectTimer(playerId: string): void {
-  const timeout = disconnectGraceTimeouts.get(playerId);
-  if (timeout) {
-    clearTimeout(timeout);
-    disconnectGraceTimeouts.delete(playerId);
-  }
 }
 
 function clearActiveGameArtifacts(lobbyId: string): Lobby | undefined {
@@ -635,7 +616,7 @@ function clearActiveGameArtifacts(lobbyId: string): Lobby | undefined {
   gameIdByLobbyId.delete(lobbyId);
   cleanupBots(lobbyId);
 
-  const lobby = lobbiesById.get(lobbyId);
+  const lobby = lobbyManager.getLobby(lobbyId);
   if (lobby) {
     lobby.disconnectedPlayerIds.forEach(clearPlayerDisconnectTimer);
   }
@@ -662,7 +643,7 @@ function handleDisconnectGracePeriodExpired(
   if (playerIndex !== -1) {
     lobby.players.splice(playerIndex, 1);
   }
-  lobbyIdByPlayerId.delete(playerId);
+  lobbyManager.removePlayerFromLobbyMapping(playerId);
 
   if (lobby.players.length === 0) {
     lobby.status = 'finished';
@@ -721,140 +702,20 @@ function handlePlayerInGameDisconnect(lobby: Lobby, playerId: string): void {
   });
 }
 
-/**
- * Check if a lobby is stale (all players disconnected with no active connections)
- */
-function isLobbyStale(lobby: Lobby, now: number): boolean {
-  // Only check waiting and in_progress lobbies
-  if (lobby.status === 'finished') {
-    return false;
-  }
-
-  // If the lobby has no human players, it's stale
-  if (lobby.players.length === 0) {
-    return true;
-  }
-
-  // Check if ALL players have no active socket connection
-  const allPlayersDisconnected = lobby.players.every(
-    player => !connectionManager.hasPlayer(player.playerId)
-  );
-
-  if (!allPlayersDisconnected) {
-    return false; // At least one player is still connected
-  }
-
-  // Determine the stale threshold based on lobby status
-  const staleThreshold =
-    lobby.status === 'waiting'
-      ? STALE_WAITING_LOBBY_MS
-      : STALE_IN_PROGRESS_LOBBY_MS;
-
-  // Check if lobby has been around longer than the stale threshold
-  const lobbyAge = now - lobby.createdAt;
-  if (lobbyAge < staleThreshold) {
-    return false; // Not old enough to be considered stale
-  }
-
-  // Check if any players still have pending disconnect grace timeouts
-  // If they do, we're still within the grace period for reconnection
-  const anyPendingTimeouts = lobby.players.some(player =>
-    disconnectGraceTimeouts.has(player.playerId)
-  );
-
-  if (anyPendingTimeouts) {
-    return false; // Still waiting for grace period to expire
-  }
-
-  return true; // Lobby is stale - all conditions met
-}
-
-/**
- * Clean up a lobby (shared logic for finished and stale lobbies)
- */
-async function cleanupLobby(
-  lobbyId: string,
-  lobby: Lobby,
-  reason: 'finished' | 'stale'
-): Promise<void> {
-  lobby.players.forEach(player => {
-    if (lobbyIdByPlayerId.get(player.playerId) === lobbyId) {
-      lobbyIdByPlayerId.delete(player.playerId);
-    }
-  });
-
-  lobby.disconnectedPlayerIds.forEach(clearPlayerDisconnectTimer);
-  cleanupBots(lobbyId);
-  gameLoopsByLobbyId.delete(lobbyId);
-  mostRecentGameSnapshotByLobbyId.delete(lobbyId);
-  currentRoundGameEventsByLobbyId.delete(lobbyId);
-  roundStartSnapshotByLobbyId.delete(lobbyId);
-  supabaseGameIdByLobbyId.delete(lobbyId);
-  currentGameBotIdsByLobbyId.delete(lobbyId);
-
-  lobbiesById.delete(lobbyId);
-  io.emit('lobbyClosed', { lobbyId });
-
-  // Update Supabase if lobby was stale (not already finished in DB)
-  if (reason === 'stale' && SUPABASE_LOBBIES_ENABLED) {
-    try {
-      await getServiceClient()
-        .from('lobbies')
-        .update({ status: 'finished' })
-        .eq('id', lobbyId);
-    } catch (error) {
-      logger.error(`[cleanupLobby] Failed to update stale lobby in DB:`, error);
-    }
-  }
-
-  logger.info(
-    `[cleanupLobby] Removed ${reason} lobby ${lobby.name ?? lobbyId} (${lobbyId})`
-  );
-}
-
-function cleanupFinishedLobbies(): void {
-  const now = Date.now();
-
-  // Collect lobbies to cleanup (can't modify map while iterating)
-  const lobbiesToCleanup: Array<{ lobbyId: string; lobby: Lobby; reason: 'finished' | 'stale' }> = [];
-
-  lobbiesById.forEach((lobby, lobbyId) => {
-    // Check for stale lobbies (waiting/in_progress with no connections)
-    if (lobby.status !== 'finished' && isLobbyStale(lobby, now)) {
-      lobbiesToCleanup.push({ lobbyId, lobby, reason: 'stale' });
-      return;
-    }
-
-    // Check for finished lobbies past TTL
-    if (lobby.status === 'finished') {
-      const finishedAt = lobby.finishedAt ?? lobby.createdAt;
-      const lobbyIsEmpty = lobby.players.length === 0;
-      if (lobbyIsEmpty || now - finishedAt >= FINISHED_LOBBY_TTL_MS) {
-        lobbiesToCleanup.push({ lobbyId, lobby, reason: 'finished' });
-      }
-    }
-  });
-
-  // Cleanup collected lobbies
-  lobbiesToCleanup.forEach(({ lobbyId, lobby, reason }) => {
-    void cleanupLobby(lobbyId, lobby, reason);
-  });
-}
-
-setInterval(cleanupFinishedLobbies, FINISHED_LOBBY_SWEEP_INTERVAL_MS);
+// Cleanup timer is now managed by LobbyManager
 
 registerHttpApi(app, {
   onLobbyUpdated: lobbyPayload => {
-    const mapped = cacheLobbyFromPayload(lobbyPayload);
+    const mapped = lobbyManager.cacheLobbyFromPayload(lobbyPayload);
     io.emit('lobbyUpdated', mapped);
   },
   onLobbyClosed: lobbyId => {
-    removeLobbyFromCache(lobbyId);
+    lobbyManager.removeLobbyFromCache(lobbyId);
     io.emit('lobbyClosed', { lobbyId });
   },
   onPlayerLeftLobby: (playerId, lobbyId) => {
     // Clear in-memory lobby membership when player leaves via HTTP API
-    lobbyIdByPlayerId.delete(playerId);
+    lobbyManager.removePlayerFromLobbyMapping(playerId);
     // Make the player's socket leave the lobby room
     const socketId = connectionManager.getSocketId(playerId);
     if (socketId) {
@@ -868,35 +729,13 @@ registerHttpApi(app, {
   onStartLobbyGame: (lobbyId, hostId) => startLobbyGameForHost(lobbyId, hostId),
 });
 
-function lobbyFromSupabase(payload: any): Lobby {
-  return {
-    id: payload.id,
-    name: payload.name ?? undefined,
-    hostId: payload.host_id ?? '',
-    maxPlayers: payload.max_players ?? payload.playerCount ?? 2,
-    playerCount: payload.max_players ?? payload.playerCount ?? 2,
-    currentPlayers: payload.current_players ?? payload.players?.length ?? 0,
-    players: (payload.players ?? []).map((p: any) => ({
-      playerId: p.playerId,
-      displayName: p.displayName,
-    })),
-    status: payload.status ?? 'waiting',
-    createdAt: payload.created_at
-      ? new Date(payload.created_at).getTime()
-      : Date.now(),
-    finishedAt: payload.finished_at ?? null,
-    disconnectedPlayerIds: [],
-    isFixedSize: payload.is_fixed_size ?? true,
-  };
-}
-
 async function refreshLobbyFromSupabase(
   lobbyId: string
 ): Promise<Lobby | null> {
   try {
     const payload = await getLobbyWithPlayers(lobbyId);
     if (!payload) return null;
-    return cacheLobbyFromPayload(payload);
+    return lobbyManager.cacheLobbyFromPayload(payload);
   } catch (error) {
     logger.error('[Supabase] Failed to refresh lobby', lobbyId, error);
     return null;
@@ -972,7 +811,7 @@ io.on('connection', socket => {
         'playerCount:',
         data?.playerCount
       );
-      handleCreateLobby(socket, data, callback);
+      lobbyManager.handleCreateLobby(socket, data, callback);
     }
   );
 
@@ -985,7 +824,7 @@ io.on('connection', socket => {
         'lobbyId:',
         data?.lobbyId
       );
-      handleJoinLobby(socket, data, callback);
+      lobbyManager.handleJoinLobby(socket, data, callback);
     }
   );
 
@@ -998,7 +837,7 @@ io.on('connection', socket => {
         'lobbyId:',
         data?.lobbyId
       );
-      handleLeaveLobby(socket, data, callback);
+      lobbyManager.handleLeaveLobby(socket, data, callback);
     }
   );
 
@@ -1016,7 +855,7 @@ io.on('connection', socket => {
         'target:',
         data?.targetPlayerId
       );
-      handleKickPlayer(socket, data, callback);
+      lobbyManager.handleKickPlayer(socket, data, callback);
     }
   );
 
@@ -1034,7 +873,7 @@ io.on('connection', socket => {
         'playerCount:',
         data?.playerCount
       );
-      handleUpdateLobbySize(socket, data, callback);
+      lobbyManager.handleUpdateLobbySize(socket, data, callback);
     }
   );
 
@@ -1052,13 +891,13 @@ io.on('connection', socket => {
         'name:',
         data?.name
       );
-      handleUpdateLobbyName(socket, data, callback);
+      lobbyManager.handleUpdateLobbyName(socket, data, callback);
     }
   );
 
   socket.on('listLobbies', () => {
     logger.info('Received listLobbies request from socket:', socket.id);
-    handleListLobbies(socket);
+    lobbyManager.handleListLobbies(socket);
   });
 
   socket.on(
@@ -1092,7 +931,7 @@ io.on('connection', socket => {
     cleanupInactiveBots();
 
     const playerId = connectionManager.getPlayerId(socket.id);
-    const playerLobbyId = playerId ? lobbyIdByPlayerId.get(playerId) : null;
+    const playerLobbyId = playerId ? lobbyManager.getLobbyIdForPlayer(playerId) : null;
 
     // Collect bot IDs from the requesting player's lobby (if they're in a lobby with an active game)
     const activeBotIds = new Set<string>();
@@ -1130,9 +969,9 @@ io.on('connection', socket => {
 
     if (playerId) {
       // If player is in a lobby, remove them and handle cleanup
-      const lobbyId = lobbyIdByPlayerId.get(playerId);
+      const lobbyId = lobbyManager.getLobbyIdForPlayer(playerId);
       if (lobbyId) {
-        const lobby = lobbiesById.get(lobbyId);
+        const lobby = lobbyManager.getLobby(lobbyId);
         if (lobby) {
           if (lobby.status === 'waiting') {
             // For waiting lobbies, don't remove players immediately on disconnect
@@ -1152,7 +991,7 @@ io.on('connection', socket => {
       }
 
       // Only remove the player if they are not part of an active lobby game
-      const playerLobbyId = lobbyIdByPlayerId.get(playerId);
+      const playerLobbyId = lobbyManager.getLobbyIdForPlayer(playerId);
       const playerInActiveGame = playerLobbyId
         ? gameLoopsByLobbyId.has(playerLobbyId)
         : false;
@@ -1176,258 +1015,7 @@ io.on('connection', socket => {
   });
 });
 
-function handleJoinLobby(
-  socket: Socket,
-  data: { lobbyId: string },
-  callback?: (response: any) => void
-): void {
-  const playerId = connectionManager.getPlayerId(socket.id);
-  if (!playerId) {
-    logger.error('Player ID not found for socket:', socket.id);
-    const error = { error: 'Not logged in' };
-    if (callback) callback(error);
-    socket.emit('error', { message: 'Not logged in' });
-    return;
-  }
-
-  const { lobbyId } = data;
-
-  // Check if player is already in a lobby (in-memory check first for speed)
-  const memoryLobbyId = lobbyIdByPlayerId.get(playerId);
-  if (memoryLobbyId) {
-    // Allow rejoining the same lobby (idempotent)
-    if (memoryLobbyId === lobbyId) {
-      logger.info(
-        `[handleJoinLobby] Player ${playerId} rejoining same lobby ${lobbyId}`
-      );
-      // Fall through to allow the join (will be idempotent in Supabase)
-    } else {
-      logger.error(
-        `[handleJoinLobby] Player ${playerId} already in lobby ${memoryLobbyId} (in-memory)`
-      );
-      const error = { error: 'Already in a lobby', lobbyId: memoryLobbyId };
-      if (callback) callback(error);
-      socket.emit('error', { message: 'Already in a lobby' });
-      return;
-    }
-  }
-
-  const joinLobby = async (): Promise<void> => {
-    try {
-      // Defense in depth: Check DB for existing lobby membership in a DIFFERENT lobby
-      // Exclude the target lobby since joining the same lobby is allowed (idempotent)
-      const existingLobbyId = await getPlayerActiveLobbyId(playerId, lobbyId);
-      if (existingLobbyId) {
-        // Sync in-memory map with DB state
-        lobbyIdByPlayerId.set(playerId, existingLobbyId);
-        logger.warn(
-          `[handleJoinLobby] Player ${playerId} already in different lobby ${existingLobbyId} (DB check)`
-        );
-        const error = { error: 'Already in a lobby', lobbyId: existingLobbyId };
-        if (callback) callback(error);
-        socket.emit('error', { message: 'Already in a lobby' });
-        return;
-      }
-
-      const joined = await joinLobbyInSupabase({ lobbyId, playerId });
-      const mappedLobby = cacheLobbyFromPayload(joined);
-      lobbyIdByPlayerId.set(playerId, lobbyId);
-      socket.join(lobbyId);
-      if (mappedLobby.disconnectedPlayerIds.length) {
-        mappedLobby.disconnectedPlayerIds =
-          mappedLobby.disconnectedPlayerIds.filter(id => id !== playerId);
-      }
-      logger.info(
-        `Player ${playerId} joined lobby ${mappedLobby.name ?? lobbyId}`
-      );
-      if (callback) {
-        callback({ lobby: mappedLobby });
-      }
-      io.emit('lobbyUpdated', mappedLobby);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Join failed';
-      logger.error('Failed to join lobby via Supabase', message);
-      const response = { error: message };
-      if (callback) callback(response);
-      socket.emit('error', { message });
-    }
-  };
-
-  void joinLobby();
-}
-
-function handleLeaveLobby(
-  socket: Socket,
-  data: { lobbyId: string },
-  callback?: (response: any) => void
-): void {
-  const playerId = connectionManager.getPlayerId(socket.id);
-  if (!playerId) {
-    logger.error('Player ID not found for socket:', socket.id);
-    const error = { error: 'Not logged in' };
-    if (callback) callback(error);
-    socket.emit('error', { message: 'Not logged in' });
-    return;
-  }
-
-  const { lobbyId } = data;
-
-  // Get current lobby state to detect host transfer
-  const lobbyBefore = lobbiesById.get(lobbyId);
-  const previousHostId = lobbyBefore?.hostId;
-  const wasHost = previousHostId === playerId;
-
-  const leave = async (): Promise<void> => {
-    try {
-      const updatedLobby = await leaveLobbyInSupabase({ lobbyId, playerId });
-      lobbyIdByPlayerId.delete(playerId);
-      socket.leave(lobbyId);
-      logger.info(`Player ${playerId} left lobby ${lobbyId}`);
-
-      if (callback) {
-        callback({ success: true });
-      }
-
-      if (updatedLobby) {
-        const mapped = cacheLobbyFromPayload(updatedLobby);
-        if (mapped.currentPlayers === 0) {
-          mapped.status = 'finished';
-          mapped.finishedAt = Date.now();
-          removeLobbyFromCache(lobbyId);
-          io.emit('lobbyClosed', { lobbyId });
-        } else {
-          // Check if host was transferred
-          if (wasHost && mapped.hostId && mapped.hostId !== previousHostId) {
-            const newHostPlayer = mapped.players.find(
-              p => p.playerId === mapped.hostId
-            );
-            logger.info(
-              `[handleLeaveLobby] Host transferred from ${previousHostId} to ${mapped.hostId} (${newHostPlayer?.displayName})`
-            );
-            io.to(lobbyId).emit('hostTransferred', {
-              lobbyId,
-              newHostId: mapped.hostId,
-              newHostName: newHostPlayer?.displayName ?? 'Unknown',
-              previousHostId,
-            });
-          }
-          io.emit('lobbyUpdated', mapped);
-        }
-      } else {
-        removeLobbyFromCache(lobbyId);
-        io.emit('lobbyClosed', { lobbyId });
-      }
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Failed to leave lobby';
-      logger.error('Failed to leave lobby via Supabase', message);
-      const response = { error: message };
-      if (callback) callback(response);
-      socket.emit('error', { message });
-    }
-  };
-
-  void leave();
-}
-
-function handleKickPlayer(
-  socket: Socket,
-  data: { lobbyId: string; targetPlayerId: string },
-  callback?: (response: any) => void
-): void {
-  const playerId = connectionManager.getPlayerId(socket.id);
-  if (!playerId) {
-    logger.error('Player ID not found for socket:', socket.id);
-    const error = { error: 'Not logged in' };
-    if (callback) callback(error);
-    socket.emit('error', { message: 'Not logged in' });
-    return;
-  }
-
-  const { lobbyId, targetPlayerId } = data;
-
-  // Check if lobby exists
-  const lobby = lobbiesById.get(lobbyId);
-  if (!lobby) {
-    logger.error('Lobby not found:', lobbyId);
-    const error = { error: 'Lobby not found' };
-    if (callback) callback(error);
-    socket.emit('error', { message: 'Lobby not found' });
-    return;
-  }
-
-  // Check if player is host
-  if (playerId !== lobby.hostId) {
-    logger.error('Not the host:', playerId, 'actual host:', lobby.hostId);
-    const error = { error: 'Only the host can kick players' };
-    if (callback) callback(error);
-    socket.emit('error', { message: 'Only the host can kick players' });
-    return;
-  }
-
-  // Check if target is in this lobby
-  const targetIndex = lobby.players.findIndex(
-    p => p.playerId === targetPlayerId
-  );
-  if (targetIndex === -1) {
-    logger.error('Target player not in lobby:', targetPlayerId, lobbyId);
-    const error = { error: 'Player not in this lobby' };
-    if (callback) callback(error);
-    socket.emit('error', { message: 'Player not in this lobby' });
-    return;
-  }
-
-  const targetPlayerName = lobby.players[targetIndex].displayName;
-
-  void (async () => {
-    try {
-      const updated = await removeLobbyPlayer({
-        lobbyId,
-        hostId: playerId,
-        targetPlayerId,
-      });
-      lobbyIdByPlayerId.delete(targetPlayerId);
-      lobby.disconnectedPlayerIds = lobby.disconnectedPlayerIds.filter(
-        id => id !== targetPlayerId
-      );
-
-      logger.info(
-        `Player ${targetPlayerName} was kicked from lobby ${lobby.name} (${lobbyId}) by host ${playerId}`
-      );
-
-      if (callback) {
-        callback({ success: true });
-      }
-
-      const targetSocketId = connectionManager.getSocketId(targetPlayerId);
-      if (targetSocketId) {
-        const targetSocket = io.sockets.sockets.get(targetSocketId);
-        targetSocket?.leave(lobbyId);
-        io.to(targetSocketId).emit('kickedFromLobby', {
-          lobbyId,
-          reason: 'You were kicked by the host',
-        });
-      }
-
-      const mapped = cacheLobbyFromPayload(updated);
-      if (mapped.currentPlayers === 0 || mapped.status === 'finished') {
-        mapped.status = 'finished';
-        mapped.finishedAt = Date.now();
-        removeLobbyFromCache(lobbyId);
-        io.emit('lobbyClosed', { lobbyId });
-        return;
-      }
-
-      io.emit('lobbyUpdated', mapped);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Failed to kick player';
-      logger.error('[handleKickPlayer] Supabase remove failed', message);
-      if (callback) callback({ error: message });
-      socket.emit('error', { message });
-    }
-  })();
-}
+// Lobby handlers moved to LobbyManager
 
 async function startLobbyGameForHost(
   lobbyId: string,
@@ -1438,7 +1026,7 @@ async function startLobbyGameForHost(
   }
 
   const startedLobby = await startLobby({ lobbyId, hostId });
-  const lobby = cacheLobbyFromPayload(startedLobby);
+  const lobby = lobbyManager.cacheLobbyFromPayload(startedLobby);
   const newBotIds: string[] = [];
 
   try {
@@ -1656,202 +1244,7 @@ async function startLobbyGameForHost(
   }
 }
 
-function handleUpdateLobbySize(
-  socket: Socket,
-  data: { lobbyId: string; playerCount: number },
-  callback?: (response: any) => void
-): void {
-  const playerId = connectionManager.getPlayerId(socket.id);
-  if (!playerId) {
-    logger.error('Player ID not found for socket:', socket.id);
-    const error = { error: 'Not logged in' };
-    if (callback) callback(error);
-    socket.emit('error', { message: 'Not logged in' });
-    return;
-  }
-
-  const { lobbyId, playerCount } = data;
-
-  // Validate player count
-  if (!playerCount || playerCount < 2 || playerCount > 4) {
-    const error = { error: 'Player count must be between 2 and 4' };
-    if (callback) callback(error);
-    socket.emit('error', { message: 'Player count must be between 2 and 4' });
-    return;
-  }
-
-  // Check if lobby exists
-  const lobby = lobbiesById.get(lobbyId);
-  if (!lobby) {
-    const error = { error: 'Lobby not found' };
-    if (callback) callback(error);
-    socket.emit('error', { message: 'Lobby not found' });
-    return;
-  }
-
-  // Check if player is host
-  if (playerId !== lobby.hostId) {
-    const error = { error: 'Only the host can change lobby size' };
-    if (callback) callback(error);
-    socket.emit('error', { message: 'Only the host can change lobby size' });
-    return;
-  }
-
-  // Check if lobby is still waiting
-  if (lobby.status !== 'waiting') {
-    const error = { error: 'Cannot change size after game has started' };
-    if (callback) callback(error);
-    socket.emit('error', {
-      message: 'Cannot change size after game has started',
-    });
-    return;
-  }
-
-  void (async () => {
-    try {
-      const updated = await updateLobbySize({
-        lobbyId,
-        hostId: playerId,
-        maxPlayers: playerCount,
-      });
-      const mapped = cacheLobbyFromPayload(updated);
-      logger.info(
-        `Lobby ${lobby.name} size updated to ${playerCount} by host ${playerId}`
-      );
-      if (callback) {
-        callback({ lobby: mapped });
-      }
-      io.emit('lobbyUpdated', mapped);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Failed to update lobby size';
-      logger.error('[handleUpdateLobbySize] Supabase update failed', message);
-      if (callback) callback({ error: message });
-      socket.emit('error', { message });
-    }
-  })();
-}
-
-function handleUpdateLobbyName(
-  socket: Socket,
-  data: { lobbyId: string; name: string },
-  callback?: (response: any) => void
-): void {
-  const playerId = connectionManager.getPlayerId(socket.id);
-  if (!playerId) {
-    logger.error('Player ID not found for socket:', socket.id);
-    const error = { error: 'Not logged in' };
-    if (callback) callback(error);
-    socket.emit('error', { message: 'Not logged in' });
-    return;
-  }
-
-  const { lobbyId, name } = data;
-
-  // Validate name
-  const trimmedName = name?.trim();
-  if (!trimmedName || trimmedName.length === 0) {
-    const error = { error: 'Lobby name cannot be empty' };
-    if (callback) callback(error);
-    socket.emit('error', { message: 'Lobby name cannot be empty' });
-    return;
-  }
-
-  if (trimmedName.length > 50) {
-    const error = { error: 'Lobby name must be 50 characters or less' };
-    if (callback) callback(error);
-    socket.emit('error', {
-      message: 'Lobby name must be 50 characters or less',
-    });
-    return;
-  }
-
-  // Check if lobby exists
-  const lobby = lobbiesById.get(lobbyId);
-  if (!lobby) {
-    const error = { error: 'Lobby not found' };
-    if (callback) callback(error);
-    socket.emit('error', { message: 'Lobby not found' });
-    return;
-  }
-
-  // Check if player is host
-  if (playerId !== lobby.hostId) {
-    const error = { error: 'Only the host can change lobby name' };
-    if (callback) callback(error);
-    socket.emit('error', { message: 'Only the host can change lobby name' });
-    return;
-  }
-
-  // Check if lobby is still waiting
-  if (lobby.status !== 'waiting') {
-    const error = { error: 'Cannot change name after game has started' };
-    if (callback) callback(error);
-    socket.emit('error', {
-      message: 'Cannot change name after game has started',
-    });
-    return;
-  }
-
-  void (async () => {
-    try {
-      const updated = await updateLobbyName({
-        lobbyId,
-        hostId: playerId,
-        name: trimmedName,
-      });
-      const mapped = cacheLobbyFromPayload(updated);
-      logger.info(
-        `Lobby ${lobbyId} name updated to "${trimmedName}" by host ${playerId}`
-      );
-      if (callback) {
-        callback({ lobby: mapped });
-      }
-      io.emit('lobbyUpdated', mapped);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Failed to update lobby name';
-      logger.error('[handleUpdateLobbyName] Supabase update failed', message);
-      if (callback) callback({ error: message });
-      socket.emit('error', { message });
-    }
-  })();
-}
-
-function handleListLobbies(socket: Socket): void {
-  void (async () => {
-    try {
-      const lobbies = await listLobbiesFromSupabase();
-      lobbies.forEach(l => cacheLobbyFromPayload(l));
-      const waitingLobbies = lobbies
-        .filter(l => l.status === 'waiting')
-        .map(lobby => {
-          const hostId = lobby.host_id as string | undefined;
-          const hostPlayerInfo = hostId
-            ? connectionManager.getPlayer(hostId)
-            : undefined;
-          const hostDisplayName = hostPlayerInfo?.name || 'Unknown';
-          return {
-            id: lobby.id,
-            name: lobby.name,
-            hostDisplayName,
-            currentPlayers: lobby.current_players ?? lobby.players?.length ?? 0,
-            playerCount: lobby.max_players ?? (lobby as any).playerCount,
-            createdAt: lobby.created_at
-              ? new Date(lobby.created_at).getTime()
-              : Date.now(),
-          };
-        });
-      logger.info(`Sending ${waitingLobbies.length} waiting lobbies to client`);
-      socket.emit('lobbyList', { lobbies: waitingLobbies });
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Failed to list lobbies';
-      logger.error('[handleListLobbies] Supabase list failed', message);
-      socket.emit('error', { message: 'Failed to list lobbies' });
-    }
-  })();
-}
+// Lobby handlers moved to LobbyManager
 
 async function handleStartLobbyGame(
   socket: Socket,
@@ -1872,7 +1265,7 @@ async function handleStartLobbyGame(
   const { lobbyId } = data;
 
   const lobby =
-    lobbiesById.get(lobbyId) ?? (await refreshLobbyFromSupabase(lobbyId));
+    lobbyManager.getLobby(lobbyId) ?? (await refreshLobbyFromSupabase(lobbyId));
   if (!lobby) {
     const errorMsg = 'Lobby not found';
     socket.emit('error', { message: errorMsg });
@@ -1907,126 +1300,7 @@ async function handleStartLobbyGame(
   }
 }
 
-function handleCreateLobby(
-  socket: Socket,
-  data: {
-    playerCount: number;
-    name?: string;
-    visibility?: 'public' | 'private' | 'friends';
-    isFixedSize?: boolean;
-  },
-  callback?: (response: any) => void
-): void {
-  const playerId = connectionManager.getPlayerId(socket.id);
-  logger.info(
-    `[handleCreateLobby] Starting for player: ${playerId}, callback present: ${!!callback}`
-  );
-
-  if (!playerId) {
-    logger.error('Player ID not found for socket:', socket.id);
-    const error = { error: 'Not logged in' };
-    if (callback) {
-      logger.info('[handleCreateLobby] Sending error callback: Not logged in');
-      callback(error);
-    }
-    socket.emit('error', { message: 'Not logged in' });
-    return;
-  }
-
-  // Check if player is already in a lobby (in-memory check first for speed)
-  if (lobbyIdByPlayerId.has(playerId)) {
-    const existingLobbyId = lobbyIdByPlayerId.get(playerId);
-    logger.error(
-      `[handleCreateLobby] Player ${playerId} already in lobby ${existingLobbyId} (in-memory)`
-    );
-    const error = { error: 'Already in a lobby', lobbyId: existingLobbyId };
-    if (callback) {
-      logger.info(
-        '[handleCreateLobby] Sending error callback: Already in a lobby'
-      );
-      callback(error);
-    }
-    socket.emit('error', { message: 'Already in a lobby' });
-    return;
-  }
-
-  const {
-    playerCount,
-    name: customName,
-    visibility = 'public',
-    isFixedSize = true,
-  } = data;
-
-  // Validate player count
-  if (!playerCount || playerCount < 2 || playerCount > 4) {
-    logger.error('Invalid player count:', playerCount);
-    const error = { error: 'Player count must be between 2 and 4' };
-    if (callback) callback(error);
-    socket.emit('error', { message: 'Player count must be between 2 and 4' });
-    return;
-  }
-
-  // Get player info for host display name
-  const playerInfo = connectionManager.getPlayer(playerId);
-  const hostDisplayName = playerInfo?.name || 'Unknown';
-
-  // Generate lobby name (either custom or default to "<host's name>'s lobby")
-  const lobbyName = customName?.trim() || `${hostDisplayName}'s lobby`;
-
-  const createLobbyAsync = async (): Promise<void> => {
-    try {
-      // Defense in depth: Check DB for existing lobby membership
-      // This catches cases where in-memory map is out of sync (e.g., after server restart)
-      const existingLobbyId = await getPlayerActiveLobbyId(playerId);
-      if (existingLobbyId) {
-        // Sync in-memory map with DB state
-        lobbyIdByPlayerId.set(playerId, existingLobbyId);
-        logger.warn(
-          `[handleCreateLobby] Player ${playerId} already in lobby ${existingLobbyId} (DB check)`
-        );
-        const error = { error: 'Already in a lobby', lobbyId: existingLobbyId };
-        if (callback) callback(error);
-        socket.emit('error', { message: 'Already in a lobby' });
-        return;
-      }
-
-      const created = await createLobby({
-        hostId: playerId,
-        name: lobbyName,
-        maxPlayers: playerCount,
-        isFixedSize,
-        visibility,
-      });
-      const mapped = cacheLobbyFromPayload(created);
-      lobbyIdByPlayerId.set(playerId, mapped.id);
-      socket.join(mapped.id);
-
-      logger.info(
-        `[handleCreateLobby] Lobby created: ${mapped.name} (${mapped.id}) by ${hostDisplayName}`
-      );
-
-      if (callback) {
-        logger.info(
-          '[handleCreateLobby] Sending success callback with lobby:',
-          mapped.id
-        );
-        callback({ lobby: mapped });
-      }
-
-      io.emit('lobbyUpdated', mapped);
-      socket.emit('lobbyCreated', { lobbyId: mapped.id, name: mapped.name });
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Failed to create lobby';
-      logger.error('[handleCreateLobby] Supabase create failed', message);
-      const response = { error: message };
-      if (callback) callback(response);
-      socket.emit('error', { message });
-    }
-  };
-
-  void createLobbyAsync();
-}
+// Lobby handlers moved to LobbyManager
 
 async function handleLogin(socket: Socket, data: LoginData): Promise<void> {
   if (!SUPABASE_AUTH_ENABLED) {
@@ -2115,19 +1389,21 @@ async function handleLogin(socket: Socket, data: LoginData): Promise<void> {
     connectionManager.setPlayerId(socket.id, playerId);
     connectionManager.setPlayer(playerId, playerInfo);
 
-    let reconnectLobbyId = lobbyIdByPlayerId.get(playerId);
+    let reconnectLobbyId = lobbyManager.getLobbyIdForPlayer(playerId);
     let reconnectLobby = reconnectLobbyId
-      ? lobbiesById.get(reconnectLobbyId)
+      ? lobbyManager.getLobby(reconnectLobbyId)
       : null;
 
     // If not found in memory, check database (handles server restart scenario)
     if (!reconnectLobby) {
       // First check in-memory maps
-      for (const [lobbyId, lobby] of lobbiesById.entries()) {
+      const allLobbies = lobbyManager.getAllLobbies();
+      for (const [lobbyId, lobby] of allLobbies.entries()) {
         if (lobby.players.some(p => p.playerId === playerId)) {
           reconnectLobbyId = lobbyId;
           reconnectLobby = lobby;
-          lobbyIdByPlayerId.set(playerId, lobbyId);
+          // Note: lobbyIdByPlayerId is managed by LobbyManager, but we need to ensure it's set
+          // This is handled by cacheLobbyFromPayload when we refresh from DB
           break;
         }
       }
@@ -2143,7 +1419,7 @@ async function handleLogin(socket: Socket, data: LoginData): Promise<void> {
             reconnectLobbyId = dbLobbyId;
             reconnectLobby = await refreshLobbyFromSupabase(dbLobbyId);
             if (reconnectLobby) {
-              lobbyIdByPlayerId.set(playerId, dbLobbyId);
+              // refreshLobbyFromSupabase already calls cacheLobbyFromPayload which sets the mapping
               logger.info(
                 `[handleLogin] Successfully restored lobby ${reconnectLobby.name} from database`
               );
@@ -2278,14 +1554,14 @@ async function handleRestartGame(socket: Socket): Promise<void> {
   }
 
   // Get the lobby this player is in
-  const lobbyId = lobbyIdByPlayerId.get(playerId);
+  const lobbyId = lobbyManager.getLobbyIdForPlayer(playerId);
   if (!lobbyId) {
     logger.error('Player not in a lobby:', playerId);
     socket.emit('error', { message: 'Not in a lobby' });
     return;
   }
 
-  const lobby = lobbiesById.get(lobbyId);
+  const lobby = lobbyManager.getLobby(lobbyId);
   if (!lobby) {
     logger.error('Lobby not found:', lobbyId);
     socket.emit('error', { message: 'Lobby not found' });
@@ -2561,7 +1837,7 @@ function sendMostRecentGameData(socket: Socket): void {
     return;
   }
 
-  const lobbyId = lobbyIdByPlayerId.get(playerId);
+  const lobbyId = lobbyManager.getLobbyIdForPlayer(playerId);
   if (!lobbyId) {
     logger.warn(
       `Player ${playerId} is not in a lobby; skipping game state send.`
@@ -2698,7 +1974,7 @@ async function startGame(lobbyId: string): Promise<void> {
     supabaseGameIdByLobbyId.delete(lobbyId);
     roundStartSnapshotByLobbyId.delete(lobbyId);
 
-    const completedLobby = lobbiesById.get(lobbyId);
+    const completedLobby = lobbyManager.getLobby(lobbyId);
     if (completedLobby) {
       completedLobby.status = 'finished';
       completedLobby.finishedAt = Date.now();
