@@ -42,6 +42,20 @@ import {
   verifyAccessToken,
   type LobbyPayload,
 } from './services/supabaseService';
+import {
+  PlayerInfo,
+  PlayerInLobby,
+  Lobby,
+  LoginData,
+  TestResetRequest,
+  TestResetResponse,
+  PLAYER_DISCONNECT_GRACE_MS,
+  FINISHED_LOBBY_TTL_MS,
+  FINISHED_LOBBY_SWEEP_INTERVAL_MS,
+  STALE_WAITING_LOBBY_MS,
+  STALE_IN_PROGRESS_LOBBY_MS,
+  DEFAULT_LOBBY_ID,
+} from './server/types';
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
 dotenv.config();
@@ -254,38 +268,6 @@ io.use((socket, next) => {
     });
 });
 
-interface PlayerInfo {
-  id: string;
-  name: string;
-  agent: GameAgent;
-}
-
-interface PlayerInLobby {
-  playerId: string;
-  displayName: string;
-}
-
-interface Lobby {
-  id: string;
-  name?: string;
-  hostId: string;
-  maxPlayers: number; // 2–4
-  playerCount?: number; // legacy field
-  currentPlayers: number;
-  players: PlayerInLobby[]; // humans only; bots are added when starting game
-  status: 'waiting' | 'in_progress' | 'finished';
-  createdAt: number;
-  finishedAt?: number | null;
-  disconnectedPlayerIds: string[];
-  isFixedSize?: boolean;
-}
-
-interface LoginData {
-  // Optional because auth is established at handshake time via middleware.
-  // If provided, it must match the middleware-authenticated user.
-  accessToken?: string;
-}
-
 const connectedPlayers: Map<string, PlayerInfo> = new Map();
 const playerIdToSocketId: Map<string, string> = new Map();
 const socketIdToPlayerId: Map<string, string> = new Map(); // Track socket -> player ID mapping for reconnection
@@ -305,21 +287,6 @@ app.get('/connected-players', (_req, res) => {
 // Test-only endpoint for resetting server state between E2E tests
 // Only available in non-production environments
 if (process.env.NODE_ENV !== 'production') {
-  interface TestResetRequest {
-    userId?: string;
-    scopes: Array<'lobbies' | 'games' | 'connections' | 'all'>;
-  }
-
-  interface TestResetResponse {
-    success: boolean;
-    cleared: {
-      lobbies?: number;
-      games?: number;
-      connections?: number;
-      players?: string[];
-    };
-  }
-
   app.post('/api/test/reset', (req, res) => {
     const { userId, scopes = ['all'] } = req.body as TestResetRequest;
 
@@ -654,15 +621,6 @@ async function persistRoundHistory(
     // This is acceptable since persistence failures are logged for monitoring
   }
 }
-
-const PLAYER_DISCONNECT_GRACE_MS = 60 * 1000; // 1 minute to reconnect before cancelling the game
-const FINISHED_LOBBY_TTL_MS = 60 * 60 * 1000; // 1 hour retention for finished lobbies before cleanup
-const FINISHED_LOBBY_SWEEP_INTERVAL_MS = 5 * 60 * 1000; // Sweep finished lobbies every 5 minutes
-const STALE_WAITING_LOBBY_MS = 30 * 60 * 1000; // 30 minutes before a waiting lobby with no connections is stale
-const STALE_IN_PROGRESS_LOBBY_MS = 60 * 60 * 1000; // 1 hour before an in-progress lobby with no connections is stale
-
-// Temporary default lobby ID used until full lobby management is implemented
-const DEFAULT_LOBBY_ID = 'default-lobby';
 
 // Generate a unique lobby name (adjective-animal) that doesn't collide with active lobbies
 function generateUniqueLobbyName(): string {
