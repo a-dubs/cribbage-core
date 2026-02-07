@@ -12,8 +12,6 @@ import {
 } from '../types';
 import {
   parseCard,
-  scoreHand,
-  scorePegging,
   sumOfPeggingStack,
   scoreHandWithBreakdown,
   scorePeggingWithBreakdown,
@@ -196,10 +194,15 @@ export class CribbageGame extends EventEmitter {
       const dealerIndex = this.gameState.players.findIndex(
         player => player.isDealer
       );
-      this.gameState.players[dealerIndex].isDealer = false;
-      this.gameState.players[
-        (dealerIndex + 1) % this.gameState.players.length
-      ].isDealer = true;
+      const currentDealer = this.gameState.players[dealerIndex];
+      const nextDealerIndex = (dealerIndex + 1) % this.gameState.players.length;
+      const nextDealer = this.gameState.players[nextDealerIndex];
+      if (currentDealer) {
+        currentDealer.isDealer = false;
+      }
+      if (nextDealer) {
+        nextDealer.isDealer = true;
+      }
     }
     // increment round number
     this.gameState.roundNumber += 1;
@@ -302,7 +305,8 @@ export class CribbageGame extends EventEmitter {
     if (!isValidDiscard(this.gameState, player, cards)) {
       throw new Error('Invalid cards to discard.');
     }
-    if (playerId === this.gameState.players[1].id) {
+    const secondPlayer = this.gameState.players[1];
+    if (secondPlayer && playerId === secondPlayer.id) {
       // logger.info(`Player ${playerId} hand: ${player.hand.join(', ')}`);
       // logger.info(`Player ${playerId} discards: ${cards.join(', ')}`);
     }
@@ -569,7 +573,11 @@ export class CribbageGame extends EventEmitter {
     }
     const followingPlayerIndex =
       (playerIndex + 1) % this.gameState.players.length;
-    return this.gameState.players[followingPlayerIndex].id;
+    const followingPlayer = this.gameState.players[followingPlayerIndex];
+    if (!followingPlayer) {
+      throw new Error('Following player not found.');
+    }
+    return followingPlayer.id;
   }
 
   /**
@@ -1098,7 +1106,7 @@ export class CribbageGame extends EventEmitter {
    */
   public getDealerSelectionCard(
     playerId: string,
-    forPlayerId: string
+    _forPlayerId: string
   ): Card | 'UNKNOWN' {
     // Check if all players have selected
     const allPlayersSelected =
@@ -1144,7 +1152,6 @@ export class CribbageGame extends EventEmitter {
     // Determine if event is from opponent
     const isOpponentEvent =
       gameEvent.playerId !== null && gameEvent.playerId !== forPlayerId;
-    const isDealer = requestingPlayer.isDealer;
     const isCountingPhase = this.gameState.currentPhase === Phase.COUNTING;
 
     // Redaction rules based on action type
@@ -1231,9 +1238,9 @@ export class CribbageGame extends EventEmitter {
    */
   public getRedactedGameSnapshot(forPlayerId: string): GameSnapshot {
     // Get the most recent snapshot (or create one if none exists)
-    const latestSnapshot =
+    const latestSnapshot: GameSnapshot =
       this.gameSnapshotHistory.length > 0
-        ? this.gameSnapshotHistory[this.gameSnapshotHistory.length - 1]
+        ? this.gameSnapshotHistory[this.gameSnapshotHistory.length - 1]!
         : {
             gameState: this.gameState,
             gameEvent: {

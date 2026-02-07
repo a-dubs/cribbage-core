@@ -3,7 +3,7 @@ import { parseCard, sumOfPeggingStack } from './scoring';
 import { logger } from '../utils/logger';
 
 export function isValidDiscard(
-  game: GameState,
+  _game: GameState,
   player: Player,
   cards: Card[]
 ): boolean {
@@ -96,8 +96,9 @@ export function getMostRecentGameEventForPlayer(
   playerId: string
 ): GameEvent | null {
   for (let i = gameEventHistory.length - 1; i >= 0; i--) {
-    if (gameEventHistory[i].playerId === playerId) {
-      return gameEventHistory[i];
+    const event = gameEventHistory[i];
+    if (event && event.playerId === playerId) {
+      return event;
     }
   }
   return null;
@@ -120,11 +121,13 @@ export function getMostRecentScoreableEventForPlayer(
   playerId: string
 ): GameEvent | null {
   for (let i = gameEventHistory.length - 1; i >= 0; i--) {
+    const event = gameEventHistory[i];
     if (
-      gameEventHistory[i].playerId === playerId &&
-      isScoreableEvent(gameEventHistory[i])
+      event &&
+      event.playerId === playerId &&
+      isScoreableEvent(event)
     ) {
-      return gameEventHistory[i];
+      return event;
     }
   }
   return null;
@@ -136,11 +139,13 @@ export function getMostRecentEventForPlayerByActionType(
   actionType: ActionType
 ): GameEvent | null {
   for (let i = gameEventHistory.length - 1; i >= 0; i--) {
+    const event = gameEventHistory[i];
     if (
-      gameEventHistory[i].playerId === playerId &&
-      gameEventHistory[i].actionType === actionType
+      event &&
+      event.playerId === playerId &&
+      event.actionType === actionType
     ) {
-      return gameEventHistory[i];
+      return event;
     }
   }
   return null;

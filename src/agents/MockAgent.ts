@@ -87,6 +87,11 @@ export class MockAgent implements GameAgent {
       );
     }
     const response = this.playCardResponses[this.playCardIndex];
+    if (response === undefined) {
+      throw new Error(
+        `MockAgent: Missing play card response at index ${this.playCardIndex} for player ${playerId}`
+      );
+    }
     this.playCardIndex++;
     return Promise.resolve(response);
   }
@@ -102,6 +107,11 @@ export class MockAgent implements GameAgent {
       );
     }
     const response = this.discardResponses[this.discardIndex];
+    if (response === undefined) {
+      throw new Error(
+        `MockAgent: Missing discard response at index ${this.discardIndex} for player ${playerId}`
+      );
+    }
     this.discardIndex++;
     if (response.length !== numberOfCardsToDiscard) {
       throw new Error(
@@ -127,6 +137,11 @@ export class MockAgent implements GameAgent {
       );
     }
     const response = this.cutDeckResponses[this.cutDeckIndex];
+    if (response === undefined) {
+      throw new Error(
+        `MockAgent: Missing cut deck response at index ${this.cutDeckIndex} for player ${playerId}`
+      );
+    }
     this.cutDeckIndex++;
     if (response < 0 || response > maxIndex) {
       throw new Error(
@@ -147,6 +162,11 @@ export class MockAgent implements GameAgent {
       );
     }
     const response = this.selectDealerCardResponses[this.selectDealerCardIndex];
+    if (response === undefined) {
+      throw new Error(
+        `MockAgent: Missing select dealer card response at index ${this.selectDealerCardIndex} for player ${playerId}`
+      );
+    }
     this.selectDealerCardIndex++;
     if (response < 0 || response > maxIndex) {
       throw new Error(

@@ -1,5 +1,4 @@
-import { CribbageGame } from '../core/CribbageGame';
-import { parseCard, scoreHand, scorePegging } from '../core/scoring';
+import { parseCard, scorePegging } from '../core/scoring';
 import { GameSnapshot, Card } from '../types';
 import { ExhaustiveSimpleAgent } from './ExhaustiveSimpleAgent';
 import { logger } from '../utils/logger';
@@ -34,7 +33,6 @@ export class HeuristicSimpleAgent extends ExhaustiveSimpleAgent {
     }
 
     const parseStartTime = DEBUG_TIMING ? Date.now() : 0;
-    const parsedHand = player.peggingHand.map(card => parseCard(card));
     const parsedStack = game.peggingStack.map(card => parseCard(card));
 
     // Calculate current stack sum for quick filtering
