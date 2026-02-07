@@ -30,10 +30,8 @@ import {
   leaveLobby as leaveLobbyInSupabase,
   listLobbies as listLobbiesFromSupabase,
   completeGameRecord,
-  createGameRecord,
   getProfile,
   getServiceClient,
-  persistGameEvents,
   removeLobbyPlayer,
   startLobby,
   toUuidOrNull,
@@ -45,6 +43,7 @@ import {
 import { applyAuthMiddleware } from './server/AuthMiddleware';
 import { ConnectionManager } from './server/ConnectionManager';
 import { LobbyManager } from './server/LobbyManager';
+import { PersistenceService } from './server/PersistenceService';
 import {
   PlayerInfo,
   PlayerInLobby,
@@ -445,150 +444,8 @@ const lobbyManager = new LobbyManager({
   SUPABASE_LOBBIES_ENABLED,
 });
 
-function mapPlayersForGameRecord(
-  players: PlayerIdAndName[]
-): Array<{ playerId: string | null; playerName: string }> {
-  return players.map(player => ({
-    playerId: toUuidOrNull(player.id),
-    playerName: player.name,
-  }));
-}
-
-async function createSupabaseGameForLobby(
-  lobby: Lobby,
-  playersInfo: PlayerIdAndName[],
-  gameLoop: GameLoop
-): Promise<string | null> {
-  if (!SUPABASE_AUTH_ENABLED) {
-    logger.debug(
-      '[Supabase] Game record creation skipped: SUPABASE_AUTH_ENABLED is false'
-    );
-    return null;
-  }
-  try {
-    logger.info(
-      `[Supabase] Creating game record for lobby ${lobby.id} with ${playersInfo.length} players`
-    );
-    const gameId = await createGameRecord({
-      lobbyId: lobby.id,
-      players: mapPlayersForGameRecord(playersInfo),
-      initialState: gameLoop.cribbageGame.getGameState(),
-      startedAt: new Date(),
-    });
-    supabaseGameIdByLobbyId.set(lobby.id, gameId);
-    logger.info(
-      `[Supabase] Created game record ${gameId} for lobby ${lobby.id}`
-    );
-    return gameId;
-  } catch (error) {
-    logger.error(
-      `[Supabase] Failed to create game record for lobby ${lobby.id}`,
-      error
-    );
-    return null;
-  }
-}
-
-function shouldStoreSnapshotForEvent(event: GameEvent): boolean {
-  return (
-    event.actionType === ActionType.START_ROUND ||
-    event.actionType === ActionType.READY_FOR_NEXT_ROUND ||
-    event.actionType === ActionType.WIN
-  );
-}
-
-function snapshotForEvent(
-  event: GameEvent,
-  latestSnapshot: GameSnapshot,
-  roundStartSnapshot?: GameSnapshot
-): GameSnapshot | undefined {
-  if (event.actionType === ActionType.START_ROUND) {
-    return roundStartSnapshot ?? latestSnapshot;
-  }
-  if (
-    event.actionType === ActionType.READY_FOR_NEXT_ROUND ||
-    event.actionType === ActionType.WIN
-  ) {
-    return latestSnapshot;
-  }
-  return undefined;
-}
-
-async function persistRoundHistory(
-  lobbyId: string,
-  latestSnapshot: GameSnapshot
-): Promise<void> {
-  const supabaseGameId = supabaseGameIdByLobbyId.get(lobbyId);
-  if (!SUPABASE_AUTH_ENABLED) {
-    logger.debug(
-      '[Supabase] Persistence skipped: SUPABASE_AUTH_ENABLED is false'
-    );
-    return;
-  }
-  if (!supabaseGameId) {
-    logger.warn(
-      `[Supabase] Persistence skipped: No game ID found for lobby ${lobbyId}`
-    );
-    return;
-  }
-
-  // Atomically capture and clear events to prevent race conditions
-  // If START_ROUND fires during persistence, it won't be lost
-  const roundEvents = currentRoundGameEventsByLobbyId.get(lobbyId) ?? [];
-  if (roundEvents.length === 0) {
-    logger.debug(
-      `[Supabase] Persistence skipped: No events to persist for lobby ${lobbyId}`
-    );
-    return;
-  }
-
-  logger.info(
-    `[Supabase] Persisting ${roundEvents.length} events for game ${supabaseGameId} (lobby ${lobbyId})`
-  );
-
-  // Clear immediately before async operation to prevent race conditions
-  currentRoundGameEventsByLobbyId.set(lobbyId, []);
-
-  const roundStartSnapshot = roundStartSnapshotByLobbyId.get(lobbyId);
-  const eventsWithSnapshots = roundEvents.map(event => {
-    const snapshot = snapshotForEvent(
-      event,
-      latestSnapshot,
-      roundStartSnapshot
-    );
-    return {
-      event,
-      snapshot,
-      storeSnapshot: snapshot ? shouldStoreSnapshotForEvent(event) : false,
-    };
-  });
-
-  const snapshotsToStore = eventsWithSnapshots.filter(
-    e => e.storeSnapshot
-  ).length;
-  if (snapshotsToStore > 0) {
-    logger.info(
-      `[Supabase] Will store ${snapshotsToStore} snapshots along with events`
-    );
-  }
-
-  try {
-    await persistGameEvents({
-      gameId: supabaseGameId,
-      events: eventsWithSnapshots,
-    });
-    logger.info(
-      `[Supabase] Successfully persisted ${roundEvents.length} events for game ${supabaseGameId}`
-    );
-  } catch (error) {
-    logger.error(
-      `[Supabase] Failed to persist round history for game ${supabaseGameId}`,
-      error
-    );
-    // Note: Events are already cleared, so they won't be retried
-    // This is acceptable since persistence failures are logged for monitoring
-  }
-}
+// Create PersistenceService instance
+const persistenceService = new PersistenceService(logger);
 
 
 /**
@@ -1102,7 +959,13 @@ async function startLobbyGameForHost(
     agents.forEach((agent, id) => gameLoop.addAgent(id, agent));
     gameLoopsByLobbyId.set(lobby.id, gameLoop);
     currentRoundGameEventsByLobbyId.set(lobby.id, []);
-    await createSupabaseGameForLobby(lobby, validPlayersInfo, gameLoop);
+    await persistenceService.createSupabaseGameForLobby(
+      lobby,
+      validPlayersInfo,
+      gameLoop,
+      supabaseGameIdByLobbyId,
+      SUPABASE_AUTH_ENABLED
+    );
 
     // Set up gameSnapshot listener to send redacted snapshots to all clients
     let firstSnapshotEmitted = false;
@@ -1138,8 +1001,17 @@ async function startLobbyGameForHost(
         logger.info(
           `[Supabase] Triggering persistence for ${newSnapshot.gameEvent.actionType} (lobby ${lobby.id}, ${eventsToPersist.length} events collected)`
         );
-        // Use void to fire-and-forget, but ensure errors are logged in persistRoundHistory
-        void persistRoundHistory(lobby.id, newSnapshot).catch(error => {
+      // Use void to fire-and-forget, but ensure errors are logged in persistRoundHistory
+      void persistenceService
+        .persistRoundHistory(
+          lobby.id,
+          newSnapshot,
+          supabaseGameIdByLobbyId,
+          currentRoundGameEventsByLobbyId,
+          roundStartSnapshotByLobbyId,
+          SUPABASE_AUTH_ENABLED
+        )
+        .catch(error => {
           logger.error(
             `[Supabase] Unhandled error in persistRoundHistory for lobby ${lobby.id}`,
             error
@@ -1666,11 +1538,17 @@ async function handleRestartGame(socket: Socket): Promise<void> {
     throw new Error('Not enough connected players to restart game');
   }
 
-  const gameLoop = new GameLoop(validPlayersInfo);
-  agents.forEach((agent, id) => gameLoop.addAgent(id, agent));
-  gameLoopsByLobbyId.set(lobby.id, gameLoop);
-  currentRoundGameEventsByLobbyId.set(lobby.id, []);
-  await createSupabaseGameForLobby(lobby, validPlayersInfo, gameLoop);
+    const gameLoop = new GameLoop(validPlayersInfo);
+    agents.forEach((agent, id) => gameLoop.addAgent(id, agent));
+    gameLoopsByLobbyId.set(lobby.id, gameLoop);
+    currentRoundGameEventsByLobbyId.set(lobby.id, []);
+    await persistenceService.createSupabaseGameForLobby(
+      lobby,
+      validPlayersInfo,
+      gameLoop,
+      supabaseGameIdByLobbyId,
+      SUPABASE_AUTH_ENABLED
+    );
 
   // Set up gameSnapshot listener to send redacted snapshots to all clients
   let firstSnapshotEmitted = false;
@@ -1704,12 +1582,21 @@ async function handleRestartGame(socket: Socket): Promise<void> {
         `[Supabase] Triggering persistence for ${newSnapshot.gameEvent.actionType} (lobby ${lobby.id}, ${eventsToPersist.length} events collected)`
       );
       // Use void to fire-and-forget, but ensure errors are logged in persistRoundHistory
-      void persistRoundHistory(lobby.id, newSnapshot).catch(error => {
-        logger.error(
-          `[Supabase] Unhandled error in persistRoundHistory for lobby ${lobby.id}`,
-          error
-        );
-      });
+      void persistenceService
+        .persistRoundHistory(
+          lobby.id,
+          newSnapshot,
+          supabaseGameIdByLobbyId,
+          currentRoundGameEventsByLobbyId,
+          roundStartSnapshotByLobbyId,
+          SUPABASE_AUTH_ENABLED
+        )
+        .catch(error => {
+          logger.error(
+            `[Supabase] Unhandled error in persistRoundHistory for lobby ${lobby.id}`,
+            error
+          );
+        });
     }
 
     // Send redacted snapshots to all players
@@ -1924,7 +1811,14 @@ async function startGame(lobbyId: string): Promise<void> {
     if (supabaseGameId) {
       const latestSnapshot = mostRecentGameSnapshotByLobbyId.get(lobbyId);
       if (latestSnapshot) {
-        await persistRoundHistory(lobbyId, latestSnapshot);
+        await persistenceService.persistRoundHistory(
+          lobbyId,
+          latestSnapshot,
+          supabaseGameIdByLobbyId,
+          currentRoundGameEventsByLobbyId,
+          roundStartSnapshotByLobbyId,
+          SUPABASE_AUTH_ENABLED
+        );
       }
       const finalState = currentGameLoop.cribbageGame.getGameState();
       const finalScores = finalState.players.map(player => ({
