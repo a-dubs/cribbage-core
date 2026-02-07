@@ -1773,7 +1773,12 @@ export async function getGameSnapshotsForUser(
  */
 export async function getGameHistoryCountsByLobbyId(
   lobbyId: string
-): Promise<{ gameId: string | null; eventsCount: number; snapshotsCount: number }> {
+): Promise<{
+  gameId: string | null;
+  eventsCount: number;
+  snapshotsCount: number;
+  readyForCountingCount: number;
+}> {
   const client = getServiceClient();
   
   // First, find the game ID for this lobby
@@ -1790,7 +1795,12 @@ export async function getGameHistoryCountsByLobbyId(
   }
   
   if (!gameData) {
-    return { gameId: null, eventsCount: 0, snapshotsCount: 0 };
+    return {
+      gameId: null,
+      eventsCount: 0,
+      snapshotsCount: 0,
+      readyForCountingCount: 0,
+    };
   }
   
   const gameId = gameData.id as string;
@@ -1814,10 +1824,27 @@ export async function getGameHistoryCountsByLobbyId(
   if (snapshotsError) {
     throw new Error(`Failed to count snapshots: ${snapshotsError.message}`);
   }
+
+  // Count "ready for counting" events (a strong signal that a round ended)
+  const {
+    count: readyForCountingCount,
+    error: readyForCountingError,
+  } = await client
+    .from('game_events')
+    .select('*', { count: 'exact', head: true })
+    .eq('game_id', gameId)
+    .eq('action_type', 'READY_FOR_COUNTING');
+
+  if (readyForCountingError) {
+    throw new Error(
+      `Failed to count READY_FOR_COUNTING events: ${readyForCountingError.message}`
+    );
+  }
   
   return {
     gameId,
     eventsCount: eventsCount ?? 0,
     snapshotsCount: snapshotsCount ?? 0,
+    readyForCountingCount: readyForCountingCount ?? 0,
   };
 }
