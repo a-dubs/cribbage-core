@@ -10,8 +10,6 @@ import { verifyAccessToken } from '../services/supabaseService';
  */
 export function applyAuthMiddleware(io: Server): void {
   io.use((socket, next) => {
-    // Direct console.log to verify middleware is being called
-    console.log('>>> AUTH MIDDLEWARE CALLED <<<', socket.id);
     const socketId = socket.id || 'pending';
     logger.info(
       `[Auth Middleware] 🔐 Processing connection for socket ${socketId}`,
