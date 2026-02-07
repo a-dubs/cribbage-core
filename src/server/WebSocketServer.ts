@@ -36,7 +36,6 @@ import {
 export interface WebSocketServerConfig {
   port: number;
   webAppOrigin: string;
-  supabaseAuthEnabled: boolean;
   supabaseLobbiesEnabled: boolean;
 }
 
@@ -170,7 +169,6 @@ export class WebSocketServer {
       gameIdByLobbyId: this.gameIdByLobbyId,
       cleanupBots: (lobbyId: string) => this.cleanupBots(lobbyId),
       emitConnectedPlayers: () => this.emitConnectedPlayers(),
-      SUPABASE_AUTH_ENABLED: this.config.supabaseAuthEnabled,
     });
 
     // Setup HTTP routes
@@ -468,17 +466,15 @@ export class WebSocketServer {
         }
       );
 
-      if (this.config.supabaseAuthEnabled) {
-        const userId = (socket.data as { userId?: string }).userId;
-        if (!userId) {
-          logger.warn(
-            `[Connection] ❌ Connection without userId, disconnecting socket ${socket.id}`
-          );
-          socket.disconnect(true);
-          return;
-        }
-        logger.info(`[Connection] ✅ Socket ${socket.id} has userId: ${userId}`);
+      const userId = (socket.data as { userId?: string }).userId;
+      if (!userId) {
+        logger.warn(
+          `[Connection] ❌ Connection without userId, disconnecting socket ${socket.id}`
+        );
+        socket.disconnect(true);
+        return;
       }
+      logger.info(`[Connection] ✅ Socket ${socket.id} has userId: ${userId}`);
 
       logger.info(
         `[Connection] ✓ Socket connected: ${socket.id} from ${
@@ -680,14 +676,6 @@ export class WebSocketServer {
    * Handle login event
    */
   private async handleLogin(socket: Socket, data: LoginData): Promise<void> {
-    if (!this.config.supabaseAuthEnabled) {
-      socket.emit('loginRejected', {
-        reason: 'AUTH_DISABLED',
-        message: 'Supabase auth is disabled',
-      });
-      return;
-    }
-
     try {
       const socketAuthedUserId = (socket.data as { userId?: string }).userId;
       if (!socketAuthedUserId) {

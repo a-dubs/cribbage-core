@@ -2,7 +2,7 @@
 process.env.SUPABASE_URL = 'http://localhost:54321';
 process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key';
 process.env.SUPABASE_ANON_KEY = 'test-anon-key';
-process.env.SUPABASE_AUTH_ENABLED = 'true';
+// Note: SUPABASE_AUTH_ENABLED flag removed - auth is always required
 process.env.SUPABASE_LOBBIES_ENABLED = 'true';
 
 // Mock avatarRoutes to avoid sharp dependency issues in tests
@@ -818,40 +818,22 @@ describe('httpApi', () => {
   });
 
   describe('Feature flags', () => {
+    // Note: SUPABASE_AUTH_ENABLED flag has been removed - auth is always required
+    // Only SUPABASE_LOBBIES_ENABLED remains as a feature flag
     let appWithFlagsDisabled: express.Express;
 
     beforeEach(() => {
       // Create a new app with flags disabled
       // We need to re-import to pick up new env vars
       jest.resetModules();
-      process.env.SUPABASE_AUTH_ENABLED = 'false';
       process.env.SUPABASE_LOBBIES_ENABLED = 'false';
     });
 
     afterEach(() => {
       // Restore flags
-      process.env.SUPABASE_AUTH_ENABLED = 'true';
       process.env.SUPABASE_LOBBIES_ENABLED = 'true';
     });
 
-    it('returns 503 for auth endpoints when auth is disabled', async () => {
-      // Re-import with new env vars
-      jest.isolateModules(() => {
-        process.env.SUPABASE_AUTH_ENABLED = 'false';
-        const express = require('express');
-        const { registerHttpApi } = require('../src/httpApi');
-
-        appWithFlagsDisabled = express();
-        appWithFlagsDisabled.use(express.json());
-        registerHttpApi(appWithFlagsDisabled, hooks);
-      });
-
-      const response = await request(appWithFlagsDisabled)
-        .post('/auth/login')
-        .send({ email: 'test@example.com', password: 'pass' });
-
-      expect(response.status).toBe(503);
-      expect(response.body.error).toBe('FEATURE_DISABLED');
-    });
+    // Auth endpoints are now always enabled - no feature flag test needed
   });
 });

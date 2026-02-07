@@ -69,15 +69,8 @@ export class PersistenceService {
     lobby: Lobby,
     playersInfo: PlayerIdAndName[],
     gameLoop: GameLoop,
-    supabaseGameIdByLobbyId: Map<string, string>,
-    supabaseAuthEnabled: boolean
+    supabaseGameIdByLobbyId: Map<string, string>
   ): Promise<string | null> {
-    if (!supabaseAuthEnabled) {
-      this.logger.debug(
-        '[Supabase] Game record creation skipped: SUPABASE_AUTH_ENABLED is false'
-      );
-      return null;
-    }
     try {
       this.logger.info(
         `[Supabase] Creating game record for lobby ${lobby.id} with ${playersInfo.length} players`
@@ -95,7 +88,8 @@ export class PersistenceService {
       return gameId;
     } catch (error) {
       this.logger.error(
-        `[Supabase] Failed to create game record for lobby ${lobby.id}`,
+        `[Supabase] Failed to create game record for lobby ${lobby.id}. ` +
+          `This is a critical error - game persistence is required.`,
         error
       );
       return null;
@@ -113,16 +107,9 @@ export class PersistenceService {
     latestSnapshot: GameSnapshot,
     supabaseGameIdByLobbyId: Map<string, string>,
     currentRoundGameEventsByLobbyId: Map<string, GameEvent[]>,
-    roundStartSnapshotByLobbyId: Map<string, GameSnapshot>,
-    supabaseAuthEnabled: boolean
+    roundStartSnapshotByLobbyId: Map<string, GameSnapshot>
   ): Promise<void> {
     const supabaseGameId = supabaseGameIdByLobbyId.get(lobbyId);
-    if (!supabaseAuthEnabled) {
-      this.logger.debug(
-        '[Supabase] Persistence skipped: SUPABASE_AUTH_ENABLED is false'
-      );
-      return;
-    }
     if (!supabaseGameId) {
       this.logger.warn(
         `[Supabase] Persistence skipped: No game ID found for lobby ${lobbyId}`
@@ -180,7 +167,8 @@ export class PersistenceService {
       );
     } catch (error) {
       this.logger.error(
-        `[Supabase] Failed to persist round history for game ${supabaseGameId}`,
+        `[Supabase] Failed to persist round history for game ${supabaseGameId}. ` +
+          `This is a critical error - game persistence is required.`,
         error
       );
       // Note: Events are already cleared, so they won't be retried

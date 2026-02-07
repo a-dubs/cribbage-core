@@ -9,6 +9,7 @@ import {
 } from '../types';
 import { WebSocketAgent } from '../agents/WebSocketAgent';
 import { ExhaustiveSimpleAgent } from '../agents/ExhaustiveSimpleAgent';
+import { HeuristicSimpleAgent } from '../agents/HeuristicSimpleAgent';
 import { logger } from '../utils/logger';
 import { ConnectionManager } from './ConnectionManager';
 import { LobbyManager } from './LobbyManager';
@@ -42,7 +43,6 @@ export interface GameManagerDependencies {
   gameIdByLobbyId: Map<string, string>;
   cleanupBots: (lobbyId: string) => void;
   emitConnectedPlayers: () => void;
-  SUPABASE_AUTH_ENABLED: boolean;
 }
 
 /**
@@ -64,7 +64,6 @@ export class GameManager {
   private readonly gameIdByLobbyId: Map<string, string>;
   private readonly cleanupBots: (lobbyId: string) => void;
   private readonly emitConnectedPlayers: () => void;
-  private readonly SUPABASE_AUTH_ENABLED: boolean;
 
   constructor(deps: GameManagerDependencies) {
     this.io = deps.io;
@@ -81,7 +80,6 @@ export class GameManager {
     this.gameIdByLobbyId = deps.gameIdByLobbyId;
     this.cleanupBots = deps.cleanupBots;
     this.emitConnectedPlayers = deps.emitConnectedPlayers;
-    this.SUPABASE_AUTH_ENABLED = deps.SUPABASE_AUTH_ENABLED;
   }
 
   /**
@@ -117,11 +115,11 @@ export class GameManager {
         `Starting lobby game: ${lobby.name} with ${playersInfo.length} humans and ${botsNeeded} bots needed`
       );
 
-      // Create bots
+      // Create bots (use HeuristicSimpleAgent for faster decisions)
       const botNames = ['Bot Alex', 'Bot Morgan', 'Bot Jordan'];
       for (let i = 0; i < botsNeeded; i++) {
         const botName = botNames[i] || `Bot ${i + 1}`;
-        const botAgent = new ExhaustiveSimpleAgent();
+        const botAgent = new HeuristicSimpleAgent();
         const botId = `${botAgent.playerId}-${Date.now()}-${i}`;
         // Update the agent's playerId to match the generated botId
         botAgent.playerId = botId;
@@ -176,8 +174,7 @@ export class GameManager {
         lobby,
         validPlayersInfo,
         gameLoop,
-        this.supabaseGameIdByLobbyId,
-        this.SUPABASE_AUTH_ENABLED
+        this.supabaseGameIdByLobbyId
       );
 
       // Set up gameSnapshot listener to send redacted snapshots to all clients
@@ -221,8 +218,7 @@ export class GameManager {
               newSnapshot,
               this.supabaseGameIdByLobbyId,
               this.currentRoundGameEventsByLobbyId,
-              this.roundStartSnapshotByLobbyId,
-              this.SUPABASE_AUTH_ENABLED
+              this.roundStartSnapshotByLobbyId
             )
             .catch(error => {
               logger.error(
@@ -466,7 +462,7 @@ export class GameManager {
     const newBotIds: string[] = [];
     for (let i = 0; i < botsNeeded; i++) {
       const botName = botNames[i] || `Bot ${i + 1}`;
-      const botAgent = new ExhaustiveSimpleAgent();
+      const botAgent = new HeuristicSimpleAgent();
       const botId = `${botAgent.playerId}-${Date.now()}-${i}`;
       // Update the agent's playerId to match the generated botId
       botAgent.playerId = botId;
@@ -517,13 +513,12 @@ export class GameManager {
     agents.forEach((agent, id) => gameLoop.addAgent(id, agent));
     this.gameLoopsByLobbyId.set(lobby.id, gameLoop);
     this.currentRoundGameEventsByLobbyId.set(lobby.id, []);
-    await this.persistenceService.createSupabaseGameForLobby(
-      lobby,
-      validPlayersInfo,
-      gameLoop,
-      this.supabaseGameIdByLobbyId,
-      this.SUPABASE_AUTH_ENABLED
-    );
+      await this.persistenceService.createSupabaseGameForLobby(
+        lobby,
+        validPlayersInfo,
+        gameLoop,
+        this.supabaseGameIdByLobbyId
+      );
 
     // Set up gameSnapshot listener to send redacted snapshots to all clients
     let firstSnapshotEmitted = false;
@@ -563,8 +558,7 @@ export class GameManager {
             newSnapshot,
             this.supabaseGameIdByLobbyId,
             this.currentRoundGameEventsByLobbyId,
-            this.roundStartSnapshotByLobbyId,
-            this.SUPABASE_AUTH_ENABLED
+            this.roundStartSnapshotByLobbyId
           )
           .catch(error => {
             logger.error(
@@ -666,8 +660,7 @@ export class GameManager {
             latestSnapshot,
             this.supabaseGameIdByLobbyId,
             this.currentRoundGameEventsByLobbyId,
-            this.roundStartSnapshotByLobbyId,
-            this.SUPABASE_AUTH_ENABLED
+            this.roundStartSnapshotByLobbyId
           );
         }
         const finalState = currentGameLoop.cribbageGame.getGameState();
@@ -726,18 +719,17 @@ export class GameManager {
         this.io.emit('lobbyUpdated', completedLobby);
       }
 
-      if (this.SUPABASE_AUTH_ENABLED) {
-        try {
-          await getServiceClient()
-            .from('lobbies')
-            .update({ status: 'finished' })
-            .eq('id', lobbyId);
-        } catch (updateError) {
-          logger.error(
-            '[startGame] Failed to mark lobby finished in Supabase',
-            updateError
-          );
-        }
+      try {
+        await getServiceClient()
+          .from('lobbies')
+          .update({ status: 'finished' })
+          .eq('id', lobbyId);
+      } catch (updateError) {
+        logger.error(
+          '[startGame] Failed to mark lobby finished in Supabase. ' +
+            `This is a critical error - lobby status update is required.`,
+          updateError
+        );
       }
 
       this.io.emit('gameOver', winner);

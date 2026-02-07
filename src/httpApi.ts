@@ -46,7 +46,6 @@ type AuthenticatedRequest = Request & {
   profile?: SupabaseProfile | null;
 };
 
-const SUPABASE_AUTH_ENABLED = process.env.SUPABASE_AUTH_ENABLED === 'true';
 const SUPABASE_LOBBIES_ENABLED =
   process.env.SUPABASE_LOBBIES_ENABLED === 'true';
 
@@ -76,14 +75,6 @@ async function authMiddleware(
   res: Response,
   next: NextFunction
 ): Promise<void> {
-  if (!SUPABASE_AUTH_ENABLED) {
-    res.status(503).json({
-      error: 'FEATURE_DISABLED',
-      message: 'Supabase auth is disabled',
-    });
-    return;
-  }
-
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) {
     res
@@ -117,7 +108,6 @@ export function registerHttpApi(
 ): void {
   registerAvatarRoutes(app, authMiddleware);
   app.post('/auth/signup', async (req: Request, res: Response) => {
-    if (!requireSupabaseFlag(SUPABASE_AUTH_ENABLED, res)) return;
     const { email, password, username, displayName } = req.body ?? {};
     if (!email || !password || !username || !displayName) {
       res.status(400).json({
@@ -141,7 +131,6 @@ export function registerHttpApi(
   });
 
   app.post('/auth/login', async (req: Request, res: Response) => {
-    if (!requireSupabaseFlag(SUPABASE_AUTH_ENABLED, res)) return;
     const { email, password } = req.body ?? {};
     if (!email || !password) {
       res.status(400).json({
@@ -160,7 +149,6 @@ export function registerHttpApi(
   });
 
   app.post('/auth/refresh', async (req: Request, res: Response) => {
-    if (!requireSupabaseFlag(SUPABASE_AUTH_ENABLED, res)) return;
     const { refreshToken } = req.body ?? {};
     if (!refreshToken) {
       res.status(400).json({
