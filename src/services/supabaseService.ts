@@ -1772,14 +1772,20 @@ export async function getGameSnapshotsForUser(
  * Returns counts of events and snapshots for the game associated with the lobby.
  */
 export async function getGameHistoryCountsByLobbyId(
-  lobbyId: string
+  lobbyId: string,
+  clientOverride?: SupabaseClient
 ): Promise<{
   gameId: string | null;
   eventsCount: number;
   snapshotsCount: number;
   readyForCountingCount: number;
+  discardCount: number;
+  cutDeckCount: number;
+  playCardCount: number;
+  endPhaseCountingCount: number;
+  beginPhaseCountingCount: number;
 }> {
-  const client = getServiceClient();
+  const client = clientOverride ?? getServiceClient();
   
   // First, find the game ID for this lobby
   const { data: gameData, error: gameError } = await client
@@ -1800,6 +1806,11 @@ export async function getGameHistoryCountsByLobbyId(
       eventsCount: 0,
       snapshotsCount: 0,
       readyForCountingCount: 0,
+      discardCount: 0,
+      cutDeckCount: 0,
+      playCardCount: 0,
+      endPhaseCountingCount: 0,
+      beginPhaseCountingCount: 0,
     };
   }
   
@@ -1840,11 +1851,88 @@ export async function getGameHistoryCountsByLobbyId(
       `Failed to count READY_FOR_COUNTING events: ${readyForCountingError.message}`
     );
   }
+
+  // Additional high-signal action counts (phase milestones)
+  const {
+    count: discardCount,
+    error: discardError,
+  } = await client
+    .from('game_events')
+    .select('*', { count: 'exact', head: true })
+    .eq('game_id', gameId)
+    .eq('action_type', 'DISCARD');
+  if (discardError) {
+    throw new Error(`Failed to count DISCARD events: ${discardError.message}`);
+  }
+
+  const {
+    count: cutDeckCount,
+    error: cutDeckError,
+  } = await client
+    .from('game_events')
+    .select('*', { count: 'exact', head: true })
+    .eq('game_id', gameId)
+    .eq('action_type', 'CUT_DECK');
+  if (cutDeckError) {
+    throw new Error(
+      `Failed to count CUT_DECK events: ${cutDeckError.message}`
+    );
+  }
+
+  const {
+    count: playCardCount,
+    error: playCardError,
+  } = await client
+    .from('game_events')
+    .select('*', { count: 'exact', head: true })
+    .eq('game_id', gameId)
+    .eq('action_type', 'PLAY_CARD');
+  if (playCardError) {
+    throw new Error(
+      `Failed to count PLAY_CARD events: ${playCardError.message}`
+    );
+  }
+
+  // Phase transition counts for COUNTING (best "round is over" signal)
+  const {
+    count: endPhaseCountingCount,
+    error: endPhaseCountingError,
+  } = await client
+    .from('game_events')
+    .select('*', { count: 'exact', head: true })
+    .eq('game_id', gameId)
+    .eq('action_type', 'END_PHASE')
+    .eq('phase', 'COUNTING');
+  if (endPhaseCountingError) {
+    throw new Error(
+      `Failed to count END_PHASE COUNTING events: ${endPhaseCountingError.message}`
+    );
+  }
+
+  const {
+    count: beginPhaseCountingCount,
+    error: beginPhaseCountingError,
+  } = await client
+    .from('game_events')
+    .select('*', { count: 'exact', head: true })
+    .eq('game_id', gameId)
+    .eq('action_type', 'BEGIN_PHASE')
+    .eq('phase', 'COUNTING');
+  if (beginPhaseCountingError) {
+    throw new Error(
+      `Failed to count BEGIN_PHASE COUNTING events: ${beginPhaseCountingError.message}`
+    );
+  }
   
   return {
     gameId,
     eventsCount: eventsCount ?? 0,
     snapshotsCount: snapshotsCount ?? 0,
     readyForCountingCount: readyForCountingCount ?? 0,
+    discardCount: discardCount ?? 0,
+    cutDeckCount: cutDeckCount ?? 0,
+    playCardCount: playCardCount ?? 0,
+    endPhaseCountingCount: endPhaseCountingCount ?? 0,
+    beginPhaseCountingCount: beginPhaseCountingCount ?? 0,
   };
 }
