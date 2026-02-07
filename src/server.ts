@@ -42,6 +42,7 @@ import {
 } from './services/supabaseService';
 import { applyAuthMiddleware } from './server/AuthMiddleware';
 import { ConnectionManager } from './server/ConnectionManager';
+import { DisconnectHandler } from './server/DisconnectHandler';
 import { LobbyManager } from './server/LobbyManager';
 import { PersistenceService } from './server/PersistenceService';
 import {
@@ -360,7 +361,7 @@ if (process.env.NODE_ENV !== 'production') {
         if (socketId) {
           connectionManager.deletePlayerId(socketId);
         }
-        clearPlayerDisconnectTimer(userId);
+        disconnectHandler.clearPlayerDisconnectTimer(userId);
         logger.info(`[TEST] Cleared connection for user: ${userId}`);
       } else {
         // Disconnect all users
@@ -374,7 +375,7 @@ if (process.env.NODE_ENV !== 'production') {
             }
             connectionManager.deletePlayerId(socketId);
           }
-          clearPlayerDisconnectTimer(playerId);
+          disconnectHandler.clearPlayerDisconnectTimer(playerId);
         });
         connectionManager.clearAll();
         logger.info(`[TEST] Cleared all connections: ${connectionsCleared}`);
@@ -419,13 +420,12 @@ function cleanupBots(lobbyId: string): void {
   emitConnectedPlayers();
 }
 
-function clearPlayerDisconnectTimer(playerId: string): void {
-  const timeout = disconnectGraceTimeouts.get(playerId);
-  if (timeout) {
-    clearTimeout(timeout);
-    disconnectGraceTimeouts.delete(playerId);
-  }
-}
+// Wrapper object for clearPlayerDisconnectTimer to avoid circular dependency
+const clearPlayerDisconnectTimerWrapper = {
+  fn: (playerId: string) => {
+    // Will be set after DisconnectHandler is created
+  },
+};
 
 // Create LobbyManager instance
 const lobbyManager = new LobbyManager({
@@ -439,10 +439,31 @@ const lobbyManager = new LobbyManager({
   supabaseGameIdByLobbyId,
   currentGameBotIdsByLobbyId,
   cleanupBots,
-  clearPlayerDisconnectTimer,
+  clearPlayerDisconnectTimer: (playerId: string) =>
+    clearPlayerDisconnectTimerWrapper.fn(playerId),
   lobbyFromSupabase,
   SUPABASE_LOBBIES_ENABLED,
 });
+
+// Create DisconnectHandler instance
+const disconnectHandler = new DisconnectHandler({
+  io,
+  lobbyManager,
+  connectionManager,
+  disconnectGraceTimeouts,
+  gameLoopsByLobbyId,
+  mostRecentGameSnapshotByLobbyId,
+  currentRoundGameEventsByLobbyId,
+  roundStartSnapshotByLobbyId,
+  supabaseGameIdByLobbyId,
+  gameIdByLobbyId,
+  currentGameBotIdsByLobbyId,
+  cleanupBots,
+});
+
+// Set the function reference now that disconnectHandler is created
+clearPlayerDisconnectTimerWrapper.fn = (playerId: string) =>
+  disconnectHandler.clearPlayerDisconnectTimer(playerId);
 
 // Create PersistenceService instance
 const persistenceService = new PersistenceService(logger);
@@ -475,88 +496,12 @@ function clearActiveGameArtifacts(lobbyId: string): Lobby | undefined {
 
   const lobby = lobbyManager.getLobby(lobbyId);
   if (lobby) {
-    lobby.disconnectedPlayerIds.forEach(clearPlayerDisconnectTimer);
+    lobby.disconnectedPlayerIds.forEach(playerId =>
+      disconnectHandler.clearPlayerDisconnectTimer(playerId)
+    );
   }
 
   return lobby;
-}
-
-function handleDisconnectGracePeriodExpired(
-  playerId: string,
-  lobbyId: string
-): void {
-  disconnectGraceTimeouts.delete(playerId);
-  const lobby = clearActiveGameArtifacts(lobbyId);
-  if (!lobby) {
-    return;
-  }
-
-  const wasTracked = lobby.disconnectedPlayerIds.includes(playerId);
-  lobby.disconnectedPlayerIds = lobby.disconnectedPlayerIds.filter(
-    id => id !== playerId
-  );
-
-  const playerIndex = lobby.players.findIndex(p => p.playerId === playerId);
-  if (playerIndex !== -1) {
-    lobby.players.splice(playerIndex, 1);
-  }
-  lobbyManager.removePlayerFromLobbyMapping(playerId);
-
-  if (lobby.players.length === 0) {
-    lobby.status = 'finished';
-    lobby.finishedAt = Date.now();
-    logger.warn(
-      `[Disconnect] Lobby ${lobbyId} is now empty after grace expiry; closing lobby.`
-    );
-    io.emit('lobbyClosed', { lobbyId });
-    return;
-  }
-
-  if (lobby.hostId === playerId) {
-    lobby.hostId = lobby.players[0].playerId;
-    logger.warn(
-      `[Disconnect] Host ${playerId} dropped. Transferring host to ${lobby.hostId} for lobby ${lobbyId}.`
-    );
-  }
-
-  if (wasTracked) {
-    logger.warn(
-      `[Disconnect] Grace period expired for player ${playerId} in lobby ${lobbyId}`
-    );
-  }
-
-  lobby.status = 'waiting';
-  lobby.finishedAt = null;
-  io.emit('lobbyUpdated', lobby);
-  io.emit('gameCancelledDueToDisconnect', {
-    lobbyId,
-    playerId,
-    timeoutMs: PLAYER_DISCONNECT_GRACE_MS,
-  });
-}
-
-function schedulePlayerDisconnectTimer(
-  lobbyId: string,
-  playerId: string
-): void {
-  clearPlayerDisconnectTimer(playerId);
-  const timeout = setTimeout(() => {
-    handleDisconnectGracePeriodExpired(playerId, lobbyId);
-  }, PLAYER_DISCONNECT_GRACE_MS);
-  disconnectGraceTimeouts.set(playerId, timeout);
-}
-
-function handlePlayerInGameDisconnect(lobby: Lobby, playerId: string): void {
-  if (!lobby.disconnectedPlayerIds.includes(playerId)) {
-    lobby.disconnectedPlayerIds.push(playerId);
-  }
-  schedulePlayerDisconnectTimer(lobby.id, playerId);
-  io.emit('lobbyUpdated', lobby);
-  io.emit('playerDisconnectedFromLobby', {
-    lobbyId: lobby.id,
-    playerId,
-    gracePeriodMs: PLAYER_DISCONNECT_GRACE_MS,
-  });
 }
 
 // Cleanup timer is now managed by LobbyManager
@@ -821,50 +766,7 @@ io.on('connection', socket => {
   // NOTE: playAgain handler removed - use lobby system for rematch.
 
   socket.on('disconnect', reason => {
-    logger.info(`A socket disconnected: ${socket.id}, Reason: ${reason}`);
-    const playerId = connectionManager.getPlayerId(socket.id);
-
-    if (playerId) {
-      // If player is in a lobby, remove them and handle cleanup
-      const lobbyId = lobbyManager.getLobbyIdForPlayer(playerId);
-      if (lobbyId) {
-        const lobby = lobbyManager.getLobby(lobbyId);
-        if (lobby) {
-          if (lobby.status === 'waiting') {
-            // For waiting lobbies, don't remove players immediately on disconnect
-            // They can reconnect and resume. Only remove if they explicitly leave or are kicked.
-            // Keep the lobbyIdByPlayerId mapping so handleLogin can restore them
-            logger.info(
-              `Player ${playerId} disconnected from waiting lobby ${lobby.name} - keeping lobby membership for reconnection`
-            );
-            // Don't remove from lobby or delete mapping - let them reconnect
-          } else if (lobby.status === 'in_progress') {
-            logger.info(
-              `Player ${playerId} disconnected during an active game in lobby ${lobby.name}`
-            );
-            handlePlayerInGameDisconnect(lobby, playerId);
-          }
-        }
-      }
-
-      // Only remove the player if they are not part of an active lobby game
-      const playerLobbyId = lobbyManager.getLobbyIdForPlayer(playerId);
-      const playerInActiveGame = playerLobbyId
-        ? gameLoopsByLobbyId.has(playerLobbyId)
-        : false;
-      if (!playerInActiveGame) {
-        connectionManager.deletePlayer(playerId);
-        connectionManager.deleteSocketId(playerId);
-        connectionManager.deletePlayerId(socket.id);
-        logger.info(`Removed player ${playerId} (socket ${socket.id})`);
-        // send updated connected players to all clients
-        emitConnectedPlayers();
-      } else {
-        logger.info(
-          'Player is part of an active game. Keeping player record for reconnection.'
-        );
-      }
-    }
+    disconnectHandler.handleSocketDisconnect(socket.id, reason, emitConnectedPlayers);
   });
 
   socket.on('heartbeat', () => {
@@ -1314,7 +1216,7 @@ async function handleLogin(socket: Socket, data: LoginData): Promise<void> {
 
     if (reconnectLobbyId && reconnectLobby) {
       if (reconnectLobby.disconnectedPlayerIds.includes(playerId)) {
-        clearPlayerDisconnectTimer(playerId);
+        disconnectHandler.clearPlayerDisconnectTimer(playerId);
         reconnectLobby.disconnectedPlayerIds =
           reconnectLobby.disconnectedPlayerIds.filter(id => id !== playerId);
       }
