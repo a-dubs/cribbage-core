@@ -10,6 +10,18 @@ import {
   Fixed200msSimpleAgent,
 } from './DelayedSimpleAgent';
 
+export {
+  RandomAgent,
+  ExhaustiveSimpleAgent,
+  HeuristicSimpleAgent,
+  WebSocketAgent,
+  MockAgent,
+  DelayedSimpleAgent,
+  RandomDelaySimpleAgent,
+  Fixed500msSimpleAgent,
+  Fixed200msSimpleAgent,
+};
+
 export const agents = {
   RandomAgent,
   ExhaustiveSimpleAgent,
