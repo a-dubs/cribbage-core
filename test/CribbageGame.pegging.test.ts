@@ -641,7 +641,7 @@ describe('CribbageGame - Pegging Logic', () => {
       game.setPhase(Phase.PEGGING, ActionType.BEGIN_PHASE);
     });
 
-    it('should award BOTH 31 points AND last card point when hitting 31 with last card', () => {
+    it('should award ONLY 31 points (not last card) when last card makes 31', () => {
       const state = game.getGameState();
       const p1 = state.players[0];
       const p2 = state.players[1];
@@ -655,11 +655,11 @@ describe('CribbageGame - Pegging Logic', () => {
 
       const result = game.playCard('p1', 'THREE_SPADES');
 
-      // Should get 2 points for 31 + 1 point for last card = 3 total
-      expect(p1.score).toBe(initialScore + 3);
+      // Per cribbage rules: when last card makes 31, you get 2 points for 31 only (no extra last-card point)
+      expect(p1.score).toBe(initialScore + 2);
       expect(result).toBe('p1'); // Round over
       
-      // Verify both events were recorded
+      // Verify PLAY_CARD event with 31 scoring; no LAST_CARD event (last card point not awarded when making 31)
       const history = game.getGameSnapshotHistory();
       const playCardEvent = history.find(
         (s) => s.gameEvent.actionType === ActionType.PLAY_CARD && s.gameEvent.playerId === 'p1'
@@ -670,8 +670,7 @@ describe('CribbageGame - Pegging Logic', () => {
       
       expect(playCardEvent).toBeDefined();
       expect(playCardEvent?.gameEvent.scoreChange).toBe(2); // 2 points for 31
-      expect(lastCardEvent).toBeDefined();
-      expect(lastCardEvent?.gameEvent.scoreChange).toBe(1); // 1 point for last card
+      expect(lastCardEvent).toBeUndefined(); // No last card point when last card makes 31
     });
 
     it('should handle peggingTotal and sumOfPeggingStack being in sync', () => {

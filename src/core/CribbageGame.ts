@@ -750,10 +750,17 @@ export class CribbageGame extends EventEmitter {
     );
 
     // if this is the last card in the pegging round, give the player a point for last
+    // (unless the last card made 31 — in that case we already scored 2 for 31, no extra last-card point)
     const playersWithCards = this.gameState.players.filter(
       player => player.peggingHand.length > 0
     );
     if (playersWithCards.length === 0) {
+      if (sumOfPeggingStack(this.gameState.peggingStack) === 31) {
+        logger.info(
+          `Player ${playerId} played the last card (made 31) - no last card point, already scored 2 for 31`
+        );
+        return this.startNewPeggingRound();
+      }
       // give the player a point for playing the last card
       this.updatePlayerScore(player, 1);
       // log the scoring of the last card
@@ -795,6 +802,13 @@ export class CribbageGame extends EventEmitter {
 
       if (allOthersWithCardsHaveSaidGo) {
         // All other players with cards have said Go, so this player gets last card point
+        // (unless the last card made 31 — in that case we already scored 2 for 31, no extra last-card point)
+        if (sumOfPeggingStack(this.gameState.peggingStack) === 31) {
+          logger.info(
+            `Player ${playerId} played their last card (made 31) - no last card point, already scored 2 for 31`
+          );
+          return this.startNewPeggingRound();
+        }
         logger.info(
           `Player ${playerId} played their last card and all others with cards have said Go - awarding last card point`
         );
