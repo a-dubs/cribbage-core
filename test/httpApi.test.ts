@@ -817,21 +817,4 @@ describe('httpApi', () => {
     });
   });
 
-  describe('Feature flags', () => {
-    // Note: SUPABASE_AUTH_ENABLED flag has been removed - auth is always required
-    // Only SUPABASE_LOBBIES_ENABLED remains as a feature flag
-    beforeEach(() => {
-      // Create a new app with flags disabled
-      // We need to re-import to pick up new env vars
-      jest.resetModules();
-      process.env.SUPABASE_LOBBIES_ENABLED = 'false';
-    });
-
-    afterEach(() => {
-      // Restore flags
-      process.env.SUPABASE_LOBBIES_ENABLED = 'true';
-    });
-
-    // Auth endpoints are now always enabled - no feature flag test needed
-  });
 });
