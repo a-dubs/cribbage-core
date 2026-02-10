@@ -1,4 +1,4 @@
-import { GameSession, GameSessionStatus } from '../../src/gameplay/GameSession';
+import { GameSessionStatus } from '../../src/gameplay/GameSession';
 import { MockAgent } from '../../src/agents/MockAgent';
 import { RandomAgent } from '../../src/agents/RandomAgent';
 import { createTestSession, playUntilPhase } from '../utils/gameTestUtils';

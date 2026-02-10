@@ -3,13 +3,10 @@ import {
   playUntilPhase,
   createTestSession,
   assertValidGameEnd,
-  BotDifficulty,
 } from './utils/gameTestUtils';
 import { GameSession, GameSessionStatus } from '../src/gameplay/GameSession';
 import { Phase } from '../src/types';
 import { RandomAgent } from '../src/agents/RandomAgent';
-import { HeuristicSimpleAgent } from '../src/agents/HeuristicSimpleAgent';
-import { ExhaustiveSimpleAgent } from '../src/agents/ExhaustiveSimpleAgent';
 import { GameLoop } from '../src/gameplay/GameLoop';
 import { ActionType } from '../src/types';
 

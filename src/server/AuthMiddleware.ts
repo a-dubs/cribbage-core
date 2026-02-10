@@ -16,7 +16,6 @@ export function applyAuthMiddleware(io: Server): void {
       {
         hasAuth: !!socket.handshake.auth,
         authKeys: socket.handshake.auth ? Object.keys(socket.handshake.auth) : [],
-        authValues: socket.handshake.auth,
         origin: socket.handshake.headers.origin,
       }
     );
@@ -26,16 +25,13 @@ export function applyAuthMiddleware(io: Server): void {
     if (!token) {
       logger.warn(
         `[Auth Middleware] ❌ Missing access token from socket ${socketId}`,
-        {
-          handshakeAuth: socket.handshake.auth,
-        }
+        { hasAuth: !!socket.handshake.auth }
       );
       return next(new Error('Missing access token'));
     }
 
     logger.info(`[Auth Middleware] 🔍 Verifying token for socket ${socketId}`, {
       tokenLength: token.length,
-      tokenPreview: token.substring(0, 20) + '...',
     });
 
     verifyAccessToken(token)
@@ -47,10 +43,8 @@ export function applyAuthMiddleware(io: Server): void {
         next();
       })
       .catch(err => {
-        const tokenPreview =
-          token.length > 20 ? `${token.substring(0, 20)}...` : token;
         logger.error(
-          `[Auth Middleware] ❌❌❌ Socket auth failed for socket ${socketId}. Token preview: ${tokenPreview}`,
+          `[Auth Middleware] ❌❌❌ Socket auth failed for socket ${socketId}`,
           err
         );
         next(new Error('Invalid token'));

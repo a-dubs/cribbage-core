@@ -8,7 +8,6 @@ import {
   GameSnapshot,
 } from '../types';
 import { WebSocketAgent } from '../agents/WebSocketAgent';
-import { ExhaustiveSimpleAgent } from '../agents/ExhaustiveSimpleAgent';
 import { HeuristicSimpleAgent } from '../agents/HeuristicSimpleAgent';
 import { logger } from '../utils/logger';
 import { ConnectionManager } from './ConnectionManager';

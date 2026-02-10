@@ -820,8 +820,6 @@ describe('httpApi', () => {
   describe('Feature flags', () => {
     // Note: SUPABASE_AUTH_ENABLED flag has been removed - auth is always required
     // Only SUPABASE_LOBBIES_ENABLED remains as a feature flag
-    let appWithFlagsDisabled: express.Express;
-
     beforeEach(() => {
       // Create a new app with flags disabled
       // We need to re-import to pick up new env vars

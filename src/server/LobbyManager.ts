@@ -4,7 +4,6 @@ import { GameSnapshot, GameEvent } from '../types';
 import { ConnectionManager } from './ConnectionManager';
 import {
   createLobby,
-  getLobbyWithPlayers,
   getPlayerActiveLobbyId,
   joinLobby as joinLobbyInSupabase,
   leaveLobby as leaveLobbyInSupabase,

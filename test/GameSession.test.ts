@@ -1,6 +1,6 @@
-import { GameSession, GameSessionStatus, SerializedGameSession } from '../src/gameplay/GameSession';
+import { GameSession, GameSessionStatus } from '../src/gameplay/GameSession';
 import { MockAgent } from '../src/agents/MockAgent';
-import { Phase, ActionType, GameSnapshot, Card } from '../src/types';
+import { Phase, ActionType, GameSnapshot } from '../src/types';
 
 describe('GameSession', () => {
   describe('Creation', () => {
@@ -150,7 +150,6 @@ describe('GameSession', () => {
       ]);
 
       session.cancel();
-      const cancelledStatus = session.getStatus();
 
       // end() should throw for cancelled sessions
       expect(() => session.end()).toThrow('Cannot end a cancelled session');

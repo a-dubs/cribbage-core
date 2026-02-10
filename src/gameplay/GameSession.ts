@@ -238,9 +238,6 @@ export class GameSession extends EventEmitter {
     // Restore game state using CribbageGame's restoreState method
     session.gameLoop.cribbageGame.restoreState(data.gameState);
 
-    // Re-setup event forwarding (in case listeners were lost)
-    session.setupEventForwarding();
-
     return session;
   }
 }

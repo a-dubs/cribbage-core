@@ -274,7 +274,7 @@ export class WebSocketServer {
       const isAllowed = uniqueOrigins.some(allowedOrigin => {
         if (allowedOrigin.startsWith('*.')) {
           const domain = allowedOrigin.slice(2);
-          let allowedHostname = domain;
+          let allowedHostname: string;
           try {
             const allowedUrl = new URL(domain);
             allowedHostname = allowedUrl.hostname;
@@ -329,9 +329,6 @@ export class WebSocketServer {
 
         const shouldClear = (scope: 'lobbies' | 'games' | 'connections'): boolean =>
           scopes.includes('all') || scopes.includes(scope);
-
-        const matchesTarget = (playerId: string): boolean =>
-          !userId || playerId === userId;
 
         // Clear lobby state
         if (shouldClear('lobbies')) {

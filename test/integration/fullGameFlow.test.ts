@@ -2,7 +2,6 @@ import {
   playCompleteGame,
   assertValidGameEnd,
 } from '../utils/gameTestUtils';
-import { GameSession } from '../../src/gameplay/GameSession';
 
 describe('Full Game Flow Integration Tests', () => {
   let consoleLogSpy: jest.SpyInstance;
