@@ -196,13 +196,20 @@ async function findPendingFriendRequest(
     .or(
       `and(sender_id.eq.${userId1},recipient_id.eq.${userId2}),and(sender_id.eq.${userId2},recipient_id.eq.${userId1})`
     )
-    .maybeSingle();
+    .order('created_at', { ascending: false })
+    .limit(1);
 
   if (error) {
     throw new Error(error.message);
   }
 
-  return data as FriendRequest | null;
+  const requests = (data ?? []) as FriendRequest[];
+  if (requests.length === 0) {
+    return null;
+  }
+
+  // If duplicate pending rows exist, treat this as an existing pending request.
+  return requests[0] ?? null;
 }
 
 function publicAvatarUrl(path: string): string {

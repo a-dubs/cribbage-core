@@ -181,12 +181,14 @@ describe('supabaseService', () => {
       mockSupabase._pushResult(null);
 
       // 3. Mock checking for existing pending request - found outgoing!
-      mockSupabase._pushResult({ 
-        id: 'request-123', 
-        sender_id: 'sender-123', 
-        recipient_id: 'recipient-123',
-        status: 'pending'
-      });
+      mockSupabase._pushResult([
+        {
+          id: 'request-123',
+          sender_id: 'sender-123',
+          recipient_id: 'recipient-123',
+          status: 'pending',
+        },
+      ]);
 
       await expect(supabaseService.sendFriendRequest({
         senderId: 'sender-123',
@@ -202,12 +204,14 @@ describe('supabaseService', () => {
       mockSupabase._pushResult(null);
 
       // 3. Mock checking for existing pending request - found incoming!
-      mockSupabase._pushResult({ 
-        id: 'request-456', 
-        sender_id: 'recipient-123',  // The would-be recipient already sent one
-        recipient_id: 'sender-123',
-        status: 'pending'
-      });
+      mockSupabase._pushResult([
+        {
+          id: 'request-456',
+          sender_id: 'recipient-123', // The would-be recipient already sent one
+          recipient_id: 'sender-123',
+          status: 'pending',
+        },
+      ]);
 
       await expect(supabaseService.sendFriendRequest({
         senderId: 'sender-123',
@@ -292,12 +296,14 @@ describe('supabaseService', () => {
       mockSupabase._pushResult(null);
 
       // 3. Mock checking for existing pending request - found outgoing!
-      mockSupabase._pushResult({
-        id: 'request-123',
-        sender_id: 'sender-123',
-        recipient_id: 'target-123',
-        status: 'pending'
-      });
+      mockSupabase._pushResult([
+        {
+          id: 'request-123',
+          sender_id: 'sender-123',
+          recipient_id: 'target-123',
+          status: 'pending',
+        },
+      ]);
 
       await expect(supabaseService.sendFriendRequestFromLobby({
         senderId: 'sender-123',
@@ -317,12 +323,14 @@ describe('supabaseService', () => {
       mockSupabase._pushResult(null);
 
       // 3. Mock checking for existing pending request - found incoming!
-      mockSupabase._pushResult({
-        id: 'request-456',
-        sender_id: 'target-123',
-        recipient_id: 'sender-123',
-        status: 'pending'
-      });
+      mockSupabase._pushResult([
+        {
+          id: 'request-456',
+          sender_id: 'target-123',
+          recipient_id: 'sender-123',
+          status: 'pending',
+        },
+      ]);
 
       await expect(supabaseService.sendFriendRequestFromLobby({
         senderId: 'sender-123',
