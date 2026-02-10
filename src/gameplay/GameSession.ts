@@ -1,11 +1,9 @@
 import { GameLoop } from './GameLoop';
-import { CribbageGame, SerializedCribbageGameState } from '../core/CribbageGame';
 import {
-  PlayerIdAndName,
-  GameState,
-  GameSnapshot,
-  GameAgent,
-} from '../types';
+  CribbageGame,
+  SerializedCribbageGameState,
+} from '../core/CribbageGame';
+import { PlayerIdAndName, GameState, GameSnapshot, GameAgent } from '../types';
 import EventEmitter from 'eventemitter3';
 
 /**

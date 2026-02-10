@@ -15,13 +15,16 @@ export function applyAuthMiddleware(io: Server): void {
       `[Auth Middleware] 🔐 Processing connection for socket ${socketId}`,
       {
         hasAuth: !!socket.handshake.auth,
-        authKeys: socket.handshake.auth ? Object.keys(socket.handshake.auth) : [],
+        authKeys: socket.handshake.auth
+          ? Object.keys(socket.handshake.auth)
+          : [],
         origin: socket.handshake.headers.origin,
       }
     );
 
-    const token = (socket.handshake.auth as { accessToken?: string } | undefined)
-      ?.accessToken;
+    const token = (
+      socket.handshake.auth as { accessToken?: string } | undefined
+    )?.accessToken;
     if (!token) {
       logger.warn(
         `[Auth Middleware] ❌ Missing access token from socket ${socketId}`,

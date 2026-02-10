@@ -14,10 +14,7 @@ import { ConnectionManager } from './ConnectionManager';
 import { LobbyManager } from './LobbyManager';
 import { DisconnectHandler } from './DisconnectHandler';
 import { PersistenceService } from './PersistenceService';
-import {
-  PlayerInfo,
-  Lobby,
-} from './types';
+import { PlayerInfo, Lobby } from './types';
 import {
   startLobby,
   getServiceClient,
@@ -202,7 +199,8 @@ export class GameManager {
         }
 
         if (
-          newSnapshot.gameEvent.actionType === ActionType.READY_FOR_NEXT_ROUND ||
+          newSnapshot.gameEvent.actionType ===
+            ActionType.READY_FOR_NEXT_ROUND ||
           newSnapshot.gameEvent.actionType === ActionType.WIN
         ) {
           const eventsToPersist =
@@ -512,22 +510,25 @@ export class GameManager {
     agents.forEach((agent, id) => gameLoop.addAgent(id, agent));
     this.gameLoopsByLobbyId.set(lobby.id, gameLoop);
     this.currentRoundGameEventsByLobbyId.set(lobby.id, []);
-      await this.persistenceService.createSupabaseGameForLobby(
-        lobby,
-        validPlayersInfo,
-        gameLoop,
-        this.supabaseGameIdByLobbyId
-      );
+    await this.persistenceService.createSupabaseGameForLobby(
+      lobby,
+      validPlayersInfo,
+      gameLoop,
+      this.supabaseGameIdByLobbyId
+    );
 
     // Set up gameSnapshot listener to send redacted snapshots to all clients
     let firstSnapshotEmitted = false;
     gameLoop.on('gameSnapshot', (newSnapshot: GameSnapshot) => {
       this.mostRecentGameSnapshotByLobbyId.set(lobby.id, newSnapshot);
-      const existingEvents = this.currentRoundGameEventsByLobbyId.get(lobby.id) || [];
+      const existingEvents =
+        this.currentRoundGameEventsByLobbyId.get(lobby.id) || [];
       const updatedEvents = [...existingEvents, newSnapshot.gameEvent];
       const isStartRound =
         newSnapshot.gameEvent.actionType === ActionType.START_ROUND;
-      const roundEvents = isStartRound ? [newSnapshot.gameEvent] : updatedEvents;
+      const roundEvents = isStartRound
+        ? [newSnapshot.gameEvent]
+        : updatedEvents;
       if (isStartRound) {
         logger.debug(
           `[Supabase] START_ROUND detected, resetting event collection for lobby ${lobby.id}`
@@ -579,7 +580,9 @@ export class GameManager {
       if (!firstSnapshotEmitted) {
         firstSnapshotEmitted = true;
         setTimeout(() => {
-          const latestSnapshot = this.mostRecentGameSnapshotByLobbyId.get(lobby.id);
+          const latestSnapshot = this.mostRecentGameSnapshotByLobbyId.get(
+            lobby.id
+          );
           const latestEvents =
             this.currentRoundGameEventsByLobbyId.get(lobby.id) || [];
           if (latestSnapshot === newSnapshot) {
@@ -646,13 +649,16 @@ export class GameManager {
 
       // Check if this game loop was cancelled (replaced by a new one)
       if (this.gameLoopsByLobbyId.get(lobbyId) !== currentGameLoop) {
-        logger.info('[startGame()] Game loop was replaced, ignoring completion');
+        logger.info(
+          '[startGame()] Game loop was replaced, ignoring completion'
+        );
         return;
       }
 
       const supabaseGameId = this.supabaseGameIdByLobbyId.get(lobbyId);
       if (supabaseGameId) {
-        const latestSnapshot = this.mostRecentGameSnapshotByLobbyId.get(lobbyId);
+        const latestSnapshot =
+          this.mostRecentGameSnapshotByLobbyId.get(lobbyId);
         if (latestSnapshot) {
           await this.persistenceService.persistRoundHistory(
             lobbyId,
@@ -726,7 +732,7 @@ export class GameManager {
       } catch (updateError) {
         logger.error(
           '[startGame] Failed to mark lobby finished in Supabase. ' +
-            `This is a critical error - lobby status update is required.`,
+            'This is a critical error - lobby status update is required.',
           updateError
         );
       }
@@ -734,7 +740,10 @@ export class GameManager {
       this.io.emit('gameOver', winner);
     } catch (error) {
       // If game loop was cancelled, that's expected - just log and return
-      if (error instanceof Error && error.message === 'Game loop was cancelled') {
+      if (
+        error instanceof Error &&
+        error.message === 'Game loop was cancelled'
+      ) {
         logger.info('[startGame()] Game loop was cancelled, cleaning up');
         // Clean up bots even if cancelled
         if (this.gameLoopsByLobbyId.get(lobbyId) === currentGameLoop) {
@@ -834,7 +843,8 @@ export class GameManager {
     }
 
     const activeGameLoop = this.gameLoopsByLobbyId.get(lobbyId);
-    const mostRecentGameSnapshot = this.mostRecentGameSnapshotByLobbyId.get(lobbyId);
+    const mostRecentGameSnapshot =
+      this.mostRecentGameSnapshotByLobbyId.get(lobbyId);
     const roundEvents = this.currentRoundGameEventsByLobbyId.get(lobbyId) || [];
 
     if (!activeGameLoop || !mostRecentGameSnapshot) {
@@ -916,7 +926,9 @@ export class GameManager {
   /**
    * Refresh lobby from Supabase (helper method)
    */
-  private async refreshLobbyFromSupabase(lobbyId: string): Promise<Lobby | null> {
+  private async refreshLobbyFromSupabase(
+    lobbyId: string
+  ): Promise<Lobby | null> {
     try {
       const payload = await getLobbyWithPlayers(lobbyId);
       if (!payload) return null;

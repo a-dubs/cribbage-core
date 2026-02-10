@@ -3,11 +3,7 @@ import express, { type Express } from 'express';
 import cors from 'cors';
 import { Server, Socket } from 'socket.io';
 import { GameLoop } from '../gameplay/GameLoop';
-import {
-  PlayerIdAndName,
-  GameSnapshot,
-  GameEvent,
-} from '../types';
+import { PlayerIdAndName, GameSnapshot, GameEvent } from '../types';
 import { WebSocketAgent } from '../agents/WebSocketAgent';
 import { logger } from '../utils/logger';
 import { registerHttpApi } from '../httpApi';
@@ -54,12 +50,17 @@ export class WebSocketServer {
   // Game state maps (shared with managers)
   private readonly gameIdByLobbyId: Map<string, string> = new Map();
   private readonly gameLoopsByLobbyId: Map<string, GameLoop> = new Map();
-  private readonly mostRecentGameSnapshotByLobbyId: Map<string, GameSnapshot> = new Map();
-  private readonly currentRoundGameEventsByLobbyId: Map<string, GameEvent[]> = new Map();
-  private readonly roundStartSnapshotByLobbyId: Map<string, GameSnapshot> = new Map();
+  private readonly mostRecentGameSnapshotByLobbyId: Map<string, GameSnapshot> =
+    new Map();
+  private readonly currentRoundGameEventsByLobbyId: Map<string, GameEvent[]> =
+    new Map();
+  private readonly roundStartSnapshotByLobbyId: Map<string, GameSnapshot> =
+    new Map();
   private readonly supabaseGameIdByLobbyId: Map<string, string> = new Map();
-  private readonly currentGameBotIdsByLobbyId: Map<string, string[]> = new Map();
-  private readonly disconnectGraceTimeouts: Map<string, NodeJS.Timeout> = new Map();
+  private readonly currentGameBotIdsByLobbyId: Map<string, string[]> =
+    new Map();
+  private readonly disconnectGraceTimeouts: Map<string, NodeJS.Timeout> =
+    new Map();
 
   // Wrapper for clearPlayerDisconnectTimer to avoid circular dependency
   private readonly clearPlayerDisconnectTimerWrapper = {
@@ -290,7 +291,10 @@ export class WebSocketServer {
           return true;
         }
         const originWithoutProtocol = origin.replace(/^https?:\/\//, '');
-        const allowedWithoutProtocol = allowedOrigin.replace(/^https?:\/\//, '');
+        const allowedWithoutProtocol = allowedOrigin.replace(
+          /^https?:\/\//,
+          ''
+        );
         return originWithoutProtocol === allowedWithoutProtocol;
       });
       callback(null, isAllowed);
@@ -319,7 +323,9 @@ export class WebSocketServer {
         const { userId, scopes = ['all'] } = req.body as TestResetRequest;
 
         logger.info(
-          `[TEST] Reset requested - userId: ${userId ?? 'all'}, scopes: ${scopes.join(', ')}`
+          `[TEST] Reset requested - userId: ${
+            userId ?? 'all'
+          }, scopes: ${scopes.join(', ')}`
         );
 
         const response: TestResetResponse = {
@@ -327,8 +333,9 @@ export class WebSocketServer {
           cleared: {},
         };
 
-        const shouldClear = (scope: 'lobbies' | 'games' | 'connections'): boolean =>
-          scopes.includes('all') || scopes.includes(scope);
+        const shouldClear = (
+          scope: 'lobbies' | 'games' | 'connections'
+        ): boolean => scopes.includes('all') || scopes.includes(scope);
 
         // Clear lobby state
         if (shouldClear('lobbies')) {
@@ -349,10 +356,11 @@ export class WebSocketServer {
 
               const lobby = this.lobbyManager.getLobby(lobbyId);
               if (lobby) {
-                lobby.players = lobby.players.filter(p => p.playerId !== userId);
-                lobby.disconnectedPlayerIds = lobby.disconnectedPlayerIds.filter(
-                  id => id !== userId
+                lobby.players = lobby.players.filter(
+                  p => p.playerId !== userId
                 );
+                lobby.disconnectedPlayerIds =
+                  lobby.disconnectedPlayerIds.filter(id => id !== userId);
 
                 if (lobby.players.length === 0) {
                   this.lobbyManager.removeLobbyFromCache(lobbyId);
@@ -360,7 +368,9 @@ export class WebSocketServer {
                   logger.info(`[TEST] Removed empty lobby: ${lobbyId}`);
                 }
               }
-              logger.info(`[TEST] Cleared lobby membership for user: ${userId}`);
+              logger.info(
+                `[TEST] Cleared lobby membership for user: ${userId}`
+              );
             }
           } else {
             const allLobbies = this.lobbyManager.getAllLobbies();
@@ -386,7 +396,9 @@ export class WebSocketServer {
             if (lobbyId && this.gameLoopsByLobbyId.has(lobbyId)) {
               this.gameManager.clearActiveGameArtifacts(lobbyId);
               gamesCleared++;
-              logger.info(`[TEST] Cleared game for user ${userId} in lobby ${lobbyId}`);
+              logger.info(
+                `[TEST] Cleared game for user ${userId} in lobby ${lobbyId}`
+              );
             }
           } else {
             this.gameLoopsByLobbyId.forEach((_gameLoop, lobbyId) => {
@@ -420,26 +432,30 @@ export class WebSocketServer {
             this.disconnectHandler.clearPlayerDisconnectTimer(userId);
             logger.info(`[TEST] Cleared connection for user: ${userId}`);
           } else {
-            this.connectionManager.getConnectedPlayers().forEach((_, playerId) => {
-              const socketId = this.connectionManager.getSocketId(playerId);
-              if (socketId) {
-                const socket = this.io.sockets.sockets.get(socketId);
-                if (socket) {
-                  socket.disconnect(true);
-                  connectionsCleared++;
+            this.connectionManager
+              .getConnectedPlayers()
+              .forEach((_, playerId) => {
+                const socketId = this.connectionManager.getSocketId(playerId);
+                if (socketId) {
+                  const socket = this.io.sockets.sockets.get(socketId);
+                  if (socket) {
+                    socket.disconnect(true);
+                    connectionsCleared++;
+                  }
+                  this.connectionManager.deletePlayerId(socketId);
                 }
-                this.connectionManager.deletePlayerId(socketId);
-              }
-              this.disconnectHandler.clearPlayerDisconnectTimer(playerId);
-            });
+                this.disconnectHandler.clearPlayerDisconnectTimer(playerId);
+              });
             this.connectionManager.clearAll();
-            logger.info(`[TEST] Cleared all connections: ${connectionsCleared}`);
+            logger.info(
+              `[TEST] Cleared all connections: ${connectionsCleared}`
+            );
           }
 
           response.cleared.connections = connectionsCleared;
         }
 
-        logger.info(`[TEST] Reset complete:`, response.cleared);
+        logger.info('[TEST] Reset complete:', response.cleared);
         res.status(200).json(response);
       });
 
@@ -461,8 +477,14 @@ export class WebSocketServer {
           const counts = await getGameHistoryCountsByLobbyId(lobbyId);
           res.status(200).json(counts);
         } catch (error) {
-          const message = error instanceof Error ? error.message : 'Failed to fetch game history';
-          logger.error(`[TEST] Error fetching game history for lobby ${lobbyId}:`, error);
+          const message =
+            error instanceof Error
+              ? error.message
+              : 'Failed to fetch game history';
+          logger.error(
+            `[TEST] Error fetching game history for lobby ${lobbyId}:`,
+            error
+          );
           res.status(500).json({
             error: 'GAME_HISTORY_FETCH_FAILED',
             message,
@@ -470,7 +492,9 @@ export class WebSocketServer {
         }
       });
 
-      logger.info('[TEST] Test game history endpoint enabled at GET /api/test/game-history');
+      logger.info(
+        '[TEST] Test game history endpoint enabled at GET /api/test/game-history'
+      );
     }
   }
 
@@ -636,11 +660,13 @@ export class WebSocketServer {
             'lobbyId:',
             data?.lobbyId
           );
-          this.gameManager.handleStartLobbyGame(socket, data, callback).catch(error => {
-            logger.error('Error starting lobby game:', error);
-            if (callback) callback({ error: 'Failed to start game' });
-            socket.emit('error', { message: 'Failed to start game' });
-          });
+          this.gameManager
+            .handleStartLobbyGame(socket, data, callback)
+            .catch(error => {
+              logger.error('Error starting lobby game:', error);
+              if (callback) callback({ error: 'Failed to start game' });
+              socket.emit('error', { message: 'Failed to start game' });
+            });
         }
       );
 
@@ -653,7 +679,10 @@ export class WebSocketServer {
       });
 
       socket.on('getConnectedPlayers', () => {
-        logger.info('Received getConnectedPlayers request from socket:', socket.id);
+        logger.info(
+          'Received getConnectedPlayers request from socket:',
+          socket.id
+        );
         this.cleanupInactiveBots();
 
         const playerId = this.connectionManager.getPlayerId(socket.id);
@@ -684,10 +713,8 @@ export class WebSocketServer {
       });
 
       socket.on('disconnect', reason => {
-        this.disconnectHandler.handleSocketDisconnect(
-          socket.id,
-          reason,
-          () => this.emitConnectedPlayers()
+        this.disconnectHandler.handleSocketDisconnect(socket.id, reason, () =>
+          this.emitConnectedPlayers()
         );
       });
 
@@ -717,7 +744,9 @@ export class WebSocketServer {
       const payloadToken = data?.accessToken;
       if (payloadToken) {
         try {
-          const { userId: payloadUserId } = await verifyAccessToken(payloadToken);
+          const { userId: payloadUserId } = await verifyAccessToken(
+            payloadToken
+          );
           if (payloadUserId !== socketAuthedUserId) {
             logger.warn(
               `[handleLogin] Token/user mismatch for socket ${socket.id}: ` +
@@ -930,7 +959,10 @@ export class WebSocketServer {
    * Helper function to cleanup bots for a lobby
    */
   private cleanupBots(lobbyId: string): void {
-    this.connectionManager.cleanupBots(lobbyId, this.currentGameBotIdsByLobbyId);
+    this.connectionManager.cleanupBots(
+      lobbyId,
+      this.currentGameBotIdsByLobbyId
+    );
     this.emitConnectedPlayers();
   }
 

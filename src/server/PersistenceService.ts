@@ -1,9 +1,4 @@
-import {
-  ActionType,
-  GameEvent,
-  GameSnapshot,
-  PlayerIdAndName,
-} from '../types';
+import { ActionType, GameEvent, GameSnapshot, PlayerIdAndName } from '../types';
 import { GameLoop } from '../gameplay/GameLoop';
 import {
   createGameRecord,
@@ -89,7 +84,7 @@ export class PersistenceService {
     } catch (error) {
       this.logger.error(
         `[Supabase] Failed to create game record for lobby ${lobby.id}. ` +
-          `This is a critical error - game persistence is required.`,
+          'This is a critical error - game persistence is required.',
         error
       );
       return null;
@@ -146,7 +141,9 @@ export class PersistenceService {
       return {
         event,
         snapshot,
-        storeSnapshot: snapshot ? this.shouldStoreSnapshotForEvent(event) : false,
+        storeSnapshot: snapshot
+          ? this.shouldStoreSnapshotForEvent(event)
+          : false,
       };
     });
 
@@ -169,14 +166,15 @@ export class PersistenceService {
       );
     } catch (error) {
       // Re-queue failed events so history is not silently dropped.
-      const queuedAfterSwap = currentRoundGameEventsByLobbyId.get(lobbyId) ?? [];
+      const queuedAfterSwap =
+        currentRoundGameEventsByLobbyId.get(lobbyId) ?? [];
       currentRoundGameEventsByLobbyId.set(lobbyId, [
         ...roundEvents,
         ...queuedAfterSwap,
       ]);
       this.logger.error(
         `[Supabase] Failed to persist round history for game ${supabaseGameId}. ` +
-          `This is a critical error - game persistence is required.`,
+          'This is a critical error - game persistence is required.',
         error
       );
       throw error;

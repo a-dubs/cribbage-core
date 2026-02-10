@@ -77,14 +77,11 @@ const countFifteens = (cards: CardValue[]): number => {
 
     // Check if the sum of any combination equals 15
     for (const combination of combinations) {
-      const sum = combination.reduce(
-        (acc, index) => {
-          const card = cards[index];
-          if (!card) return acc;
-          return acc + card.pegValue;
-        },
-        0
-      );
+      const sum = combination.reduce((acc, index) => {
+        const card = cards[index];
+        if (!card) return acc;
+        return acc + card.pegValue;
+      }, 0);
       if (sum === 15) {
         totalPoints += 2;
       }
@@ -309,12 +306,10 @@ const scorePeggingRun = (peggingStack: CardValue[]): number => {
     const slice = peggingStack.slice(i);
     const sorted_slice = slice.sort((a, b) => a.runValue - b.runValue);
     // if there are any duplicates, then this slice cannot be a run
-    const has_duplicates = sorted_slice.some(
-      (card, index) => {
-        const next = sorted_slice[index + 1];
-        return next !== undefined && card.runValue === next.runValue;
-      }
-    );
+    const has_duplicates = sorted_slice.some((card, index) => {
+      const next = sorted_slice[index + 1];
+      return next !== undefined && card.runValue === next.runValue;
+    });
     if (has_duplicates) {
       continue;
     }
@@ -405,7 +400,9 @@ export const scoreHandWithBreakdown = (
         );
       });
       if (!found) {
-        throw new Error(`Card not found for runValue ${cardValue.runValue}, suit ${cardValue.suit}`);
+        throw new Error(
+          `Card not found for runValue ${cardValue.runValue}, suit ${cardValue.suit}`
+        );
       }
       return found;
     });
@@ -438,7 +435,10 @@ export const scoreHandWithBreakdown = (
     const currentValue = runValues[i];
     const prevValue = i > 0 ? runValues[i - 1] : undefined;
     if (currentValue === undefined) continue;
-    if (i === 0 || (prevValue !== undefined && currentValue === prevValue + 1)) {
+    if (
+      i === 0 ||
+      (prevValue !== undefined && currentValue === prevValue + 1)
+    ) {
       currentRun.push(currentValue);
     } else {
       if (currentRun.length > longestRun.length) {
@@ -622,14 +622,11 @@ export const scoreHandWithBreakdown = (
   for (let size = 2; size <= 5; size++) {
     const combinations = getCombinations(allIndices, size);
     for (const combination of combinations) {
-      const sum = combination.reduce(
-        (acc, idx) => {
-          const cardValue = sortedCardValues[idx];
-          if (!cardValue) return acc;
-          return acc + cardValue.pegValue;
-        },
-        0
-      );
+      const sum = combination.reduce((acc, idx) => {
+        const cardValue = sortedCardValues[idx];
+        if (!cardValue) return acc;
+        return acc + cardValue.pegValue;
+      }, 0);
       if (sum === 15) {
         const cards = getCardsFromIndices(combination);
         breakdown.push(createBreakdownItem('FIFTEEN', 2, cards));

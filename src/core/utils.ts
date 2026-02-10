@@ -122,11 +122,7 @@ export function getMostRecentScoreableEventForPlayer(
 ): GameEvent | null {
   for (let i = gameEventHistory.length - 1; i >= 0; i--) {
     const event = gameEventHistory[i];
-    if (
-      event &&
-      event.playerId === playerId &&
-      isScoreableEvent(event)
-    ) {
+    if (event && event.playerId === playerId && isScoreableEvent(event)) {
       return event;
     }
   }

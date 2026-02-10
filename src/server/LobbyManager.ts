@@ -131,7 +131,9 @@ export class LobbyManager {
   cacheLobbyFromPayload(payload: LobbyPayload): Lobby {
     const mapped = this.lobbyFromSupabase(payload);
     const playerIds = new Set(mapped.players.map(p => p.playerId));
-    mapped.players.forEach(p => this.lobbyIdByPlayerId.set(p.playerId, mapped.id));
+    mapped.players.forEach(p =>
+      this.lobbyIdByPlayerId.set(p.playerId, mapped.id)
+    );
     // Collect entries to delete first to avoid modifying Map during iteration
     const playerIdsToDelete: string[] = [];
     for (const [playerId, lobbyId] of this.lobbyIdByPlayerId.entries()) {
@@ -140,7 +142,9 @@ export class LobbyManager {
       }
     }
     // Delete collected entries after iteration completes
-    playerIdsToDelete.forEach(playerId => this.lobbyIdByPlayerId.delete(playerId));
+    playerIdsToDelete.forEach(playerId =>
+      this.lobbyIdByPlayerId.delete(playerId)
+    );
     this.lobbiesById.set(mapped.id, mapped);
     return mapped;
   }
@@ -269,12 +273,17 @@ export class LobbyManager {
           .update({ status: 'finished' })
           .eq('id', lobbyId);
       } catch (error) {
-        logger.error(`[cleanupLobby] Failed to update stale lobby in DB:`, error);
+        logger.error(
+          '[cleanupLobby] Failed to update stale lobby in DB:',
+          error
+        );
       }
     }
 
     logger.info(
-      `[cleanupLobby] Removed ${reason} lobby ${lobby.name ?? lobbyId} (${lobbyId})`
+      `[cleanupLobby] Removed ${reason} lobby ${
+        lobby.name ?? lobbyId
+      } (${lobbyId})`
     );
   }
 
@@ -285,7 +294,11 @@ export class LobbyManager {
     const now = Date.now();
 
     // Collect lobbies to cleanup (can't modify map while iterating)
-    const lobbiesToCleanup: Array<{ lobbyId: string; lobby: Lobby; reason: 'finished' | 'stale' }> = [];
+    const lobbiesToCleanup: Array<{
+      lobbyId: string;
+      lobby: Lobby;
+      reason: 'finished' | 'stale';
+    }> = [];
 
     this.lobbiesById.forEach((lobby, lobbyId) => {
       // Check for stale lobbies (waiting/in_progress with no connections)
@@ -332,7 +345,9 @@ export class LobbyManager {
       logger.error('Player ID not found for socket:', socket.id);
       const error = { error: 'Not logged in' };
       if (callback) {
-        logger.info('[handleCreateLobby] Sending error callback: Not logged in');
+        logger.info(
+          '[handleCreateLobby] Sending error callback: Not logged in'
+        );
         callback(error);
       }
       socket.emit('error', { message: 'Not logged in' });
@@ -390,7 +405,10 @@ export class LobbyManager {
           logger.warn(
             `[handleCreateLobby] Player ${playerId} already in lobby ${existingLobbyId} (DB check)`
           );
-          const error = { error: 'Already in a lobby', lobbyId: existingLobbyId };
+          const error = {
+            error: 'Already in a lobby',
+            lobbyId: existingLobbyId,
+          };
           if (callback) callback(error);
           socket.emit('error', { message: 'Already in a lobby' });
           return;
@@ -484,7 +502,10 @@ export class LobbyManager {
           logger.warn(
             `[handleJoinLobby] Player ${playerId} already in different lobby ${existingLobbyId} (DB check)`
           );
-          const error = { error: 'Already in a lobby', lobbyId: existingLobbyId };
+          const error = {
+            error: 'Already in a lobby',
+            lobbyId: existingLobbyId,
+          };
           if (callback) callback(error);
           socket.emit('error', { message: 'Already in a lobby' });
           return;
@@ -666,7 +687,8 @@ export class LobbyManager {
           callback({ success: true });
         }
 
-        const targetSocketId = this.connectionManager.getSocketId(targetPlayerId);
+        const targetSocketId =
+          this.connectionManager.getSocketId(targetPlayerId);
         if (targetSocketId) {
           const targetSocket = this.io.sockets.sockets.get(targetSocketId);
           targetSocket?.leave(lobbyId);
@@ -767,7 +789,9 @@ export class LobbyManager {
         this.io.emit('lobbyUpdated', mapped);
       } catch (error) {
         const message =
-          error instanceof Error ? error.message : 'Failed to update lobby size';
+          error instanceof Error
+            ? error.message
+            : 'Failed to update lobby size';
         logger.error('[handleUpdateLobbySize] Supabase update failed', message);
         if (callback) callback({ error: message });
         socket.emit('error', { message });
@@ -856,7 +880,9 @@ export class LobbyManager {
         this.io.emit('lobbyUpdated', mapped);
       } catch (error) {
         const message =
-          error instanceof Error ? error.message : 'Failed to update lobby name';
+          error instanceof Error
+            ? error.message
+            : 'Failed to update lobby name';
         logger.error('[handleUpdateLobbyName] Supabase update failed', message);
         if (callback) callback({ error: message });
         socket.emit('error', { message });
@@ -884,14 +910,17 @@ export class LobbyManager {
               id: lobby.id,
               name: lobby.name,
               hostDisplayName,
-              currentPlayers: lobby.current_players ?? lobby.players?.length ?? 0,
+              currentPlayers:
+                lobby.current_players ?? lobby.players?.length ?? 0,
               playerCount: lobby.max_players ?? (lobby as any).playerCount,
               createdAt: lobby.created_at
                 ? new Date(lobby.created_at).getTime()
                 : Date.now(),
             };
           });
-        logger.info(`Sending ${waitingLobbies.length} waiting lobbies to client`);
+        logger.info(
+          `Sending ${waitingLobbies.length} waiting lobbies to client`
+        );
         socket.emit('lobbyList', { lobbies: waitingLobbies });
       } catch (error) {
         const message =

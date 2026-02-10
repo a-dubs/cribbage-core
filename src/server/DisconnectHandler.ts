@@ -45,8 +45,7 @@ export class DisconnectHandler {
     this.connectionManager = deps.connectionManager;
     this.disconnectGraceTimeouts = deps.disconnectGraceTimeouts;
     this.gameLoopsByLobbyId = deps.gameLoopsByLobbyId;
-    this.mostRecentGameSnapshotByLobbyId =
-      deps.mostRecentGameSnapshotByLobbyId;
+    this.mostRecentGameSnapshotByLobbyId = deps.mostRecentGameSnapshotByLobbyId;
     this.currentRoundGameEventsByLobbyId = deps.currentRoundGameEventsByLobbyId;
     this.roundStartSnapshotByLobbyId = deps.roundStartSnapshotByLobbyId;
     this.supabaseGameIdByLobbyId = deps.supabaseGameIdByLobbyId;
