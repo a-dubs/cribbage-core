@@ -63,6 +63,23 @@ export class CribbageGame extends EventEmitter {
     { cardIndex: number; card: Card; timestamp: number }
   > = new Map(); // Track dealer selection cards
 
+  private cloneGameState(gameState: GameState): GameState {
+    return JSON.parse(JSON.stringify(gameState)) as GameState;
+  }
+
+  private cloneDecisionRequests(
+    requests: DecisionRequest[]
+  ): DecisionRequest[] {
+    return requests.map(request => ({
+      ...request,
+      requestData: JSON.parse(
+        JSON.stringify(request.requestData)
+      ) as DecisionRequest['requestData'],
+      timestamp: new Date(request.timestamp),
+      expiresAt: request.expiresAt ? new Date(request.expiresAt) : undefined,
+    }));
+  }
+
   constructor(playersInfo: PlayerIdAndName[], startingScore = 0) {
     super();
     // Validate player count (2-4 players)
@@ -174,8 +191,11 @@ export class CribbageGame extends EventEmitter {
     };
     const newGameSnapshot: GameSnapshot = {
       gameEvent,
-      gameState: this.gameState,
-      pendingDecisionRequests: [...this.pendingDecisionRequests], // Include current pending requests
+      // Store an immutable copy to preserve historical snapshot integrity.
+      gameState: this.cloneGameState(this.gameState),
+      pendingDecisionRequests: this.cloneDecisionRequests(
+        this.pendingDecisionRequests
+      ),
     };
     this.gameSnapshotHistory.push(newGameSnapshot);
     this.emit('gameSnapshot', newGameSnapshot);
@@ -1314,9 +1334,9 @@ export class CribbageGame extends EventEmitter {
    */
   public serialize(): SerializedCribbageGameState {
     return {
-      gameState: { ...this.gameState },
+      gameState: this.cloneGameState(this.gameState),
       gameSnapshotHistory: this.gameSnapshotHistory.map(snapshot => ({
-        gameState: snapshot.gameState,
+        gameState: this.cloneGameState(snapshot.gameState),
         gameEvent: {
           ...snapshot.gameEvent,
           timestamp: snapshot.gameEvent.timestamp.toISOString(),
@@ -1342,11 +1362,11 @@ export class CribbageGame extends EventEmitter {
    */
   public restoreState(serialized: SerializedCribbageGameState): void {
     // Restore gameState (no Date fields in GameState itself)
-    this.gameState = { ...serialized.gameState };
+    this.gameState = this.cloneGameState(serialized.gameState);
 
     // Restore gameSnapshotHistory with Date parsing
     this.gameSnapshotHistory = serialized.gameSnapshotHistory.map(snapshot => ({
-      gameState: snapshot.gameState,
+      gameState: this.cloneGameState(snapshot.gameState),
       gameEvent: {
         ...snapshot.gameEvent,
         timestamp: new Date(snapshot.gameEvent.timestamp),

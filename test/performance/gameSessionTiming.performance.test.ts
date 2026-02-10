@@ -4,17 +4,6 @@ import {
 import { GameSessionStatus } from '../../src/gameplay/GameSession';
 
 describe('GameSession Timing Performance Tests', () => {
-  let consoleLogSpy: jest.SpyInstance;
-
-  // Silence console.log spam during tests
-  beforeEach(() => {
-    consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    consoleLogSpy.mockRestore();
-  });
-
   it('should complete a 2-player game with medium bots in reasonable time', async () => {
     const startTime = Date.now();
 

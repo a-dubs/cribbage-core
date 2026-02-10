@@ -117,9 +117,11 @@ export class PersistenceService {
       return;
     }
 
-    // Atomically capture and clear events to prevent race conditions
-    // If START_ROUND fires during persistence, it won't be lost
-    const roundEvents = currentRoundGameEventsByLobbyId.get(lobbyId) ?? [];
+    // Atomically capture and clear events before async persistence.
+    // If new events arrive while persisting, they accumulate in the new array.
+    const roundEvents = [
+      ...(currentRoundGameEventsByLobbyId.get(lobbyId) ?? []),
+    ];
     if (roundEvents.length === 0) {
       this.logger.debug(
         `[Supabase] Persistence skipped: No events to persist for lobby ${lobbyId}`
@@ -131,7 +133,7 @@ export class PersistenceService {
       `[Supabase] Persisting ${roundEvents.length} events for game ${supabaseGameId} (lobby ${lobbyId})`
     );
 
-    // Clear immediately before async operation to prevent race conditions
+    // Swap to a fresh array so newly arriving events are not mixed into this batch.
     currentRoundGameEventsByLobbyId.set(lobbyId, []);
 
     const roundStartSnapshot = roundStartSnapshotByLobbyId.get(lobbyId);
@@ -166,13 +168,18 @@ export class PersistenceService {
         `[Supabase] Successfully persisted ${roundEvents.length} events for game ${supabaseGameId}`
       );
     } catch (error) {
+      // Re-queue failed events so history is not silently dropped.
+      const queuedAfterSwap = currentRoundGameEventsByLobbyId.get(lobbyId) ?? [];
+      currentRoundGameEventsByLobbyId.set(lobbyId, [
+        ...roundEvents,
+        ...queuedAfterSwap,
+      ]);
       this.logger.error(
         `[Supabase] Failed to persist round history for game ${supabaseGameId}. ` +
           `This is a critical error - game persistence is required.`,
         error
       );
-      // Note: Events are already cleared, so they won't be retried
-      // This is acceptable since persistence failures are logged for monitoring
+      throw error;
     }
   }
 }
