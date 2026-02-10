@@ -145,5 +145,20 @@ describe('CribbageGame Setter Methods', () => {
       expect(history[2].gameEvent.actionType).toBe(ActionType.BEGIN_PHASE);
     });
   });
+
+  describe('snapshot history immutability', () => {
+    it('should preserve historical gameState values per snapshot', () => {
+      game.setPhase(Phase.DISCARDING, ActionType.BEGIN_PHASE);
+      game.addScoreToPlayer('player-1', 2, ActionType.SCORE_HEELS);
+
+      const history = game.getGameSnapshotHistory();
+      expect(history).toHaveLength(2);
+
+      // Snapshot 0 should keep the earlier score/phase even after later mutations.
+      expect(history[0]?.gameState.currentPhase).toBe(Phase.DISCARDING);
+      expect(history[0]?.gameState.players[0]?.score).toBe(0);
+      expect(history[1]?.gameState.players[0]?.score).toBe(2);
+    });
+  });
 });
 

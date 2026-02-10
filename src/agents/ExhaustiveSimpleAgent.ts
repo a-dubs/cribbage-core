@@ -71,7 +71,11 @@ export class ExhaustiveSimpleAgent extends RandomAgent {
       const remaining = array.slice(i + 1);
       const combinations = this.generateCombinations(remaining, k - 1);
       for (const combo of combinations) {
-        result.push([array[i], ...combo]);
+        const first = array[i];
+        if (first === undefined) {
+          continue;
+        }
+        result.push([first, ...combo]);
       }
     }
     return result;

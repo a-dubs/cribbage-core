@@ -43,7 +43,7 @@ export class RandomAgent implements GameAgent {
     }
 
     const randomIndex = Math.floor(Math.random() * filteredHand.length);
-    return Promise.resolve(filteredHand[randomIndex]);
+    return Promise.resolve(filteredHand[randomIndex] ?? null);
   }
 
   discard(
@@ -64,18 +64,20 @@ export class RandomAgent implements GameAgent {
     }
 
     return Promise.resolve(
-      Array.from(randomIndices).map(index => player.hand[index])
+      Array.from(randomIndices)
+        .map(index => player.hand[index])
+        .filter((card): card is Card => card !== undefined)
     );
   }
 
-  async deal(snapshot: GameSnapshot, playerId: string): Promise<void> {
+  async deal(_snapshot: GameSnapshot, _playerId: string): Promise<void> {
     // Bots automatically deal - no need to wait
     return Promise.resolve();
   }
 
   async cutDeck(
-    snapshot: GameSnapshot,
-    playerId: string,
+    _snapshot: GameSnapshot,
+    _playerId: string,
     maxIndex: number
   ): Promise<number> {
     // Bots randomly cut the deck
@@ -83,8 +85,8 @@ export class RandomAgent implements GameAgent {
   }
 
   async selectDealerCard(
-    snapshot: GameSnapshot,
-    playerId: string,
+    _snapshot: GameSnapshot,
+    _playerId: string,
     maxIndex: number
   ): Promise<number> {
     // Bots randomly select a card for dealer selection
@@ -92,7 +94,7 @@ export class RandomAgent implements GameAgent {
   }
 
   async acknowledgeReadyForGameStart(
-    snapshot: GameSnapshot,
+    _snapshot: GameSnapshot,
     playerId: string
   ): Promise<void> {
     const startTime = Date.now();
@@ -110,7 +112,7 @@ export class RandomAgent implements GameAgent {
   }
 
   async acknowledgeReadyForCounting(
-    snapshot: GameSnapshot,
+    _snapshot: GameSnapshot,
     playerId: string
   ): Promise<void> {
     const startTime = Date.now();
@@ -128,7 +130,7 @@ export class RandomAgent implements GameAgent {
   }
 
   async acknowledgeReadyForNextRound(
-    snapshot: GameSnapshot,
+    _snapshot: GameSnapshot,
     playerId: string
   ): Promise<void> {
     const startTime = Date.now();

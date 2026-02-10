@@ -21,18 +21,37 @@ import {
 } from '../types';
 import { displayCard, parseCard, suitToEmoji } from '../core/scoring';
 import EventEmitter from 'eventemitter3';
-import dotenv from 'dotenv';
 import { getPlayerCountConfig } from './rules';
 import { logger } from '../utils/logger';
 
-// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
-dotenv.config();
-const startingScore = process.env.OVERRIDE_START_SCORE
-  ? parseInt(process.env.OVERRIDE_START_SCORE)
-  : 0;
+/**
+ * Environment variables are loaded by the server/CLI entrypoints.
+ *
+ * This module is part of the core library and may be imported into web bundles,
+ * so it must not perform Node-only side effects (like `dotenv.config()`).
+ */
+function readEnvNumber(name: string): number | undefined {
+  try {
+    const value = process?.env?.[name];
+    if (!value) return undefined;
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readEnvFlag(name: string): boolean {
+  try {
+    return process?.env?.[name] === 'true';
+  } catch {
+    return false;
+  }
+}
+
+const startingScore = readEnvNumber('OVERRIDE_START_SCORE') ?? 0;
 // Feature flag for READY_FOR_COUNTING decision request (defaults to disabled)
-const ENABLE_READY_FOR_COUNTING =
-  process.env.ENABLE_READY_FOR_COUNTING === 'true';
+const ENABLE_READY_FOR_COUNTING = readEnvFlag('ENABLE_READY_FOR_COUNTING');
 
 export class GameLoop extends EventEmitter {
   public cribbageGame: CribbageGame;

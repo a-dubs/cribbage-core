@@ -46,13 +46,13 @@ type AuthenticatedRequest = Request & {
   profile?: SupabaseProfile | null;
 };
 
-const SUPABASE_AUTH_ENABLED = process.env.SUPABASE_AUTH_ENABLED === 'true';
 const SUPABASE_LOBBIES_ENABLED =
   process.env.SUPABASE_LOBBIES_ENABLED === 'true';
 
 type HttpApiHooks = {
   onLobbyUpdated?: (lobby: LobbyPayload) => void;
   onLobbyClosed?: (lobbyId: string) => void;
+  onPlayerLeftLobby?: (playerId: string, lobbyId: string) => void;
   onStartLobbyGame?: (
     lobbyId: string,
     hostId: string
@@ -75,14 +75,6 @@ async function authMiddleware(
   res: Response,
   next: NextFunction
 ): Promise<void> {
-  if (!SUPABASE_AUTH_ENABLED) {
-    res.status(503).json({
-      error: 'FEATURE_DISABLED',
-      message: 'Supabase auth is disabled',
-    });
-    return;
-  }
-
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) {
     res
@@ -116,7 +108,6 @@ export function registerHttpApi(
 ): void {
   registerAvatarRoutes(app, authMiddleware);
   app.post('/auth/signup', async (req: Request, res: Response) => {
-    if (!requireSupabaseFlag(SUPABASE_AUTH_ENABLED, res)) return;
     const { email, password, username, displayName } = req.body ?? {};
     if (!email || !password || !username || !displayName) {
       res.status(400).json({
@@ -140,7 +131,6 @@ export function registerHttpApi(
   });
 
   app.post('/auth/login', async (req: Request, res: Response) => {
-    if (!requireSupabaseFlag(SUPABASE_AUTH_ENABLED, res)) return;
     const { email, password } = req.body ?? {};
     if (!email || !password) {
       res.status(400).json({
@@ -159,7 +149,6 @@ export function registerHttpApi(
   });
 
   app.post('/auth/refresh', async (req: Request, res: Response) => {
-    if (!requireSupabaseFlag(SUPABASE_AUTH_ENABLED, res)) return;
     const { refreshToken } = req.body ?? {};
     if (!refreshToken) {
       res.status(400).json({
@@ -393,6 +382,8 @@ export function registerHttpApi(
       }
       try {
         const lobby = await leaveLobby({ lobbyId, playerId: req.userId });
+        // Clear in-memory state for this player leaving the lobby
+        hooks?.onPlayerLeftLobby?.(req.userId, lobbyId);
         if (
           lobby?.status === 'finished' ||
           (lobby?.current_players ?? 0) === 0
@@ -753,12 +744,24 @@ export function registerHttpApi(
         const message =
           error instanceof Error ? error.message : 'Failed to send request';
         let status = 400;
+        let errorType = 'FRIEND_REQUEST_FAILED';
+
         if (message === 'NOT_FOUND') {
           status = 404;
         } else if (message === 'CANNOT_ADD_SELF') {
           status = 400;
+        } else if (message === 'ALREADY_FRIENDS') {
+          status = 409;
+          errorType = 'ALREADY_FRIENDS';
+        } else if (message === 'ALREADY_SENT_REQUEST') {
+          status = 409;
+          errorType = 'ALREADY_SENT_REQUEST';
+        } else if (message === 'INCOMING_REQUEST_EXISTS') {
+          status = 409;
+          errorType = 'INCOMING_REQUEST_EXISTS';
         }
-        res.status(status).json({ error: 'FRIEND_REQUEST_FAILED', message });
+
+        res.status(status).json({ error: errorType, message });
       }
     }
   );
@@ -794,12 +797,24 @@ export function registerHttpApi(
             ? error.message
             : 'Failed to send request from lobby';
         let status = 400;
+        let errorType = 'FRIEND_REQUEST_FAILED';
+
         if (message === 'NOT_IN_LOBBY') {
           status = 403;
         } else if (message === 'CANNOT_ADD_SELF') {
           status = 400;
+        } else if (message === 'ALREADY_FRIENDS') {
+          status = 409;
+          errorType = 'ALREADY_FRIENDS';
+        } else if (message === 'ALREADY_SENT_REQUEST') {
+          status = 409;
+          errorType = 'ALREADY_SENT_REQUEST';
+        } else if (message === 'INCOMING_REQUEST_EXISTS') {
+          status = 409;
+          errorType = 'INCOMING_REQUEST_EXISTS';
         }
-        res.status(status).json({ error: 'FRIEND_REQUEST_FAILED', message });
+
+        res.status(status).json({ error: errorType, message });
       }
     }
   );
