@@ -65,7 +65,7 @@ export class PersistenceService {
     playersInfo: PlayerIdAndName[],
     gameLoop: GameLoop,
     supabaseGameIdByLobbyId: Map<string, string>
-  ): Promise<string | null> {
+  ): Promise<string> {
     try {
       this.logger.info(
         `[Supabase] Creating game record for lobby ${lobby.id} with ${playersInfo.length} players`
@@ -87,7 +87,7 @@ export class PersistenceService {
           'This is a critical error - game persistence is required.',
         error
       );
-      return null;
+      throw error;
     }
   }
 
