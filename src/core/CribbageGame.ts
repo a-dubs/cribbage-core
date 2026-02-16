@@ -63,8 +63,17 @@ export class CribbageGame extends EventEmitter {
     { cardIndex: number; card: Card; timestamp: number }
   > = new Map(); // Track dealer selection cards
 
+  private deepClone<T>(value: T): T {
+    const structuredCloneFn = (globalThis as { structuredClone?: <U>(x: U) => U })
+      .structuredClone;
+    if (typeof structuredCloneFn === 'function') {
+      return structuredCloneFn(value);
+    }
+    return JSON.parse(JSON.stringify(value)) as T;
+  }
+
   private cloneGameState(gameState: GameState): GameState {
-    return JSON.parse(JSON.stringify(gameState)) as GameState;
+    return this.deepClone(gameState);
   }
 
   private cloneDecisionRequests(
@@ -72,8 +81,8 @@ export class CribbageGame extends EventEmitter {
   ): DecisionRequest[] {
     return requests.map(request => ({
       ...request,
-      requestData: JSON.parse(
-        JSON.stringify(request.requestData)
+      requestData: this.deepClone(
+        request.requestData
       ) as DecisionRequest['requestData'],
       timestamp: new Date(request.timestamp),
       expiresAt: request.expiresAt ? new Date(request.expiresAt) : undefined,
