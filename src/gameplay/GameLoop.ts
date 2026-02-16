@@ -1,4 +1,3 @@
-import { randomInt } from 'crypto';
 import { CribbageGame } from '../core/CribbageGame';
 import {
   GameAgent,
@@ -49,9 +48,14 @@ function readEnvFlag(name: string): boolean {
   }
 }
 
-const startingScore = readEnvNumber('OVERRIDE_START_SCORE') ?? 0;
-// Feature flag for READY_FOR_COUNTING decision request (defaults to disabled)
-const ENABLE_READY_FOR_COUNTING = readEnvFlag('ENABLE_READY_FOR_COUNTING');
+function getStartingScore(): number {
+  return readEnvNumber('OVERRIDE_START_SCORE') ?? 0;
+}
+
+// Feature flag for READY_FOR_COUNTING decision request (defaults to disabled).
+function isReadyForCountingEnabled(): boolean {
+  return readEnvFlag('ENABLE_READY_FOR_COUNTING');
+}
 
 export class GameLoop extends EventEmitter {
   public cribbageGame: CribbageGame;
@@ -60,7 +64,7 @@ export class GameLoop extends EventEmitter {
 
   constructor(playersInfo: PlayerIdAndName[]) {
     super();
-    this.cribbageGame = new CribbageGame(playersInfo, startingScore);
+    this.cribbageGame = new CribbageGame(playersInfo, getStartingScore());
     this.cribbageGame.on('gameStateChange', (newGameState: GameState) => {
       this.emit('gameStateChange', newGameState);
     });
@@ -853,7 +857,7 @@ export class GameLoop extends EventEmitter {
 
     // READY_FOR_COUNTING: Parallel acknowledgment (all players)
     // Feature flag: can be enabled via ENABLE_READY_FOR_COUNTING=true env var
-    if (ENABLE_READY_FOR_COUNTING) {
+    if (isReadyForCountingEnabled()) {
       await this.waitForAllPlayersReady(
         AgentDecisionType.READY_FOR_COUNTING,
         'Ready for counting'
