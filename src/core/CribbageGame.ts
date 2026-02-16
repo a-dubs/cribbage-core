@@ -81,9 +81,7 @@ export class CribbageGame extends EventEmitter {
   ): DecisionRequest[] {
     return requests.map(request => ({
       ...request,
-      requestData: this.deepClone(
-        request.requestData
-      ) as DecisionRequest['requestData'],
+      requestData: this.deepClone(request.requestData),
       timestamp: new Date(request.timestamp),
       expiresAt: request.expiresAt ? new Date(request.expiresAt) : undefined,
     }));
