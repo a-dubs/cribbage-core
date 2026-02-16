@@ -128,11 +128,23 @@ export class PersistenceService {
       `[Supabase] Persisting ${roundEvents.length} events for game ${supabaseGameId} (lobby ${lobbyId})`
     );
 
+    // Acknowledgment snapshots can replay the same gameEvent multiple times.
+    // DB enforces unique (game_id, snapshot_id), so persist each snapshot once.
+    const seenSnapshotIds = new Set<number>();
+    const dedupedRoundEvents: GameEvent[] = [];
+    for (const event of roundEvents) {
+      if (seenSnapshotIds.has(event.snapshotId)) {
+        continue;
+      }
+      seenSnapshotIds.add(event.snapshotId);
+      dedupedRoundEvents.push(event);
+    }
+
     // Swap to a fresh array so newly arriving events are not mixed into this batch.
     currentRoundGameEventsByLobbyId.set(lobbyId, []);
 
     const roundStartSnapshot = roundStartSnapshotByLobbyId.get(lobbyId);
-    const eventsWithSnapshots = roundEvents.map(event => {
+    const eventsWithSnapshots = dedupedRoundEvents.map(event => {
       const snapshot = this.snapshotForEvent(
         event,
         latestSnapshot,
@@ -162,7 +174,7 @@ export class PersistenceService {
         events: eventsWithSnapshots,
       });
       this.logger.info(
-        `[Supabase] Successfully persisted ${roundEvents.length} events for game ${supabaseGameId}`
+        `[Supabase] Successfully persisted ${dedupedRoundEvents.length} events for game ${supabaseGameId}`
       );
     } catch (error) {
       // Re-queue failed events so history is not silently dropped.

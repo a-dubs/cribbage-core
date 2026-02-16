@@ -60,6 +60,9 @@ export class GameManager {
   private readonly gameIdByLobbyId: Map<string, string>;
   private readonly cleanupBots: (lobbyId: string) => void;
   private readonly emitConnectedPlayers: () => void;
+  // Dedupe persistence triggers caused by acknowledgment snapshots that can
+  // replay the same round-end gameEvent multiple times.
+  private readonly lastPersistenceTriggerKeyByLobbyId = new Map<string, string>();
 
   constructor(deps: GameManagerDependencies) {
     this.io = deps.io;
@@ -76,6 +79,31 @@ export class GameManager {
     this.gameIdByLobbyId = deps.gameIdByLobbyId;
     this.cleanupBots = deps.cleanupBots;
     this.emitConnectedPlayers = deps.emitConnectedPlayers;
+  }
+
+  private shouldTriggerRoundPersistence(gameEvent: GameEvent): boolean {
+    const isRoundEndCountingEvent =
+      gameEvent.actionType === ActionType.END_PHASE &&
+      gameEvent.phase === 'COUNTING';
+    return isRoundEndCountingEvent || gameEvent.actionType === ActionType.WIN;
+  }
+
+  private shouldPersistForEventOnce(
+    lobbyId: string,
+    gameEvent: GameEvent
+  ): boolean {
+    if (!this.shouldTriggerRoundPersistence(gameEvent)) {
+      return false;
+    }
+
+    const key = `${gameEvent.actionType}:${gameEvent.snapshotId}`;
+    const lastKey = this.lastPersistenceTriggerKeyByLobbyId.get(lobbyId);
+    if (lastKey === key) {
+      return false;
+    }
+
+    this.lastPersistenceTriggerKeyByLobbyId.set(lobbyId, key);
+    return true;
   }
 
   /**
@@ -166,6 +194,7 @@ export class GameManager {
       agents.forEach((agent, id) => gameLoop.addAgent(id, agent));
       this.gameLoopsByLobbyId.set(lobby.id, gameLoop);
       this.currentRoundGameEventsByLobbyId.set(lobby.id, []);
+      this.lastPersistenceTriggerKeyByLobbyId.delete(lobby.id);
       await this.persistenceService.createSupabaseGameForLobby(
         lobby,
         validPlayersInfo,
@@ -198,11 +227,7 @@ export class GameManager {
           );
         }
 
-        if (
-          newSnapshot.gameEvent.actionType ===
-            ActionType.READY_FOR_NEXT_ROUND ||
-          newSnapshot.gameEvent.actionType === ActionType.WIN
-        ) {
+        if (this.shouldPersistForEventOnce(lobby.id, newSnapshot.gameEvent)) {
           const eventsToPersist =
             this.currentRoundGameEventsByLobbyId.get(lobby.id) || [];
           logger.info(
@@ -510,6 +535,7 @@ export class GameManager {
     agents.forEach((agent, id) => gameLoop.addAgent(id, agent));
     this.gameLoopsByLobbyId.set(lobby.id, gameLoop);
     this.currentRoundGameEventsByLobbyId.set(lobby.id, []);
+    this.lastPersistenceTriggerKeyByLobbyId.delete(lobby.id);
     await this.persistenceService.createSupabaseGameForLobby(
       lobby,
       validPlayersInfo,
@@ -542,10 +568,7 @@ export class GameManager {
         );
       }
 
-      if (
-        newSnapshot.gameEvent.actionType === ActionType.READY_FOR_NEXT_ROUND ||
-        newSnapshot.gameEvent.actionType === ActionType.WIN
-      ) {
+      if (this.shouldPersistForEventOnce(lobby.id, newSnapshot.gameEvent)) {
         const eventsToPersist =
           this.currentRoundGameEventsByLobbyId.get(lobby.id) || [];
         logger.info(
@@ -715,6 +738,7 @@ export class GameManager {
       this.gameIdByLobbyId.delete(lobbyId);
       this.supabaseGameIdByLobbyId.delete(lobbyId);
       this.roundStartSnapshotByLobbyId.delete(lobbyId);
+      this.lastPersistenceTriggerKeyByLobbyId.delete(lobbyId);
 
       const completedLobby = this.lobbyManager.getLobby(lobbyId);
       if (completedLobby) {
@@ -753,6 +777,7 @@ export class GameManager {
         this.gameIdByLobbyId.delete(lobbyId);
         this.supabaseGameIdByLobbyId.delete(lobbyId);
         this.roundStartSnapshotByLobbyId.delete(lobbyId);
+        this.lastPersistenceTriggerKeyByLobbyId.delete(lobbyId);
         this.currentRoundGameEventsByLobbyId.delete(lobbyId);
         this.mostRecentGameSnapshotByLobbyId.delete(lobbyId);
         return;
@@ -909,6 +934,7 @@ export class GameManager {
     this.mostRecentGameSnapshotByLobbyId.delete(lobbyId);
     this.currentRoundGameEventsByLobbyId.delete(lobbyId);
     this.roundStartSnapshotByLobbyId.delete(lobbyId);
+    this.lastPersistenceTriggerKeyByLobbyId.delete(lobbyId);
     this.supabaseGameIdByLobbyId.delete(lobbyId);
     this.gameIdByLobbyId.delete(lobbyId);
     this.cleanupBots(lobbyId);

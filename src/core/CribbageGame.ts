@@ -573,6 +573,12 @@ export class CribbageGame extends EventEmitter {
     // during the READY_FOR_GAME_START acknowledgment phase
     // They will be cleared after acknowledgment completes
     this.gameState.currentPhase = Phase.DEALING;
+    // Clear dealer-card requests immediately when dealer selection completes.
+    // This prevents stale SELECT_DEALER_CARD requests from leaking into the
+    // DEALING phase snapshot.
+    this.pendingDecisionRequests = this.pendingDecisionRequests.filter(
+      request => request.decisionType !== AgentDecisionType.SELECT_DEALER_CARD
+    );
     this.recordGameEvent(ActionType.BEGIN_PHASE, null, null, 0);
   }
 
