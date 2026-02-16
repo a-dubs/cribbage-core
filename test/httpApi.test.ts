@@ -2,8 +2,6 @@
 process.env.SUPABASE_URL = 'http://localhost:54321';
 process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key';
 process.env.SUPABASE_ANON_KEY = 'test-anon-key';
-// Note: SUPABASE_AUTH_ENABLED flag removed - auth is always required
-process.env.SUPABASE_LOBBIES_ENABLED = 'true';
 
 // Mock avatarRoutes to avoid sharp dependency issues in tests
 jest.mock('../src/routes/avatarRoutes', () => ({

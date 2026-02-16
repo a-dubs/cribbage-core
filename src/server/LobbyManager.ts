@@ -41,7 +41,6 @@ export interface LobbyManagerDependencies {
   cleanupBots: (lobbyId: string) => void;
   clearPlayerDisconnectTimer: (playerId: string) => void;
   lobbyFromSupabase: (payload: any) => Lobby;
-  SUPABASE_LOBBIES_ENABLED: boolean;
 }
 
 export class LobbyManager {
@@ -57,7 +56,6 @@ export class LobbyManager {
   private readonly cleanupBots: (lobbyId: string) => void;
   private readonly clearPlayerDisconnectTimer: (playerId: string) => void;
   private readonly lobbyFromSupabase: (payload: any) => Lobby;
-  private readonly SUPABASE_LOBBIES_ENABLED: boolean;
 
   // Lobby state maps
   private readonly lobbiesById: Map<string, Lobby> = new Map();
@@ -78,7 +76,6 @@ export class LobbyManager {
     this.cleanupBots = deps.cleanupBots;
     this.clearPlayerDisconnectTimer = deps.clearPlayerDisconnectTimer;
     this.lobbyFromSupabase = deps.lobbyFromSupabase;
-    this.SUPABASE_LOBBIES_ENABLED = deps.SUPABASE_LOBBIES_ENABLED;
 
     // Start cleanup timer
     this.cleanupInterval = setInterval(
@@ -266,7 +263,7 @@ export class LobbyManager {
     this.io.emit('lobbyClosed', { lobbyId });
 
     // Update Supabase if lobby was stale (not already finished in DB)
-    if (reason === 'stale' && this.SUPABASE_LOBBIES_ENABLED) {
+    if (reason === 'stale') {
       try {
         await getServiceClient()
           .from('lobbies')

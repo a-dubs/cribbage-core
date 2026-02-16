@@ -33,7 +33,6 @@ import {
 export interface WebSocketServerConfig {
   port: number;
   webAppOrigin: string;
-  supabaseLobbiesEnabled: boolean;
 }
 
 export class WebSocketServer {
@@ -129,7 +128,6 @@ export class WebSocketServer {
       clearPlayerDisconnectTimer: (playerId: string) =>
         this.clearPlayerDisconnectTimerWrapper.fn(playerId),
       lobbyFromSupabase: (payload: any) => this.lobbyFromSupabase(payload),
-      SUPABASE_LOBBIES_ENABLED: this.config.supabaseLobbiesEnabled,
     });
 
     // Create DisconnectHandler

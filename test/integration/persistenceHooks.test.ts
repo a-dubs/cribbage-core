@@ -2,8 +2,6 @@
 process.env.SUPABASE_URL = 'http://localhost:54321';
 process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key';
 process.env.SUPABASE_ANON_KEY = 'test-anon-key';
-process.env.SUPABASE_AUTH_ENABLED = 'true';
-process.env.SUPABASE_LOBBIES_ENABLED = 'true';
 
 // Mock the entire supabaseService module
 jest.mock('../../src/services/supabaseService');
@@ -143,7 +141,6 @@ describe('Persistence Hooks Integration Test', () => {
         disconnectedPlayerIds: [],
         isFixedSize: payload.is_fixed_size ?? false,
       }),
-      SUPABASE_LOBBIES_ENABLED: true,
     });
 
     // Create DisconnectHandler

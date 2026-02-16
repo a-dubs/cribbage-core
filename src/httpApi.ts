@@ -46,9 +46,6 @@ type AuthenticatedRequest = Request & {
   profile?: SupabaseProfile | null;
 };
 
-const SUPABASE_LOBBIES_ENABLED =
-  process.env.SUPABASE_LOBBIES_ENABLED === 'true';
-
 type HttpApiHooks = {
   onLobbyUpdated?: (lobby: LobbyPayload) => void;
   onLobbyClosed?: (lobbyId: string) => void;
@@ -58,17 +55,6 @@ type HttpApiHooks = {
     hostId: string
   ) => Promise<{ lobby?: LobbyPayload; gameId?: string }>;
 };
-
-function requireSupabaseFlag(enabled: boolean, res: Response): boolean {
-  if (!enabled) {
-    res.status(503).json({
-      error: 'FEATURE_DISABLED',
-      message: 'Supabase-backed APIs are disabled',
-    });
-    return false;
-  }
-  return true;
-}
 
 async function authMiddleware(
   req: AuthenticatedRequest,
@@ -217,7 +203,6 @@ export function registerHttpApi(
     '/lobbies',
     authMiddleware,
     async (req: AuthenticatedRequest, res: Response) => {
-      if (!requireSupabaseFlag(SUPABASE_LOBBIES_ENABLED, res)) return;
       if (!req.userId) {
         res
           .status(401)
@@ -239,7 +224,6 @@ export function registerHttpApi(
     '/lobbies/current',
     authMiddleware,
     async (req: AuthenticatedRequest, res: Response) => {
-      if (!requireSupabaseFlag(SUPABASE_LOBBIES_ENABLED, res)) return;
       if (!req.userId) {
         res
           .status(401)
@@ -277,7 +261,6 @@ export function registerHttpApi(
     '/lobbies',
     authMiddleware,
     async (req: AuthenticatedRequest, res: Response) => {
-      if (!requireSupabaseFlag(SUPABASE_LOBBIES_ENABLED, res)) return;
       const {
         name,
         maxPlayers,
@@ -329,7 +312,6 @@ export function registerHttpApi(
     '/lobbies/:lobbyId/join',
     authMiddleware,
     async (req: AuthenticatedRequest, res: Response) => {
-      if (!requireSupabaseFlag(SUPABASE_LOBBIES_ENABLED, res)) return;
       const { lobbyId } = req.params;
       const { inviteCode } = req.body ?? {};
       if (!req.userId) {
@@ -372,7 +354,6 @@ export function registerHttpApi(
     '/lobbies/:lobbyId/leave',
     authMiddleware,
     async (req: AuthenticatedRequest, res: Response) => {
-      if (!requireSupabaseFlag(SUPABASE_LOBBIES_ENABLED, res)) return;
       const { lobbyId } = req.params;
       if (!req.userId) {
         res
@@ -405,7 +386,6 @@ export function registerHttpApi(
     '/lobbies/:lobbyId/invite',
     authMiddleware,
     async (req: AuthenticatedRequest, res: Response) => {
-      if (!requireSupabaseFlag(SUPABASE_LOBBIES_ENABLED, res)) return;
       const { lobbyId } = req.params;
       const { recipientId } = req.body ?? {};
       if (!req.userId) {
@@ -443,7 +423,6 @@ export function registerHttpApi(
     '/lobbies/invitations',
     authMiddleware,
     async (req: AuthenticatedRequest, res: Response) => {
-      if (!requireSupabaseFlag(SUPABASE_LOBBIES_ENABLED, res)) return;
       if (!req.userId) {
         res
           .status(401)
@@ -467,7 +446,6 @@ export function registerHttpApi(
     '/lobbies/invitations/:id/respond',
     authMiddleware,
     async (req: AuthenticatedRequest, res: Response) => {
-      if (!requireSupabaseFlag(SUPABASE_LOBBIES_ENABLED, res)) return;
       if (!req.userId) {
         res
           .status(401)
@@ -511,7 +489,6 @@ export function registerHttpApi(
     '/lobbies/:lobbyId',
     authMiddleware,
     async (req: AuthenticatedRequest, res: Response) => {
-      if (!requireSupabaseFlag(SUPABASE_LOBBIES_ENABLED, res)) return;
       const { lobbyId } = req.params;
       const { name, maxPlayers, isFixedSize } = req.body ?? {};
       if (!req.userId) {
@@ -565,7 +542,6 @@ export function registerHttpApi(
     '/lobbies/:lobbyId/lock',
     authMiddleware,
     async (req: AuthenticatedRequest, res: Response) => {
-      if (!requireSupabaseFlag(SUPABASE_LOBBIES_ENABLED, res)) return;
       const { lobbyId } = req.params;
       if (!req.userId) {
         res
@@ -595,7 +571,6 @@ export function registerHttpApi(
     '/lobbies/:lobbyId/start',
     authMiddleware,
     async (req: AuthenticatedRequest, res: Response) => {
-      if (!requireSupabaseFlag(SUPABASE_LOBBIES_ENABLED, res)) return;
       const { lobbyId } = req.params;
       if (!req.userId) {
         res
@@ -635,7 +610,6 @@ export function registerHttpApi(
     '/lobbies/:lobbyId/kick',
     authMiddleware,
     async (req: AuthenticatedRequest, res: Response) => {
-      if (!requireSupabaseFlag(SUPABASE_LOBBIES_ENABLED, res)) return;
       const { lobbyId } = req.params;
       const { targetPlayerId } = req.body ?? {};
       if (!req.userId) {
