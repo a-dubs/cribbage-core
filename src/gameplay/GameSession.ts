@@ -17,6 +17,8 @@ export enum GameSessionStatus {
   CANCELLED = 'CANCELLED',
 }
 
+const SUPPORTED_SERIALIZED_SESSION_VERSION = 1;
+
 /**
  * GameSession wraps CribbageGame and GameLoop to provide a clean lifecycle API.
  * This abstraction allows for controlled game execution and decision handling.
@@ -212,7 +214,7 @@ export class GameSession extends EventEmitter {
     }));
 
     return {
-      version: 1,
+      version: SUPPORTED_SERIALIZED_SESSION_VERSION,
       players: playersInfo,
       status: this.status,
       winnerId: this.winnerId,
@@ -227,6 +229,12 @@ export class GameSession extends EventEmitter {
    * @returns Restored GameSession instance
    */
   public static fromJSON(data: SerializedGameSession): GameSession {
+    if (data.version !== SUPPORTED_SERIALIZED_SESSION_VERSION) {
+      throw new Error(
+        `Unsupported serialized game session version: ${data.version}`
+      );
+    }
+
     const session = new GameSession(data.players);
 
     // Restore status and winner

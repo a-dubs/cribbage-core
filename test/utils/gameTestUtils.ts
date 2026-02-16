@@ -145,25 +145,56 @@ export async function playUntilPhase(
     
     // Start the game (it will continue running after target phase is reached)
     gameStartPromise = session.start();
-    gameStartPromise.catch((error) => {
-      if (resolved) return; // Already resolved, ignore error
-      
-      // If game completes before reaching target phase, check if we're at target phase
-      session.off('gameStateChange', checkPhase);
-      session.off('gameSnapshot', checkSnapshot);
-      const finalPhase = session.getGameState().currentPhase;
-      if (finalPhase === targetPhase) {
-        resolved = true;
-        resolve();
-      } else {
-        // Game completed or errored - check if it's a completion (not an error)
-        if (session.getStatus() === GameSessionStatus.ENDED && finalPhase === Phase.END) {
-          reject(new Error(`Game completed at phase ${finalPhase} before reaching target phase ${targetPhase}`));
-        } else {
-          reject(new Error(`Game ended at phase ${finalPhase} before reaching target phase ${targetPhase}: ${error.message}`));
+    gameStartPromise
+      .then(() => {
+        if (resolved) return;
+
+        session.off('gameStateChange', checkPhase);
+        session.off('gameSnapshot', checkSnapshot);
+        const finalPhase = session.getGameState().currentPhase;
+
+        if (finalPhase === targetPhase) {
+          resolved = true;
+          resolve();
+          return;
         }
-      }
-    });
+
+        reject(
+          new Error(
+            `Game completed at phase ${finalPhase} before reaching target phase ${targetPhase}`
+          )
+        );
+      })
+      .catch((error: Error) => {
+        if (resolved) return; // Already resolved, ignore error
+
+        // If game completes before reaching target phase, check if we're at target phase
+        session.off('gameStateChange', checkPhase);
+        session.off('gameSnapshot', checkSnapshot);
+        const finalPhase = session.getGameState().currentPhase;
+        if (finalPhase === targetPhase) {
+          resolved = true;
+          resolve();
+        } else {
+          // Game completed or errored - check if it's a completion (not an error)
+          if (
+            session.getStatus() === GameSessionStatus.ENDED &&
+            finalPhase === Phase.END
+          ) {
+            reject(
+              new Error(
+                `Game completed at phase ${finalPhase} before reaching target phase ${targetPhase}`
+              )
+            );
+          } else {
+            reject(
+              new Error(
+                `Game ended at phase ${finalPhase} before reaching target phase ${targetPhase}: ${error.message}`
+              )
+            );
+          }
+        }
+      });
   });
 }
 
