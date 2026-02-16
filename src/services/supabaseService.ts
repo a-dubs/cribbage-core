@@ -40,9 +40,11 @@ export type LobbyInvitationWithLobby = LobbyInvitation & {
   lobbies: LobbyRecord | null;
 };
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+type SupabaseEnv = {
+  url: string;
+  serviceRoleKey: string;
+  anonKey: string;
+};
 
 let serviceClient: SupabaseClient | null = null;
 let anonClient: SupabaseClient | null = null;
@@ -52,10 +54,16 @@ const UUID_REGEX =
 // Username must match database constraint: lowercase letters, numbers, underscores, and hyphens only, 3-20 chars
 const USERNAME_REGEX = /^[a-z0-9_-]{3,20}$/;
 
-function ensureEnv(): void {
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
+function ensureEnv(): SupabaseEnv {
+  const url = process.env.SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const anonKey = process.env.SUPABASE_ANON_KEY;
+
+  if (!url || !serviceRoleKey || !anonKey) {
     throw new Error('Supabase environment is not fully configured');
   }
+
+  return { url, serviceRoleKey, anonKey };
 }
 
 export function toUuidOrNull(value: string | null | undefined): string | null {
@@ -92,11 +100,11 @@ function validateAndNormalizeUsername(username: string): string {
 }
 
 export function getServiceClient(): SupabaseClient {
-  ensureEnv();
+  const env = ensureEnv();
   if (!serviceClient) {
     serviceClient = createClient(
-      SUPABASE_URL as string,
-      SUPABASE_SERVICE_ROLE_KEY as string,
+      env.url,
+      env.serviceRoleKey,
       {
         auth: {
           autoRefreshToken: false,
@@ -117,11 +125,11 @@ export function resetServiceClients(): void {
 }
 
 function getAnonClient(): SupabaseClient {
-  ensureEnv();
+  const env = ensureEnv();
   if (!anonClient) {
     anonClient = createClient(
-      SUPABASE_URL as string,
-      SUPABASE_ANON_KEY as string,
+      env.url,
+      env.anonKey,
       {
         auth: {
           autoRefreshToken: false,
@@ -134,8 +142,8 @@ function getAnonClient(): SupabaseClient {
 }
 
 function authClientForToken(token: string): SupabaseClient {
-  ensureEnv();
-  return createClient(SUPABASE_URL as string, SUPABASE_ANON_KEY as string, {
+  const env = ensureEnv();
+  return createClient(env.url, env.anonKey, {
     global: {
       headers: { Authorization: `Bearer ${token}` },
     },
