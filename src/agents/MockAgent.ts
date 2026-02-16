@@ -13,14 +13,18 @@ export class MockAgent implements GameAgent {
   private discardResponses: Card[][] = [];
   private cutDeckResponses: number[] = [];
   private selectDealerCardResponses: number[] = [];
-  private acknowledgeResponses: boolean[] = [];
+  private acknowledgeGameStartResponses: boolean[] = [];
+  private acknowledgeCountingResponses: boolean[] = [];
+  private acknowledgeNextRoundResponses: boolean[] = [];
 
   // Counters for tracking which response to return
   private playCardIndex = 0;
   private discardIndex = 0;
   private cutDeckIndex = 0;
   private selectDealerCardIndex = 0;
-  private acknowledgeIndex = 0;
+  private acknowledgeGameStartIndex = 0;
+  private acknowledgeCountingIndex = 0;
+  private acknowledgeNextRoundIndex = 0;
 
   constructor(playerId: string) {
     this.playerId = playerId;
@@ -62,8 +66,36 @@ export class MockAgent implements GameAgent {
    * Configure acknowledgment responses (in order)
    */
   public setAcknowledgeResponses(responses: boolean[]): void {
-    this.acknowledgeResponses = [...responses];
-    this.acknowledgeIndex = 0;
+    this.acknowledgeGameStartResponses = [...responses];
+    this.acknowledgeCountingResponses = [...responses];
+    this.acknowledgeNextRoundResponses = [...responses];
+    this.acknowledgeGameStartIndex = 0;
+    this.acknowledgeCountingIndex = 0;
+    this.acknowledgeNextRoundIndex = 0;
+  }
+
+  /**
+   * Configure game-start acknowledgment responses (in order)
+   */
+  public setAcknowledgeReadyForGameStartResponses(responses: boolean[]): void {
+    this.acknowledgeGameStartResponses = [...responses];
+    this.acknowledgeGameStartIndex = 0;
+  }
+
+  /**
+   * Configure counting acknowledgment responses (in order)
+   */
+  public setAcknowledgeReadyForCountingResponses(responses: boolean[]): void {
+    this.acknowledgeCountingResponses = [...responses];
+    this.acknowledgeCountingIndex = 0;
+  }
+
+  /**
+   * Configure next-round acknowledgment responses (in order)
+   */
+  public setAcknowledgeReadyForNextRoundResponses(responses: boolean[]): void {
+    this.acknowledgeNextRoundResponses = [...responses];
+    this.acknowledgeNextRoundIndex = 0;
   }
 
   /**
@@ -74,7 +106,9 @@ export class MockAgent implements GameAgent {
     this.discardIndex = 0;
     this.cutDeckIndex = 0;
     this.selectDealerCardIndex = 0;
-    this.acknowledgeIndex = 0;
+    this.acknowledgeGameStartIndex = 0;
+    this.acknowledgeCountingIndex = 0;
+    this.acknowledgeNextRoundIndex = 0;
   }
 
   async makeMove(
@@ -180,12 +214,15 @@ export class MockAgent implements GameAgent {
     _snapshot: GameSnapshot,
     playerId: string
   ): Promise<void> {
-    if (this.acknowledgeIndex >= this.acknowledgeResponses.length) {
+    if (
+      this.acknowledgeGameStartIndex >= this.acknowledgeGameStartResponses.length
+    ) {
       // Default to acknowledging if no response configured
       return Promise.resolve();
     }
-    const shouldAcknowledge = this.acknowledgeResponses[this.acknowledgeIndex];
-    this.acknowledgeIndex++;
+    const shouldAcknowledge =
+      this.acknowledgeGameStartResponses[this.acknowledgeGameStartIndex];
+    this.acknowledgeGameStartIndex++;
     if (!shouldAcknowledge) {
       throw new Error(
         `MockAgent: Player ${playerId} configured to not acknowledge ready for game start`
@@ -198,12 +235,13 @@ export class MockAgent implements GameAgent {
     _snapshot: GameSnapshot,
     playerId: string
   ): Promise<void> {
-    if (this.acknowledgeIndex >= this.acknowledgeResponses.length) {
+    if (this.acknowledgeCountingIndex >= this.acknowledgeCountingResponses.length) {
       // Default to acknowledging if no response configured
       return Promise.resolve();
     }
-    const shouldAcknowledge = this.acknowledgeResponses[this.acknowledgeIndex];
-    this.acknowledgeIndex++;
+    const shouldAcknowledge =
+      this.acknowledgeCountingResponses[this.acknowledgeCountingIndex];
+    this.acknowledgeCountingIndex++;
     if (!shouldAcknowledge) {
       throw new Error(
         `MockAgent: Player ${playerId} configured to not acknowledge ready for counting`
@@ -216,12 +254,15 @@ export class MockAgent implements GameAgent {
     _snapshot: GameSnapshot,
     playerId: string
   ): Promise<void> {
-    if (this.acknowledgeIndex >= this.acknowledgeResponses.length) {
+    if (
+      this.acknowledgeNextRoundIndex >= this.acknowledgeNextRoundResponses.length
+    ) {
       // Default to acknowledging if no response configured
       return Promise.resolve();
     }
-    const shouldAcknowledge = this.acknowledgeResponses[this.acknowledgeIndex];
-    this.acknowledgeIndex++;
+    const shouldAcknowledge =
+      this.acknowledgeNextRoundResponses[this.acknowledgeNextRoundIndex];
+    this.acknowledgeNextRoundIndex++;
     if (!shouldAcknowledge) {
       throw new Error(
         `MockAgent: Player ${playerId} configured to not acknowledge ready for next round`

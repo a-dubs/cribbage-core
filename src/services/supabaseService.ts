@@ -1800,6 +1800,12 @@ export async function getGameHistoryCountsByLobbyId(
   endPhaseCountingCount: number;
   beginPhaseCountingCount: number;
 }> {
+  if (process.env.NODE_ENV === 'production' && !clientOverride) {
+    throw new Error(
+      'getGameHistoryCountsByLobbyId is test-only and unavailable in production'
+    );
+  }
+
   const client = clientOverride ?? getServiceClient();
 
   // First, find the game ID for this lobby
