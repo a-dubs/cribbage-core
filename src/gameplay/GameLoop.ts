@@ -1,4 +1,3 @@
-import { randomInt } from 'crypto';
 import { CribbageGame } from '../core/CribbageGame';
 import {
   GameAgent,
@@ -21,18 +20,42 @@ import {
 } from '../types';
 import { displayCard, parseCard, suitToEmoji } from '../core/scoring';
 import EventEmitter from 'eventemitter3';
-import dotenv from 'dotenv';
 import { getPlayerCountConfig } from './rules';
 import { logger } from '../utils/logger';
 
-// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
-dotenv.config();
-const startingScore = process.env.OVERRIDE_START_SCORE
-  ? parseInt(process.env.OVERRIDE_START_SCORE)
-  : 0;
-// Feature flag for READY_FOR_COUNTING decision request (defaults to disabled)
-const ENABLE_READY_FOR_COUNTING =
-  process.env.ENABLE_READY_FOR_COUNTING === 'true';
+/**
+ * Environment variables are loaded by the server/CLI entrypoints.
+ *
+ * This module is part of the core library and may be imported into web bundles,
+ * so it must not perform Node-only side effects (like `dotenv.config()`).
+ */
+function readEnvNumber(name: string): number | undefined {
+  try {
+    const value = process?.env?.[name];
+    if (!value) return undefined;
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readEnvFlag(name: string): boolean {
+  try {
+    return process?.env?.[name] === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function getStartingScore(): number {
+  return readEnvNumber('OVERRIDE_START_SCORE') ?? 0;
+}
+
+// Feature flag for READY_FOR_COUNTING decision request (defaults to disabled).
+function isReadyForCountingEnabled(): boolean {
+  return readEnvFlag('ENABLE_READY_FOR_COUNTING');
+}
 
 export class GameLoop extends EventEmitter {
   public cribbageGame: CribbageGame;
@@ -41,7 +64,7 @@ export class GameLoop extends EventEmitter {
 
   constructor(playersInfo: PlayerIdAndName[]) {
     super();
-    this.cribbageGame = new CribbageGame(playersInfo, startingScore);
+    this.cribbageGame = new CribbageGame(playersInfo, getStartingScore());
     this.cribbageGame.on('gameStateChange', (newGameState: GameState) => {
       this.emit('gameStateChange', newGameState);
     });
@@ -834,7 +857,7 @@ export class GameLoop extends EventEmitter {
 
     // READY_FOR_COUNTING: Parallel acknowledgment (all players)
     // Feature flag: can be enabled via ENABLE_READY_FOR_COUNTING=true env var
-    if (ENABLE_READY_FOR_COUNTING) {
+    if (isReadyForCountingEnabled()) {
       await this.waitForAllPlayersReady(
         AgentDecisionType.READY_FOR_COUNTING,
         'Ready for counting'

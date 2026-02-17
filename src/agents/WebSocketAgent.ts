@@ -1,25 +1,15 @@
 import {
   Card,
-  GameState,
   GameAgent,
   EmittedMakeMoveInvalid,
-  EmittedMakeMoveResponse,
   EmittedMakeMoveRequest,
   EmittedDiscardRequest,
   EmittedDiscardInvalid,
-  EmittedDiscardResponse,
   AgentDecisionType,
   DecisionRequest,
   DecisionResponse,
-  PlayCardResponse,
-  DiscardResponse,
-  DealResponse,
-  CutDeckResponse,
-  SelectDealerCardResponse,
-  AcknowledgeResponse,
   GameSnapshot,
 } from '../types';
-import { parseCard } from '../core/scoring';
 import { Socket } from 'socket.io';
 import { getInvalidPeggingPlayReason, isValidDiscard } from '../core/utils';
 import { logger } from '../utils/logger';
@@ -213,7 +203,7 @@ export class WebSocketAgent implements GameAgent {
   async discard(
     snapshot: GameSnapshot,
     playerId: string,
-    numberOfCardsToDiscard: number
+    _numberOfCardsToDiscard: number
   ): Promise<Card[]> {
     const game = snapshot.gameState;
     const request = snapshot.pendingDecisionRequests.find(
@@ -255,7 +245,7 @@ export class WebSocketAgent implements GameAgent {
   ): Promise<T> {
     return this.makeWebsocketRequest<T>(
       'decisionResponse',
-      currentSocket => {
+      _currentSocket => {
         // Request is already in GameSnapshot.pendingDecisionRequests
         // Client will respond with decisionResponse event
       },

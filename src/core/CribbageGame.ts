@@ -12,8 +12,6 @@ import {
 } from '../types';
 import {
   parseCard,
-  scoreHand,
-  scorePegging,
   sumOfPeggingStack,
   scoreHandWithBreakdown,
   scorePeggingWithBreakdown,
@@ -28,6 +26,33 @@ import {
 } from '../gameplay/rules';
 import { logger } from '../utils/logger';
 
+/**
+ * Serialized state for CribbageGame restoration
+ * Dates are serialized as ISO strings for JSON compatibility
+ */
+export interface SerializedCribbageGameState {
+  gameState: GameState;
+  gameSnapshotHistory: Array<{
+    gameState: GameState;
+    gameEvent: Omit<GameEvent, 'timestamp'> & { timestamp: string };
+    pendingDecisionRequests: Array<
+      Omit<DecisionRequest, 'timestamp' | 'expiresAt'> & {
+        timestamp: string;
+        expiresAt?: string | null;
+      }
+    >;
+  }>;
+  pendingDecisionRequests: Array<
+    Omit<DecisionRequest, 'timestamp' | 'expiresAt'> & {
+      timestamp: string;
+      expiresAt?: string | null;
+    }
+  >;
+  dealerSelectionCards: Array<
+    [string, { cardIndex: number; card: Card; timestamp: number }]
+  >;
+}
+
 export class CribbageGame extends EventEmitter {
   private gameState: GameState;
   // private gameEventRecords: GameEvent[]; // Log of all game actions
@@ -37,6 +62,33 @@ export class CribbageGame extends EventEmitter {
     string,
     { cardIndex: number; card: Card; timestamp: number }
   > = new Map(); // Track dealer selection cards
+
+  private deepClone<T>(value: T): T {
+    const structuredCloneFn = (globalThis as { structuredClone?: <U>(x: U) => U })
+      .structuredClone;
+    if (typeof structuredCloneFn === 'function') {
+      return structuredCloneFn(value);
+    }
+    // Fallback for runtimes without structuredClone.
+    // Current game/session payloads are JSON-safe, so this preserves
+    // compatibility for legacy environments.
+    return JSON.parse(JSON.stringify(value)) as T;
+  }
+
+  private cloneGameState(gameState: GameState): GameState {
+    return this.deepClone(gameState);
+  }
+
+  private cloneDecisionRequests(
+    requests: DecisionRequest[]
+  ): DecisionRequest[] {
+    return requests.map(request => ({
+      ...request,
+      requestData: this.deepClone(request.requestData),
+      timestamp: new Date(request.timestamp),
+      expiresAt: request.expiresAt ? new Date(request.expiresAt) : undefined,
+    }));
+  }
 
   constructor(playersInfo: PlayerIdAndName[], startingScore = 0) {
     super();
@@ -149,8 +201,11 @@ export class CribbageGame extends EventEmitter {
     };
     const newGameSnapshot: GameSnapshot = {
       gameEvent,
-      gameState: this.gameState,
-      pendingDecisionRequests: [...this.pendingDecisionRequests], // Include current pending requests
+      // Store an immutable copy to preserve historical snapshot integrity.
+      gameState: this.cloneGameState(this.gameState),
+      pendingDecisionRequests: this.cloneDecisionRequests(
+        this.pendingDecisionRequests
+      ),
     };
     this.gameSnapshotHistory.push(newGameSnapshot);
     this.emit('gameSnapshot', newGameSnapshot);
@@ -169,10 +224,15 @@ export class CribbageGame extends EventEmitter {
       const dealerIndex = this.gameState.players.findIndex(
         player => player.isDealer
       );
-      this.gameState.players[dealerIndex].isDealer = false;
-      this.gameState.players[
-        (dealerIndex + 1) % this.gameState.players.length
-      ].isDealer = true;
+      const currentDealer = this.gameState.players[dealerIndex];
+      const nextDealerIndex = (dealerIndex + 1) % this.gameState.players.length;
+      const nextDealer = this.gameState.players[nextDealerIndex];
+      if (currentDealer) {
+        currentDealer.isDealer = false;
+      }
+      if (nextDealer) {
+        nextDealer.isDealer = true;
+      }
     }
     // increment round number
     this.gameState.roundNumber += 1;
@@ -275,7 +335,8 @@ export class CribbageGame extends EventEmitter {
     if (!isValidDiscard(this.gameState, player, cards)) {
       throw new Error('Invalid cards to discard.');
     }
-    if (playerId === this.gameState.players[1].id) {
+    const secondPlayer = this.gameState.players[1];
+    if (secondPlayer && playerId === secondPlayer.id) {
       // logger.info(`Player ${playerId} hand: ${player.hand.join(', ')}`);
       // logger.info(`Player ${playerId} discards: ${cards.join(', ')}`);
     }
@@ -522,6 +583,12 @@ export class CribbageGame extends EventEmitter {
     // during the READY_FOR_GAME_START acknowledgment phase
     // They will be cleared after acknowledgment completes
     this.gameState.currentPhase = Phase.DEALING;
+    // Clear dealer-card requests immediately when dealer selection completes.
+    // This prevents stale SELECT_DEALER_CARD requests from leaking into the
+    // DEALING phase snapshot.
+    this.pendingDecisionRequests = this.pendingDecisionRequests.filter(
+      request => request.decisionType !== AgentDecisionType.SELECT_DEALER_CARD
+    );
     this.recordGameEvent(ActionType.BEGIN_PHASE, null, null, 0);
   }
 
@@ -542,7 +609,11 @@ export class CribbageGame extends EventEmitter {
     }
     const followingPlayerIndex =
       (playerIndex + 1) % this.gameState.players.length;
-    return this.gameState.players[followingPlayerIndex].id;
+    const followingPlayer = this.gameState.players[followingPlayerIndex];
+    if (!followingPlayer) {
+      throw new Error('Following player not found.');
+    }
+    return followingPlayer.id;
   }
 
   /**
@@ -715,10 +786,17 @@ export class CribbageGame extends EventEmitter {
     );
 
     // if this is the last card in the pegging round, give the player a point for last
+    // (unless the last card made 31 — in that case we already scored 2 for 31, no extra last-card point)
     const playersWithCards = this.gameState.players.filter(
       player => player.peggingHand.length > 0
     );
     if (playersWithCards.length === 0) {
+      if (sumOfPeggingStack(this.gameState.peggingStack) === 31) {
+        logger.info(
+          `Player ${playerId} played the last card (made 31) - no last card point, already scored 2 for 31`
+        );
+        return this.startNewPeggingRound();
+      }
       // give the player a point for playing the last card
       this.updatePlayerScore(player, 1);
       // log the scoring of the last card
@@ -744,6 +822,53 @@ export class CribbageGame extends EventEmitter {
       // call resetPeggingRound to reset the pegging round and return the ID of last card player
       logger.info(`Player ${playerId} played the last card and scored 1 point`);
       return this.startNewPeggingRound();
+    }
+
+    // BUG FIX: Check if this player just ran out of cards and all other players have said Go
+    // This handles the case where:
+    // - Player A says "Go" (can't play without exceeding 31)
+    // - Player B plays their last card (now has 0 cards)
+    // - No one can play anymore, so round should end with B getting last card point
+    if (player.peggingHand.length === 0) {
+      // Current player just ran out of cards
+      // Check if all other players with cards have said Go
+      const allOthersWithCardsHaveSaidGo = this.gameState.players
+        .filter(p => p.id !== playerId && p.peggingHand.length > 0)
+        .every(p => this.gameState.peggingGoPlayers.includes(p.id));
+
+      if (allOthersWithCardsHaveSaidGo) {
+        // All other players with cards have said Go, so this player gets last card point
+        // (unless the last card made 31 — in that case we already scored 2 for 31, no extra last-card point)
+        if (sumOfPeggingStack(this.gameState.peggingStack) === 31) {
+          logger.info(
+            `Player ${playerId} played their last card (made 31) - no last card point, already scored 2 for 31`
+          );
+          return this.startNewPeggingRound();
+        }
+        logger.info(
+          `Player ${playerId} played their last card and all others with cards have said Go - awarding last card point`
+        );
+        this.updatePlayerScore(player, 1);
+        const lastCardBreakdown: ScoreBreakdownItem[] = [
+          {
+            type: 'LAST_CARD',
+            points: 1,
+            cards:
+              this.gameState.peggingStack.length > 0
+                ? this.gameState.peggingStack
+                : [],
+            description: 'Last card',
+          },
+        ];
+        this.recordGameEvent(
+          ActionType.LAST_CARD,
+          playerId,
+          null,
+          1,
+          lastCardBreakdown
+        );
+        return this.startNewPeggingRound();
+      }
     }
 
     // if the sum of cards in the pegging stack is 31, end the pegging round
@@ -1031,7 +1156,7 @@ export class CribbageGame extends EventEmitter {
    */
   public getDealerSelectionCard(
     playerId: string,
-    forPlayerId: string
+    _forPlayerId: string
   ): Card | 'UNKNOWN' {
     // Check if all players have selected
     const allPlayersSelected =
@@ -1077,7 +1202,6 @@ export class CribbageGame extends EventEmitter {
     // Determine if event is from opponent
     const isOpponentEvent =
       gameEvent.playerId !== null && gameEvent.playerId !== forPlayerId;
-    const isDealer = requestingPlayer.isDealer;
     const isCountingPhase = this.gameState.currentPhase === Phase.COUNTING;
 
     // Redaction rules based on action type
@@ -1164,9 +1288,9 @@ export class CribbageGame extends EventEmitter {
    */
   public getRedactedGameSnapshot(forPlayerId: string): GameSnapshot {
     // Get the most recent snapshot (or create one if none exists)
-    const latestSnapshot =
+    const latestSnapshot: GameSnapshot =
       this.gameSnapshotHistory.length > 0
-        ? this.gameSnapshotHistory[this.gameSnapshotHistory.length - 1]
+        ? this.gameSnapshotHistory[this.gameSnapshotHistory.length - 1]!
         : {
             gameState: this.gameState,
             gameEvent: {
@@ -1217,5 +1341,69 @@ export class CribbageGame extends EventEmitter {
 
   public getGameSnapshotHistory(): GameSnapshot[] {
     return this.gameSnapshotHistory;
+  }
+
+  /**
+   * Serialize game state to JSON-safe format
+   * Converts Date objects to ISO strings
+   * @returns Serialized game state
+   */
+  public serialize(): SerializedCribbageGameState {
+    return {
+      gameState: this.cloneGameState(this.gameState),
+      gameSnapshotHistory: this.gameSnapshotHistory.map(snapshot => ({
+        gameState: this.cloneGameState(snapshot.gameState),
+        gameEvent: {
+          ...snapshot.gameEvent,
+          timestamp: snapshot.gameEvent.timestamp.toISOString(),
+        },
+        pendingDecisionRequests: snapshot.pendingDecisionRequests.map(req => ({
+          ...req,
+          timestamp: req.timestamp.toISOString(),
+          expiresAt: req.expiresAt?.toISOString() ?? null,
+        })),
+      })),
+      pendingDecisionRequests: this.pendingDecisionRequests.map(req => ({
+        ...req,
+        timestamp: req.timestamp.toISOString(),
+        expiresAt: req.expiresAt?.toISOString() ?? null,
+      })),
+      dealerSelectionCards: Array.from(this.dealerSelectionCards.entries()),
+    };
+  }
+
+  /**
+   * Restore game state from serialized data
+   * @param serialized - Serialized game state with Date fields as ISO strings
+   */
+  public restoreState(serialized: SerializedCribbageGameState): void {
+    // Restore gameState (no Date fields in GameState itself)
+    this.gameState = this.cloneGameState(serialized.gameState);
+
+    // Restore gameSnapshotHistory with Date parsing
+    this.gameSnapshotHistory = serialized.gameSnapshotHistory.map(snapshot => ({
+      gameState: this.cloneGameState(snapshot.gameState),
+      gameEvent: {
+        ...snapshot.gameEvent,
+        timestamp: new Date(snapshot.gameEvent.timestamp),
+      },
+      pendingDecisionRequests: snapshot.pendingDecisionRequests.map(req => ({
+        ...req,
+        timestamp: new Date(req.timestamp),
+        expiresAt: req.expiresAt ? new Date(req.expiresAt) : undefined,
+      })),
+    }));
+
+    // Restore pendingDecisionRequests with Date parsing
+    this.pendingDecisionRequests = serialized.pendingDecisionRequests.map(
+      req => ({
+        ...req,
+        timestamp: new Date(req.timestamp),
+        expiresAt: req.expiresAt ? new Date(req.expiresAt) : undefined,
+      })
+    );
+
+    // Restore dealerSelectionCards Map
+    this.dealerSelectionCards = new Map(serialized.dealerSelectionCards);
   }
 }

@@ -45,10 +45,7 @@ const MARKERS = {
 } as const;
 
 // Default "other" settings that should always be present
-const DEFAULT_OTHER_SETTINGS = [
-  'SUPABASE_AUTH_ENABLED=true',
-  'SUPABASE_LOBBIES_ENABLED=true',
-];
+const DEFAULT_OTHER_SETTINGS: string[] = [];
 
 const SUPABASE_KEYS = [
   'SUPABASE_URL',
@@ -335,7 +332,7 @@ interface ParsedEnvFile {
   localCredentials: SupabaseCredentials | null;
   remoteCredentials: SupabaseCredentials | null;
   activeEnv: Environment | null;
-  otherSupabaseSettings: string[]; // SUPABASE_AUTH_ENABLED, SUPABASE_LOBBIES_ENABLED, etc.
+  otherSupabaseSettings: string[]; // Additional SUPABASE_* settings
 }
 
 function parseEnvFile(): ParsedEnvFile {
@@ -361,8 +358,6 @@ function parseEnvFile(): ParsedEnvFile {
       '',
     ];
     result.otherSupabaseSettings = [
-      'SUPABASE_AUTH_ENABLED=true',
-      'SUPABASE_LOBBIES_ENABLED=true',
     ];
     return result;
   }

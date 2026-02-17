@@ -131,7 +131,13 @@ describe('supabaseService', () => {
       // 1. Mock finding recipient profile
       mockSupabase._pushResult({ id: 'recipient-123', username: 'target' });
       
-      // 2. Mock inserting friend request
+      // 2. Mock checking for existing friendship
+      mockSupabase._pushResult(null);
+
+      // 3. Mock checking for existing pending request
+      mockSupabase._pushResult(null);
+
+      // 4. Mock inserting friend request
       mockSupabase._pushResult({ id: 'request-123', status: 'pending' });
 
       const result = await supabaseService.sendFriendRequest({
@@ -152,6 +158,185 @@ describe('supabaseService', () => {
         senderId: 'sender-123',
         recipientUsername: 'unknown'
       })).rejects.toThrow('NOT_FOUND');
+    });
+
+    it('throws ALREADY_FRIENDS if users are already friends', async () => {
+      // 1. Mock finding recipient profile
+      mockSupabase._pushResult({ id: 'recipient-123', username: 'target' });
+      
+      // 2. Mock checking for existing friendship - found!
+      mockSupabase._pushResult({ id: 'friendship-123' });
+
+      await expect(supabaseService.sendFriendRequest({
+        senderId: 'sender-123',
+        recipientUsername: 'target'
+      })).rejects.toThrow('ALREADY_FRIENDS');
+    });
+
+    it('throws ALREADY_SENT_REQUEST if sender already sent a request', async () => {
+      // 1. Mock finding recipient profile
+      mockSupabase._pushResult({ id: 'recipient-123', username: 'target' });
+      
+      // 2. Mock checking for existing friendship - not found
+      mockSupabase._pushResult(null);
+
+      // 3. Mock checking for existing pending request - found outgoing!
+      mockSupabase._pushResult([
+        {
+          id: 'request-123',
+          sender_id: 'sender-123',
+          recipient_id: 'recipient-123',
+          status: 'pending',
+        },
+      ]);
+
+      await expect(supabaseService.sendFriendRequest({
+        senderId: 'sender-123',
+        recipientUsername: 'target'
+      })).rejects.toThrow('ALREADY_SENT_REQUEST');
+    });
+
+    it('throws INCOMING_REQUEST_EXISTS if recipient already sent a request', async () => {
+      // 1. Mock finding recipient profile
+      mockSupabase._pushResult({ id: 'recipient-123', username: 'target' });
+      
+      // 2. Mock checking for existing friendship - not found
+      mockSupabase._pushResult(null);
+
+      // 3. Mock checking for existing pending request - found incoming!
+      mockSupabase._pushResult([
+        {
+          id: 'request-456',
+          sender_id: 'recipient-123', // The would-be recipient already sent one
+          recipient_id: 'sender-123',
+          status: 'pending',
+        },
+      ]);
+
+      await expect(supabaseService.sendFriendRequest({
+        senderId: 'sender-123',
+        recipientUsername: 'target'
+      })).rejects.toThrow('INCOMING_REQUEST_EXISTS');
+    });
+
+    it('throws CANNOT_ADD_SELF when trying to add yourself', async () => {
+      // 1. Mock finding recipient profile - same as sender
+      mockSupabase._pushResult({ id: 'sender-123', username: 'self' });
+
+      await expect(supabaseService.sendFriendRequest({
+        senderId: 'sender-123',
+        recipientUsername: 'self'
+      })).rejects.toThrow('CANNOT_ADD_SELF');
+    });
+  });
+
+  describe('respondToFriendRequest', () => {
+    it('cleans up all pending requests between users when accepting', async () => {
+      // 1. Mock updating the request status and getting sender_id
+      mockSupabase._pushResult([{ sender_id: 'sender-123' }]);
+
+      // 2. Mock creating friendship
+      mockSupabase._pushResult({ id: 'friendship-123' });
+
+      // 3. Mock deleting all pending requests between users
+      mockSupabase._pushResult({ count: 2 });
+
+      await supabaseService.respondToFriendRequest({
+        requestId: 'request-123',
+        recipientId: 'recipient-123',
+        accept: true
+      });
+
+      // Verify delete was called on friend_requests
+      expect(mockSupabase.delete).toHaveBeenCalled();
+      expect(mockSupabase.from).toHaveBeenCalledWith('friend_requests');
+    });
+
+    it('does not cleanup requests when declining', async () => {
+      // 1. Mock updating the request status
+      mockSupabase._pushResult([{ sender_id: 'sender-123' }]);
+
+      await supabaseService.respondToFriendRequest({
+        requestId: 'request-123',
+        recipientId: 'recipient-123',
+        accept: false
+      });
+
+      // Verify delete was NOT called for cleanup (only update)
+      expect(mockSupabase.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('sendFriendRequestFromLobby', () => {
+    it('throws ALREADY_FRIENDS if users are already friends', async () => {
+      // 1. Mock membership check - both in lobby
+      mockSupabase._pushResult([
+        { player_id: 'sender-123' },
+        { player_id: 'target-123' }
+      ]);
+
+      // 2. Mock checking for existing friendship - found!
+      mockSupabase._pushResult({ id: 'friendship-123' });
+
+      await expect(supabaseService.sendFriendRequestFromLobby({
+        senderId: 'sender-123',
+        targetUserId: 'target-123',
+        lobbyId: 'lobby-123'
+      })).rejects.toThrow('ALREADY_FRIENDS');
+    });
+
+    it('throws ALREADY_SENT_REQUEST if request already exists from sender', async () => {
+      // 1. Mock membership check - both in lobby
+      mockSupabase._pushResult([
+        { player_id: 'sender-123' },
+        { player_id: 'target-123' }
+      ]);
+
+      // 2. Mock checking for existing friendship - not found
+      mockSupabase._pushResult(null);
+
+      // 3. Mock checking for existing pending request - found outgoing!
+      mockSupabase._pushResult([
+        {
+          id: 'request-123',
+          sender_id: 'sender-123',
+          recipient_id: 'target-123',
+          status: 'pending',
+        },
+      ]);
+
+      await expect(supabaseService.sendFriendRequestFromLobby({
+        senderId: 'sender-123',
+        targetUserId: 'target-123',
+        lobbyId: 'lobby-123'
+      })).rejects.toThrow('ALREADY_SENT_REQUEST');
+    });
+
+    it('throws INCOMING_REQUEST_EXISTS if target already sent a request', async () => {
+      // 1. Mock membership check - both in lobby
+      mockSupabase._pushResult([
+        { player_id: 'sender-123' },
+        { player_id: 'target-123' }
+      ]);
+
+      // 2. Mock checking for existing friendship - not found
+      mockSupabase._pushResult(null);
+
+      // 3. Mock checking for existing pending request - found incoming!
+      mockSupabase._pushResult([
+        {
+          id: 'request-456',
+          sender_id: 'target-123',
+          recipient_id: 'sender-123',
+          status: 'pending',
+        },
+      ]);
+
+      await expect(supabaseService.sendFriendRequestFromLobby({
+        senderId: 'sender-123',
+        targetUserId: 'target-123',
+        lobbyId: 'lobby-123'
+      })).rejects.toThrow('INCOMING_REQUEST_EXISTS');
     });
   });
 

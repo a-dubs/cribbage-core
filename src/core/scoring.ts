@@ -30,10 +30,14 @@ const parseCardValues = (
 
 export const parseCard = (card: Card): CardValue => {
   const { pegValue, runValue } = parseCardValues(card);
+  const suit = card.split('_')[1];
+  if (!suit) {
+    throw new Error(`Invalid card format: ${card}`);
+  }
   return {
     pegValue,
     runValue,
-    suit: card.split('_')[1],
+    suit,
   };
 };
 
@@ -73,10 +77,11 @@ const countFifteens = (cards: CardValue[]): number => {
 
     // Check if the sum of any combination equals 15
     for (const combination of combinations) {
-      const sum = combination.reduce(
-        (acc, index) => acc + cards[index].pegValue,
-        0
-      );
+      const sum = combination.reduce((acc, index) => {
+        const card = cards[index];
+        if (!card) return acc;
+        return acc + card.pegValue;
+      }, 0);
       if (sum === 15) {
         totalPoints += 2;
       }
@@ -90,6 +95,7 @@ const getCombinations = (arr: number[], size: number): number[][] => {
   if (size === 0) return [[]];
   if (arr.length < size) return [];
   const [first, ...rest] = arr;
+  if (first === undefined) return [];
   const withFirst = getCombinations(rest, size - 1).map(combo => [
     first,
     ...combo,
@@ -107,15 +113,18 @@ function longestConsecutiveRun(cardFreq: { [key: number]: number }): number[] {
   let currentRun: number[] = [];
 
   for (let i = 0; i < keys.length; i++) {
-    if (i === 0 || keys[i] === keys[i - 1] + 1) {
+    const currentKey = keys[i];
+    const prevKey = i > 0 ? keys[i - 1] : undefined;
+    if (currentKey === undefined) continue;
+    if (i === 0 || (prevKey !== undefined && currentKey === prevKey + 1)) {
       // If the current key is consecutive, add it to the current run
-      currentRun.push(keys[i]);
+      currentRun.push(currentKey);
     } else {
       // Otherwise, compare and reset the current run
       if (currentRun.length > longestRun.length) {
         longestRun = currentRun;
       }
-      currentRun = [keys[i]];
+      currentRun = [currentKey];
     }
   }
 
@@ -154,8 +163,12 @@ export const score_runs = (cards: CardValue[]): number => {
 const pairs = (cards: CardValue[]): number => {
   let score = 0;
   for (let i = 0; i < cards.length - 1; i++) {
+    const cardI = cards[i];
+    if (!cardI) continue;
     for (let j = i + 1; j < cards.length; j++) {
-      if (cards[i].runValue === cards[j].runValue) {
+      const cardJ = cards[j];
+      if (!cardJ) continue;
+      if (cardI.runValue === cardJ.runValue) {
         score += 2;
       }
     }
@@ -180,7 +193,8 @@ export const suitToEmoji = (suit: string): string => {
 
 export const displayCard = (card: Card): string => {
   const { runValue, suit } = parseCard(card);
-  const rank = runValue <= 10 ? runValue.toString() : card.split('_')[0][0];
+  const rankParts = card.split('_');
+  const rank = runValue <= 10 ? runValue.toString() : rankParts[0]?.[0] ?? '';
   return `${rank}${suitToEmoji(suit)}`;
 };
 
@@ -243,8 +257,15 @@ const scorePeggingSameRank = (peggingStack: CardValue[]): number => {
 
   let score = 0;
   let i = peggingStack.length - 1;
-  while (i > 0 && peggingStack[i].runValue === peggingStack[i - 1].runValue) {
-    i--;
+  while (i > 0) {
+    const current = peggingStack[i];
+    const prev = peggingStack[i - 1];
+    if (!current || !prev) break;
+    if (current.runValue === prev.runValue) {
+      i--;
+    } else {
+      break;
+    }
   }
 
   const run_length = peggingStack.length - i;
@@ -261,7 +282,10 @@ const scorePeggingSameRank = (peggingStack: CardValue[]): number => {
 
 const allCardsAreConsecutive = (cards: CardValue[]): boolean => {
   for (let i = 0; i < cards.length - 1; i++) {
-    if (cards[i].runValue + 1 !== cards[i + 1].runValue) {
+    const current = cards[i];
+    const next = cards[i + 1];
+    if (!current || !next) return false;
+    if (current.runValue + 1 !== next.runValue) {
       return false;
     }
   }
@@ -282,11 +306,10 @@ const scorePeggingRun = (peggingStack: CardValue[]): number => {
     const slice = peggingStack.slice(i);
     const sorted_slice = slice.sort((a, b) => a.runValue - b.runValue);
     // if there are any duplicates, then this slice cannot be a run
-    const has_duplicates = sorted_slice.some(
-      (card, index) =>
-        sorted_slice[index + 1] &&
-        card.runValue === sorted_slice[index + 1].runValue
-    );
+    const has_duplicates = sorted_slice.some((card, index) => {
+      const next = sorted_slice[index + 1];
+      return next !== undefined && card.runValue === next.runValue;
+    });
     if (has_duplicates) {
       continue;
     }
@@ -365,14 +388,23 @@ export const scoreHandWithBreakdown = (
   const getCardsFromIndices = (indices: number[]): Card[] => {
     return indices.map(idx => {
       const cardValue = sortedCardValues[idx];
+      if (!cardValue) {
+        throw new Error(`CardValue not found at index ${idx}`);
+      }
       // Find the original card by matching runValue and suit
-      return allCards.find(card => {
+      const found = allCards.find(card => {
         const parsed = parseCard(card);
         return (
           parsed.runValue === cardValue.runValue &&
           parsed.suit === cardValue.suit
         );
-      })!;
+      });
+      if (!found) {
+        throw new Error(
+          `Card not found for runValue ${cardValue.runValue}, suit ${cardValue.suit}`
+        );
+      }
+      return found;
     });
   };
 
@@ -385,10 +417,11 @@ export const scoreHandWithBreakdown = (
   // Create frequency map
   const cardFreq: { [key: number]: number[] } = {}; // runValue -> array of indices
   sortedCardValues.forEach((card, idx) => {
+    if (!card) return;
     if (!cardFreq[card.runValue]) {
       cardFreq[card.runValue] = [];
     }
-    cardFreq[card.runValue].push(idx);
+    cardFreq[card.runValue]!.push(idx);
   });
 
   // Find longest consecutive run
@@ -399,13 +432,19 @@ export const scoreHandWithBreakdown = (
   let currentRun: number[] = [];
 
   for (let i = 0; i < runValues.length; i++) {
-    if (i === 0 || runValues[i] === runValues[i - 1] + 1) {
-      currentRun.push(runValues[i]);
+    const currentValue = runValues[i];
+    const prevValue = i > 0 ? runValues[i - 1] : undefined;
+    if (currentValue === undefined) continue;
+    if (
+      i === 0 ||
+      (prevValue !== undefined && currentValue === prevValue + 1)
+    ) {
+      currentRun.push(currentValue);
     } else {
       if (currentRun.length > longestRun.length) {
         longestRun = currentRun;
       }
-      currentRun = [runValues[i]];
+      currentRun = [currentValue];
     }
   }
   if (currentRun.length > longestRun.length) {
@@ -417,13 +456,19 @@ export const scoreHandWithBreakdown = (
     // Get all indices in the run
     const runIndices: number[] = [];
     longestRun.forEach(runValue => {
-      runIndices.push(...cardFreq[runValue]);
+      const indices = cardFreq[runValue];
+      if (indices) {
+        runIndices.push(...indices);
+      }
     });
 
     // Count frequencies in the run
     const runFreq: { [key: number]: number } = {};
     longestRun.forEach(runValue => {
-      runFreq[runValue] = cardFreq[runValue].length;
+      const indices = cardFreq[runValue];
+      if (indices) {
+        runFreq[runValue] = indices.length;
+      }
     });
 
     const totalCardsInRun = runIndices.length;
@@ -494,7 +539,10 @@ export const scoreHandWithBreakdown = (
   if (usedIndices.size === 0 && longestRun.length >= 3) {
     const runIndices: number[] = [];
     longestRun.forEach(runValue => {
-      runIndices.push(...cardFreq[runValue]);
+      const indices = cardFreq[runValue];
+      if (indices) {
+        runIndices.push(...indices);
+      }
     });
 
     if (longestRun.length === 5) {
@@ -520,15 +568,17 @@ export const scoreHandWithBreakdown = (
   // Group available cards by runValue
   const availableByValue: { [key: number]: number[] } = {};
   availableIndices.forEach(idx => {
-    const runValue = sortedCardValues[idx].runValue;
+    const cardValue = sortedCardValues[idx];
+    if (!cardValue) return;
+    const runValue = cardValue.runValue;
     if (!availableByValue[runValue]) {
       availableByValue[runValue] = [];
     }
-    availableByValue[runValue].push(idx);
+    availableByValue[runValue]!.push(idx);
   });
 
   // Check for four of a kind
-  for (const [runValue, indices] of Object.entries(availableByValue)) {
+  for (const [_runValue, indices] of Object.entries(availableByValue)) {
     if (indices.length === 4) {
       const cards = getCardsFromIndices(indices);
       breakdown.push(createBreakdownItem('FOUR_OF_A_KIND', 12, cards));
@@ -537,7 +587,7 @@ export const scoreHandWithBreakdown = (
   }
 
   // Check for three of a kind (only if not already used)
-  for (const [runValue, indices] of Object.entries(availableByValue)) {
+  for (const [_runValue, indices] of Object.entries(availableByValue)) {
     if (indices.length === 3 && indices.every(idx => !usedIndices.has(idx))) {
       const cards = getCardsFromIndices(indices);
       breakdown.push(createBreakdownItem('THREE_OF_A_KIND', 6, cards));
@@ -546,7 +596,7 @@ export const scoreHandWithBreakdown = (
   }
 
   // Check for pairs (only if not already used)
-  for (const [runValue, indices] of Object.entries(availableByValue)) {
+  for (const [_runValue, indices] of Object.entries(availableByValue)) {
     if (indices.length === 2 && indices.every(idx => !usedIndices.has(idx))) {
       const cards = getCardsFromIndices(indices);
       breakdown.push(createBreakdownItem('PAIR', 2, cards));
@@ -559,6 +609,7 @@ export const scoreHandWithBreakdown = (
     if (size === 0) return [[]];
     if (arr.length < size) return [];
     const [first, ...rest] = arr;
+    if (first === undefined) return [];
     const withFirst = getCombinations(rest, size - 1).map(combo => [
       first,
       ...combo,
@@ -571,10 +622,11 @@ export const scoreHandWithBreakdown = (
   for (let size = 2; size <= 5; size++) {
     const combinations = getCombinations(allIndices, size);
     for (const combination of combinations) {
-      const sum = combination.reduce(
-        (acc, idx) => acc + sortedCardValues[idx].pegValue,
-        0
-      );
+      const sum = combination.reduce((acc, idx) => {
+        const cardValue = sortedCardValues[idx];
+        if (!cardValue) return acc;
+        return acc + cardValue.pegValue;
+      }, 0);
       if (sum === 15) {
         const cards = getCardsFromIndices(combination);
         breakdown.push(createBreakdownItem('FIFTEEN', 2, cards));
@@ -640,7 +692,9 @@ export const scorePeggingWithBreakdown = (
 
     // Count how many cards from the end have the same rank
     for (let i = parsedStack.length - 2; i >= 0; i--) {
-      if (parsedStack[i].runValue === lastCard.runValue) {
+      const current = parsedStack[i];
+      if (!current || !lastCard) break;
+      if (current.runValue === lastCard.runValue) {
         sameRankCount++;
       } else {
         break;
@@ -676,7 +730,10 @@ export const scorePeggingWithBreakdown = (
     // Check for duplicates
     let hasDuplicates = false;
     for (let i = 0; i < sorted.length - 1; i++) {
-      if (sorted[i].runValue === sorted[i + 1].runValue) {
+      const current = sorted[i];
+      const next = sorted[i + 1];
+      if (!current || !next) break;
+      if (current.runValue === next.runValue) {
         hasDuplicates = true;
         break;
       }
@@ -687,7 +744,13 @@ export const scorePeggingWithBreakdown = (
     // Check if consecutive
     let isConsecutive = true;
     for (let i = 0; i < sorted.length - 1; i++) {
-      if (sorted[i].runValue + 1 !== sorted[i + 1].runValue) {
+      const current = sorted[i];
+      const next = sorted[i + 1];
+      if (!current || !next) {
+        isConsecutive = false;
+        break;
+      }
+      if (current.runValue + 1 !== next.runValue) {
         isConsecutive = false;
         break;
       }

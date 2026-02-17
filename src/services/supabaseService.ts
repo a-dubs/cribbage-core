@@ -40,9 +40,11 @@ export type LobbyInvitationWithLobby = LobbyInvitation & {
   lobbies: LobbyRecord | null;
 };
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+type SupabaseEnv = {
+  url: string;
+  serviceRoleKey: string;
+  anonKey: string;
+};
 
 let serviceClient: SupabaseClient | null = null;
 let anonClient: SupabaseClient | null = null;
@@ -52,10 +54,16 @@ const UUID_REGEX =
 // Username must match database constraint: lowercase letters, numbers, underscores, and hyphens only, 3-20 chars
 const USERNAME_REGEX = /^[a-z0-9_-]{3,20}$/;
 
-function ensureEnv(): void {
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
+function ensureEnv(): SupabaseEnv {
+  const url = process.env.SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const anonKey = process.env.SUPABASE_ANON_KEY;
+
+  if (!url || !serviceRoleKey || !anonKey) {
     throw new Error('Supabase environment is not fully configured');
   }
+
+  return { url, serviceRoleKey, anonKey };
 }
 
 export function toUuidOrNull(value: string | null | undefined): string | null {
@@ -92,11 +100,11 @@ function validateAndNormalizeUsername(username: string): string {
 }
 
 export function getServiceClient(): SupabaseClient {
-  ensureEnv();
+  const env = ensureEnv();
   if (!serviceClient) {
     serviceClient = createClient(
-      SUPABASE_URL as string,
-      SUPABASE_SERVICE_ROLE_KEY as string,
+      env.url,
+      env.serviceRoleKey,
       {
         auth: {
           autoRefreshToken: false,
@@ -117,11 +125,11 @@ export function resetServiceClients(): void {
 }
 
 function getAnonClient(): SupabaseClient {
-  ensureEnv();
+  const env = ensureEnv();
   if (!anonClient) {
     anonClient = createClient(
-      SUPABASE_URL as string,
-      SUPABASE_ANON_KEY as string,
+      env.url,
+      env.anonKey,
       {
         auth: {
           autoRefreshToken: false,
@@ -134,8 +142,8 @@ function getAnonClient(): SupabaseClient {
 }
 
 function authClientForToken(token: string): SupabaseClient {
-  ensureEnv();
-  return createClient(SUPABASE_URL as string, SUPABASE_ANON_KEY as string, {
+  const env = ensureEnv();
+  return createClient(env.url, env.anonKey, {
     global: {
       headers: { Authorization: `Bearer ${token}` },
     },
@@ -178,6 +186,38 @@ async function areFriends(
   }
 
   return !!data;
+}
+
+/**
+ * Check for existing pending friend request between two users (either direction)
+ * Returns the request if found, null otherwise
+ */
+async function findPendingFriendRequest(
+  userId1: string,
+  userId2: string,
+  client: SupabaseClient = getServiceClient()
+): Promise<FriendRequest | null> {
+  const { data, error } = await client
+    .from('friend_requests')
+    .select('*')
+    .eq('status', 'pending')
+    .or(
+      `and(sender_id.eq.${userId1},recipient_id.eq.${userId2}),and(sender_id.eq.${userId2},recipient_id.eq.${userId1})`
+    )
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const requests = (data ?? []) as FriendRequest[];
+  if (requests.length === 0) {
+    return null;
+  }
+
+  // If duplicate pending rows exist, treat this as an existing pending request.
+  return requests[0] ?? null;
 }
 
 function publicAvatarUrl(path: string): string {
@@ -1040,16 +1080,40 @@ export async function sendFriendRequest(params: {
     throw new Error('NOT_FOUND');
   }
 
+  const recipientId = recipientProfile.id;
+
   // Prevent self-friending
-  if (params.senderId === recipientProfile.id) {
+  if (params.senderId === recipientId) {
     throw new Error('CANNOT_ADD_SELF');
+  }
+
+  // Check if already friends
+  const alreadyFriends = await areFriends(params.senderId, recipientId, client);
+  if (alreadyFriends) {
+    throw new Error('ALREADY_FRIENDS');
+  }
+
+  // Check for existing pending request in either direction
+  const existingRequest = await findPendingFriendRequest(
+    params.senderId,
+    recipientId,
+    client
+  );
+  if (existingRequest) {
+    if (existingRequest.sender_id === params.senderId) {
+      // Sender already sent a request to this recipient
+      throw new Error('ALREADY_SENT_REQUEST');
+    } else {
+      // Recipient already sent a request to sender - they should accept instead
+      throw new Error('INCOMING_REQUEST_EXISTS');
+    }
   }
 
   const { data, error } = await client
     .from('friend_requests')
     .insert({
       sender_id: params.senderId,
-      recipient_id: recipientProfile.id,
+      recipient_id: recipientId,
     })
     .select('*')
     .single();
@@ -1095,6 +1159,23 @@ export async function respondToFriendRequest(params: {
     });
     if (friendshipError) {
       throw new Error(friendshipError.message);
+    }
+
+    // Clean up all pending requests between these two users (handles edge case
+    // where both users sent requests to each other)
+    const { error: cleanupError } = await client
+      .from('friend_requests')
+      .delete()
+      .eq('status', 'pending')
+      .or(
+        `and(sender_id.eq.${params.recipientId},recipient_id.eq.${senderId}),and(sender_id.eq.${senderId},recipient_id.eq.${params.recipientId})`
+      );
+    if (cleanupError) {
+      // Log but don't fail - friendship was created successfully
+      console.warn(
+        'Failed to cleanup pending friend requests:',
+        cleanupError.message
+      );
     }
   }
 }
@@ -1144,6 +1225,33 @@ export async function sendFriendRequestFromLobby(params: {
   if (!senderInLobby || !targetInLobby) {
     throw new Error('NOT_IN_LOBBY');
   }
+
+  // Check if already friends
+  const alreadyFriends = await areFriends(
+    params.senderId,
+    params.targetUserId,
+    client
+  );
+  if (alreadyFriends) {
+    throw new Error('ALREADY_FRIENDS');
+  }
+
+  // Check for existing pending request in either direction
+  const existingRequest = await findPendingFriendRequest(
+    params.senderId,
+    params.targetUserId,
+    client
+  );
+  if (existingRequest) {
+    if (existingRequest.sender_id === params.senderId) {
+      // Sender already sent a request to this target
+      throw new Error('ALREADY_SENT_REQUEST');
+    } else {
+      // Target already sent a request to sender - they should accept instead
+      throw new Error('INCOMING_REQUEST_EXISTS');
+    }
+  }
+
   const { data, error } = await client
     .from('friend_requests')
     .insert({
@@ -1486,7 +1594,9 @@ export async function persistGameEvents(params: {
   }));
 
   console.log(
-    `[Supabase] Inserting ${rows.length} events for game ${params.gameId}. Action types: ${rows.map(r => r.action_type).join(', ')}`
+    `[Supabase] Inserting ${rows.length} events for game ${
+      params.gameId
+    }. Action types: ${rows.map(r => r.action_type).join(', ')}`
   );
 
   const { data, error } = await client
@@ -1532,7 +1642,9 @@ export async function persistGameEvents(params: {
       console.error('[Supabase] Error inserting snapshots:', snapError);
       throw new Error(`Failed to insert snapshots: ${snapError.message}`);
     }
-    console.log(`[Supabase] Successfully inserted ${snapshotsPayload.length} snapshots`);
+    console.log(
+      `[Supabase] Successfully inserted ${snapshotsPayload.length} snapshots`
+    );
   }
 }
 
@@ -1667,4 +1779,164 @@ export async function getGameSnapshotsForUser(
     throw new Error(error.message);
   }
   return data ?? [];
+}
+
+/**
+ * Test-only function to get game history counts by lobbyId.
+ * Uses service role client and does not require user authentication.
+ * Returns counts of events and snapshots for the game associated with the lobby.
+ */
+export async function getGameHistoryCountsByLobbyId(
+  lobbyId: string,
+  clientOverride?: SupabaseClient
+): Promise<{
+  gameId: string | null;
+  eventsCount: number;
+  snapshotsCount: number;
+  readyForCountingCount: number;
+  discardCount: number;
+  cutDeckCount: number;
+  playCardCount: number;
+  endPhaseCountingCount: number;
+  beginPhaseCountingCount: number;
+}> {
+  if (process.env.NODE_ENV === 'production' && !clientOverride) {
+    throw new Error(
+      'getGameHistoryCountsByLobbyId is test-only and unavailable in production'
+    );
+  }
+
+  const client = clientOverride ?? getServiceClient();
+
+  // First, find the game ID for this lobby
+  const { data: gameData, error: gameError } = await client
+    .from('games')
+    .select('id')
+    .eq('lobby_id', lobbyId)
+    .order('started_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (gameError) {
+    throw new Error(`Failed to find game for lobby: ${gameError.message}`);
+  }
+
+  if (!gameData) {
+    return {
+      gameId: null,
+      eventsCount: 0,
+      snapshotsCount: 0,
+      readyForCountingCount: 0,
+      discardCount: 0,
+      cutDeckCount: 0,
+      playCardCount: 0,
+      endPhaseCountingCount: 0,
+      beginPhaseCountingCount: 0,
+    };
+  }
+
+  const gameId = gameData.id as string;
+
+  // Count events
+  const { count: eventsCount, error: eventsError } = await client
+    .from('game_events')
+    .select('*', { count: 'exact', head: true })
+    .eq('game_id', gameId);
+
+  if (eventsError) {
+    throw new Error(`Failed to count events: ${eventsError.message}`);
+  }
+
+  // Count snapshots
+  const { count: snapshotsCount, error: snapshotsError } = await client
+    .from('game_snapshots')
+    .select('*', { count: 'exact', head: true })
+    .eq('game_id', gameId);
+
+  if (snapshotsError) {
+    throw new Error(`Failed to count snapshots: ${snapshotsError.message}`);
+  }
+
+  // Count "ready for counting" events (a strong signal that a round ended)
+  const { count: readyForCountingCount, error: readyForCountingError } =
+    await client
+      .from('game_events')
+      .select('*', { count: 'exact', head: true })
+      .eq('game_id', gameId)
+      .eq('action_type', 'READY_FOR_COUNTING');
+
+  if (readyForCountingError) {
+    throw new Error(
+      `Failed to count READY_FOR_COUNTING events: ${readyForCountingError.message}`
+    );
+  }
+
+  // Additional high-signal action counts (phase milestones)
+  const { count: discardCount, error: discardError } = await client
+    .from('game_events')
+    .select('*', { count: 'exact', head: true })
+    .eq('game_id', gameId)
+    .eq('action_type', 'DISCARD');
+  if (discardError) {
+    throw new Error(`Failed to count DISCARD events: ${discardError.message}`);
+  }
+
+  const { count: cutDeckCount, error: cutDeckError } = await client
+    .from('game_events')
+    .select('*', { count: 'exact', head: true })
+    .eq('game_id', gameId)
+    .eq('action_type', 'CUT_DECK');
+  if (cutDeckError) {
+    throw new Error(`Failed to count CUT_DECK events: ${cutDeckError.message}`);
+  }
+
+  const { count: playCardCount, error: playCardError } = await client
+    .from('game_events')
+    .select('*', { count: 'exact', head: true })
+    .eq('game_id', gameId)
+    .eq('action_type', 'PLAY_CARD');
+  if (playCardError) {
+    throw new Error(
+      `Failed to count PLAY_CARD events: ${playCardError.message}`
+    );
+  }
+
+  // Phase transition counts for COUNTING (best "round is over" signal)
+  const { count: endPhaseCountingCount, error: endPhaseCountingError } =
+    await client
+      .from('game_events')
+      .select('*', { count: 'exact', head: true })
+      .eq('game_id', gameId)
+      .eq('action_type', 'END_PHASE')
+      .eq('phase', 'COUNTING');
+  if (endPhaseCountingError) {
+    throw new Error(
+      `Failed to count END_PHASE COUNTING events: ${endPhaseCountingError.message}`
+    );
+  }
+
+  const { count: beginPhaseCountingCount, error: beginPhaseCountingError } =
+    await client
+      .from('game_events')
+      .select('*', { count: 'exact', head: true })
+      .eq('game_id', gameId)
+      .eq('action_type', 'BEGIN_PHASE')
+      .eq('phase', 'COUNTING');
+  if (beginPhaseCountingError) {
+    throw new Error(
+      `Failed to count BEGIN_PHASE COUNTING events: ${beginPhaseCountingError.message}`
+    );
+  }
+
+  return {
+    gameId,
+    eventsCount: eventsCount ?? 0,
+    snapshotsCount: snapshotsCount ?? 0,
+    readyForCountingCount: readyForCountingCount ?? 0,
+    discardCount: discardCount ?? 0,
+    cutDeckCount: cutDeckCount ?? 0,
+    playCardCount: playCardCount ?? 0,
+    endPhaseCountingCount: endPhaseCountingCount ?? 0,
+    beginPhaseCountingCount: beginPhaseCountingCount ?? 0,
+  };
 }
