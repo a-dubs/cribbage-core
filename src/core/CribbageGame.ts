@@ -69,6 +69,9 @@ export class CribbageGame extends EventEmitter {
     if (typeof structuredCloneFn === 'function') {
       return structuredCloneFn(value);
     }
+    // Fallback for runtimes without structuredClone.
+    // Current game/session payloads are JSON-safe, so this preserves
+    // compatibility for legacy environments.
     return JSON.parse(JSON.stringify(value)) as T;
   }
 
